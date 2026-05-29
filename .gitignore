@@ -30,3 +30,24 @@ copilot-api
 CODEBUDDY.md
 .github
 mainWindow.js
+
+# Local toolchains and generated caches
+go/
+gomodcache/
+gocache/
+gocache-go-verify/
+go*.windows-amd64.zip
+__pycache__/
+*.py[cod]
+
+# Local cc-connect build/runtime artifacts
+cc-connect-patched.exe
+
+# VELA runtime state and archival output
+VELA/codex-snapshots/
+VELA/iteration-archive/**
+!VELA/iteration-archive/
+!VELA/iteration-archive/README.md
+VELA/learning-loop/
+VELA/market-cache/
+VELA/send-once/
