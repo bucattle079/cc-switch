@@ -21,7 +21,10 @@ from vela_market_briefing import (
 from vela_product_layers import (
     RouteDecision,
     guard_wechat_output,
+    interpret_user_need,
+    record_interaction,
     record_reply_quality,
+    record_session_note,
     run_layered_response,
 )
 from vela_reply_engine import FallbackReplyAdapter, reply_engine_status
@@ -29,7 +32,12 @@ from vela_reply_engine import FallbackReplyAdapter, reply_engine_status
 
 ROOT = Path(__file__).resolve().parents[1]
 CODEX_CONSOLE = ROOT / "tools" / "clawbot_codex_console.py"
+PERSONALITY_SCRIPT = ROOT / "tools" / "vela_personality.py"
+DAILY_BRIEFING_SCRIPT = ROOT / "tools" / "vela_daily_briefing.py"
 SEND_ONCE_DIR = ROOT / "VELA" / "send-once"
+MARKET_REFRESH_DIR = ROOT / "VELA" / "market-refresh"
+MARKET_REFRESH_LOCK_TTL_SECONDS = 20 * 60
+LOCAL_TOOL_TIMEOUT_SECONDS = 45
 
 
 @dataclass(frozen=True)
@@ -39,6 +47,14 @@ class Intent:
     focus_tags: list[str]
     codex_allowed: bool = False
     market_allowed: bool = False
+
+
+@dataclass(frozen=True)
+class MarketRefreshJob:
+    started: bool
+    in_progress: bool
+    pid: int | None = None
+    reason: str = ""
 
 
 GREETING_SET = {"你好vela", "你好 vela", "你好，vela", "早安vela", "早上好vela"}
@@ -115,7 +131,21 @@ REFRESH_KEYWORDS = [
     "要实时",
 ]
 WORLD_KEYWORDS = ["世界", "全球", "军政", "地缘", "外交", "战争", "制裁", "航运", "能源安全", "世界简报"]
-CODEX_KEYWORDS = ["codex", "代码", "提交", "diff", "git", "任务状态", "开发任务", "电脑控制"]
+CODEX_KEYWORDS = [
+    "codex",
+    "代码",
+    "提交",
+    "diff",
+    "git",
+    "任务状态",
+    "任务进展",
+    "项目进展",
+    "项目推进状态",
+    "推进状态",
+    "执行到哪里",
+    "开发任务",
+    "电脑控制",
+]
 PROJECT_KEYWORDS = ["augsun", "rollqiia", "项目", "广告中心", "intelligence center", "规划", "功能如何"]
 DEEP_KEYWORDS = ["深入分析", "深度分析", "地狱验尸", "验尸", "架构判断", "架构", "推演", "复盘", "根因", "策略验尸"]
 STYLE_FEEDBACK_KEYWORDS = [
@@ -133,8 +163,56 @@ STYLE_FEEDBACK_KEYWORDS = [
     "语气",
     "风格",
     "人格",
+    "你没懂我",
+    "没懂我",
+    "没抓到",
+    "不是这个意思",
+    "理解错",
+    "偏了",
 ]
+RELATIONSHIP_REPAIR_KEYWORDS = ["你没懂我", "没懂我", "没抓到", "不是这个意思", "理解错", "偏了"]
+WEATHER_KEYWORDS = [
+    "天气",
+    "气温",
+    "降温",
+    "下雨",
+    "下雪",
+    "冷吗",
+    "热吗",
+    "weather",
+    "temperature",
+]
+WEATHER_TIME_WORDS = ["今天", "明天", "后天", "今晚", "早上", "中午", "下午", "晚上", "现在", "本周", "周末"]
+WEATHER_QUESTION_WORDS = ["天气", "气温", "冷吗", "热吗", "冷不冷", "热不热", "会下雨吗", "下雨吗", "下雪吗"]
+DAILY_INFO_KEYWORDS = ["解释", "整理", "总结", "帮我查", "帮我搜", "这是什么意思", "什么意思", "翻译", "普通检索"]
 MEMORY_KEYWORDS = ["记住", "记忆", "长期", "以后", "默认", "偏好", "别忘", "学习一下", *STYLE_FEEDBACK_KEYWORDS]
+PERSONA_TOOL_PREFIXES = {"persona", "personality", "vela-personality"}
+PERSONA_TOOL_ALIASES = {
+    "人格": ["status"],
+    "status": ["status"],
+    "成长": ["growth"],
+    "growth": ["growth"],
+    "学习": ["learn"],
+    "learn": ["learn"],
+    "画像": ["profile"],
+    "profile": ["profile"],
+    "对白": ["samples"],
+    "samples": ["samples"],
+    "语气": ["voice"],
+    "voice": ["voice"],
+    "tone": ["voice"],
+    "压测": ["probe"],
+    "probe": ["probe"],
+    "真人压测": ["litmus"],
+    "litmus": ["litmus"],
+    "素材": ["material"],
+    "material": ["material"],
+    "质检": ["audit"],
+    "audit": ["audit"],
+    "最近质检": ["audit-last"],
+    "audit-last": ["audit-last"],
+}
+DAILY_BRIEFING_COMMANDS = {"daily-briefing", "daily_briefing", "vela-daily-briefing"}
 
 
 def ensure_utf8_stdio() -> None:
@@ -148,21 +226,65 @@ def normalize(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
 
+def command_key(token: str) -> str:
+    return normalize(token).lstrip("/")
+
+
+def first_command_token(text: str) -> str:
+    parts = str(text or "").strip().split()
+    return parts[0] if parts else ""
+
+
+def is_persona_tool_request(text: str) -> bool:
+    key = command_key(first_command_token(text))
+    return key in PERSONA_TOOL_PREFIXES or key in PERSONA_TOOL_ALIASES
+
+
+def is_daily_briefing_request(text: str) -> bool:
+    return command_key(first_command_token(text)) in DAILY_BRIEFING_COMMANDS
+
+
+def persona_tool_args(text: str) -> list[str]:
+    parts = str(text or "").strip().split()
+    if not parts:
+        return ["status"]
+    key = command_key(parts[0])
+    if key in PERSONA_TOOL_PREFIXES:
+        mode = parts[1] if len(parts) > 1 else "status"
+        rest = parts[2:] if len(parts) > 1 else []
+    else:
+        mode = parts[0]
+        rest = parts[1:]
+    mapped = PERSONA_TOOL_ALIASES.get(command_key(mode), [mode])
+    return [*mapped, *rest]
+
+
 def classify_intent(text: str) -> Intent:
     raw = (text or "").strip()
     norm = normalize(raw)
     if not norm:
         return Intent("normal_chat", 0.9, [])
+    if is_persona_tool_request(raw):
+        return Intent("persona_tool", 0.95, ["persona"])
+    if is_daily_briefing_request(raw):
+        return Intent("daily_briefing", 0.95, ["daily_briefing"], market_allowed=True)
     if norm in {"/codex", "/vela codex"}:
         return Intent("codex_task", 1.0, ["codex"], codex_allowed=True)
     if raw.startswith("/"):
         return Intent("codex_task", 0.8, ["slash_command"], codex_allowed=True)
     if norm == "vela" or norm in GREETING_SET or norm in {"你好", "在吗", "在么", "hello", "hi"}:
         return Intent("normal_chat", 1.0, [])
+    if is_weather_query(raw):
+        return Intent("weather_query", 0.9, weather_focus_tags(raw))
     if is_market_refresh_request(norm):
         return Intent("market_refresh", 0.94, market_focus_tags(norm), market_allowed=True)
     if is_freshness_question(norm) and not is_market_summary_request(norm):
         return Intent("freshness_status", 0.95, ["freshness"])
+    if contains_any(norm, STYLE_FEEDBACK_KEYWORDS):
+        tags = ["memory", "style_feedback"]
+        if contains_any(norm, RELATIONSHIP_REPAIR_KEYWORDS):
+            tags.append("relationship_repair")
+        return Intent("style_feedback", 0.9, tags)
     if contains_any(norm, MEMORY_KEYWORDS):
         return Intent("memory_related", 0.88, memory_focus_tags(norm))
     if contains_any(norm, CODEX_KEYWORDS):
@@ -176,6 +298,8 @@ def classify_intent(text: str) -> Intent:
         return Intent("project_assistant", 0.78, ["project"])
     if contains_any(norm, DEEP_KEYWORDS):
         return Intent("deep_analysis", 0.82, deep_focus_tags(norm))
+    if is_daily_info_request(norm):
+        return Intent("daily_info", 0.74, ["daily_info"])
     return Intent("normal_chat", 0.7, [])
 
 
@@ -203,6 +327,14 @@ def is_market_refresh_request(text: str) -> bool:
     return contains_any(text, REFRESH_KEYWORDS)
 
 
+def is_weather_query(text: str) -> bool:
+    return contains_any(normalize(text), WEATHER_KEYWORDS)
+
+
+def is_daily_info_request(text: str) -> bool:
+    return contains_any(text, DAILY_INFO_KEYWORDS)
+
+
 def is_fast_greeting(text: str) -> bool:
     norm = normalize(text)
     return norm == "vela" or norm in GREETING_SET or norm in {"你好", "你好 vela", "在吗", "在么", "hello", "hi"}
@@ -214,8 +346,6 @@ def is_plain_ping(text: str) -> bool:
 
 
 def should_force_fallback_for_greeting(text: str) -> bool:
-    if is_plain_ping(text):
-        return True
     return reply_engine_status().get("adapter") == "command"
 
 
@@ -236,6 +366,16 @@ def deep_focus_tags(text: str) -> list[str]:
         tags.append("architecture")
     if contains_any(text, ["风险", "策略"]):
         tags.append("risk")
+    return tags
+
+
+def weather_focus_tags(text: str) -> list[str]:
+    tags = ["weather"]
+    norm = normalize(text)
+    for token in WEATHER_TIME_WORDS:
+        if token in norm:
+            tags.append(token)
+            break
     return tags
 
 
@@ -271,10 +411,10 @@ def route_decision(text: str) -> RouteDecision:
     markets = priority_markets(intent.focus_tags)
     return RouteDecision(
         intent=intent.name,
-        needs_retrieval=intent.name in {"market_brief", "world_brief", "market_refresh"},
+        needs_retrieval=intent.name in {"market_refresh"},
         needs_codex=intent.codex_allowed,
         needs_deep_reasoning=intent.name in {"market_brief", "deep_analysis", "project_assistant"},
-        cache_allowed=intent.name in {"market_brief", "world_brief", "freshness_status", "market_refresh"},
+        cache_allowed=intent.name in {"market_brief", "world_brief", "freshness_status", "market_refresh", "daily_briefing"},
         priority_markets=markets,
     )
 
@@ -313,65 +453,207 @@ def render_cached_market_reply(text: str) -> str:
 
 def render_market_refresh_reply(text: str) -> str:
     status = market_freshness_status(text)
+    job = schedule_market_refresh(text)
+    if job.started:
+        refresh_line = "刷新状态：后台刷新已启动；前台先返回状态，不让你干等。"
+    elif job.in_progress:
+        refresh_line = "刷新状态：后台刷新已在进行；前台先返回状态，不让你干等。"
+    else:
+        refresh_line = "刷新状态：后台刷新暂未启动；前台先返回状态，不把缓存伪装成实时情报。"
     lines = [
-        "实时检索链路：已识别你要的是实时资讯，本次不返回缓存简报。",
-        f"last_updated: {status.last_updated}",
-        "source_type: live_refresh_required",
-        "data_status: refresh_required",
-        "refresh_available: true",
-        "refresh_in_progress: false",
+        "已识别为实时资讯请求。我不拿缓存冒充实时，也不把旧报告包装成刚发生。",
+        f"最近缓存：{status.last_updated}",
+        refresh_line,
         "",
         "失效控制：如果外部实时源/API 未接通或刷新超过前台预算，我只返回状态，不把缓存伪装成实时情报。",
-        "下一步需要由独立刷新任务接入外部搜索/API，完成后再生成实时简报。",
+        "后台刷新完成后，会写入市场缓存；下一次问“今天的资讯”会带更新时间给你。",
     ]
     return guard_wechat_output("\n".join(lines))
 
 
+def weather_location_from_text(text: str) -> str:
+    location = str(text or "").strip()
+    for token in [*WEATHER_TIME_WORDS, *WEATHER_QUESTION_WORDS, "?", "？", "。", "，", ","]:
+        location = location.replace(token, "")
+    location = " ".join(location.split()).strip()
+    return location or "这个位置"
+
+
+def render_weather_reply(text: str) -> str:
+    location = weather_location_from_text(text)
+    reply = (
+        f"K，{location}天气这条走天气线，不走闲聊。\n"
+        "天气不调用外部天气 API，VELA 不编实时温度、降雨概率或精确预报。\n"
+        "DeepSeek 只负责按常识和风险给行动判断：带伞，看温差，给行程留余量；要秒级预报请看本机天气源。"
+    )
+    return guard_wechat_output(reply)
+
+
+def render_local_tool_reply(
+    *,
+    script: Path,
+    args: list[str],
+    text: str,
+    intent: str,
+    conversation_type: str,
+    used_retrieval: bool,
+    quality_flags: list[str],
+    fallback: str,
+) -> str:
+    issues: list[str] = []
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-X", "utf8", str(script), *args],
+            cwd=str(ROOT),
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+            timeout=LOCAL_TOOL_TIMEOUT_SECONDS,
+        )
+        raw = (completed.stdout or "").strip()
+        if completed.returncode != 0:
+            issues.append(f"local_tool_exit:{completed.returncode}")
+    except subprocess.TimeoutExpired:
+        raw = ""
+        issues.append("local_tool_timeout")
+    except Exception as exc:
+        raw = ""
+        issues.append(f"local_tool_error:{type(exc).__name__}")
+
+    reply = guard_wechat_output(raw or fallback)
+    need_interpretation = interpret_user_need(text, intent)
+    record_reply_quality(
+        conversation_type=conversation_type,
+        user_goal=text,
+        response_text=reply,
+        used_cache=False,
+        used_retrieval=used_retrieval,
+        used_codex=False,
+        quality_flags=[*quality_flags, "guarded_output"],
+        issues=issues,
+        intent=intent,
+        need_interpretation=need_interpretation,
+    )
+    record_interaction(
+        message=text,
+        intent=intent,
+        response_text=reply,
+        used_codex=False,
+        used_retrieval=used_retrieval,
+        need_interpretation=need_interpretation,
+    )
+    record_session_note(text, intent, reply)
+    return reply
+
+
+def render_persona_tool_reply(text: str) -> str:
+    return render_local_tool_reply(
+        script=PERSONALITY_SCRIPT,
+        args=persona_tool_args(text),
+        text=text,
+        intent="persona_tool",
+        conversation_type="persona_tool",
+        used_retrieval=False,
+        quality_flags=["local_tool_lane", "persona_tool"],
+        fallback="这条人格校准工具暂时没吐出内容。我先收住，不把空回包发给你。",
+    )
+
+
+def render_daily_briefing_reply(text: str) -> str:
+    return render_local_tool_reply(
+        script=DAILY_BRIEFING_SCRIPT,
+        args=[],
+        text=text,
+        intent="daily_briefing",
+        conversation_type="daily_briefing",
+        used_retrieval=True,
+        quality_flags=["local_tool_lane", "daily_briefing"],
+        fallback="这条市场简报工具暂时没吐出内容。我不拿旧话冒充新情报，稍后再刷。",
+    )
+
+
+def schedule_market_refresh(text: str, *, state_dir: Path | None = None) -> MarketRefreshJob:
+    state_dir = state_dir or MARKET_REFRESH_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = state_dir / "refresh.lock"
+    now = time.time()
+    if lock_path.exists():
+        age = now - lock_path.stat().st_mtime
+        if age <= MARKET_REFRESH_LOCK_TTL_SECONDS:
+            return MarketRefreshJob(started=False, in_progress=True, reason="existing_refresh")
+        try:
+            lock_path.unlink()
+        except OSError:
+            return MarketRefreshJob(started=False, in_progress=True, reason="stale_lock_unlink_failed")
+
+    payload = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "message_preview": " ".join(str(text or "").split())[:160],
+    }
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return MarketRefreshJob(started=False, in_progress=True, reason="lock_race")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False))
+
+    stdout_path = state_dir / "refresh.out.log"
+    stderr_path = state_dir / "refresh.err.log"
+    stdout_handle = stdout_path.open("a", encoding="utf-8", newline="\n")
+    stderr_handle = stderr_path.open("a", encoding="utf-8", newline="\n")
+    try:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-X",
+                "utf8",
+                str(ROOT / "tools" / "vela_market_briefing.py"),
+                text,
+                "--refresh",
+                "--lock-file",
+                str(lock_path),
+            ],
+            cwd=str(ROOT),
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception as exc:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+        return MarketRefreshJob(started=False, in_progress=False, reason=type(exc).__name__)
+    finally:
+        stdout_handle.close()
+        stderr_handle.close()
+    return MarketRefreshJob(started=True, in_progress=False, pid=getattr(process, "pid", None), reason="started")
+
+
 def reply_for(text: str) -> str:
     intent = classify_intent(text)
+    if intent.name == "persona_tool":
+        supporting_context = render_persona_tool_reply(text)
+        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
+    if intent.name == "daily_briefing":
+        supporting_context = render_daily_briefing_reply(text)
+        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
     if intent.name == "freshness_status":
-        reply = render_freshness_reply(text)
-        record_reply_quality(
-            conversation_type="freshness_status",
-            user_goal=text,
-            response_text=reply,
-            used_cache=True,
-            used_retrieval=False,
-            used_codex=False,
-            quality_flags=["fast_lane", "freshness_status", "guarded_output"],
-            issues=[],
-            intent="freshness_status",
-        )
-        return reply
+        supporting_context = render_freshness_reply(text)
+        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
     if intent.name == "market_refresh":
-        reply = render_market_refresh_reply(text)
-        record_reply_quality(
-            conversation_type="market_refresh",
-            user_goal=text,
-            response_text=reply,
-            used_cache=True,
-            used_retrieval=False,
-            used_codex=False,
-            quality_flags=["refresh_lane_status_first", "guarded_output"],
-            issues=[],
-            intent="market_refresh",
-        )
-        return reply
+        supporting_context = render_market_refresh_reply(text)
+        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
     if intent.name == "market_brief":
-        reply = render_cached_market_reply(text)
-        guarded = guard_wechat_output(reply)
-        record_reply_quality(
-            conversation_type="market_brief",
-            user_goal=text,
-            response_text=guarded,
-            used_cache=True,
-            used_retrieval=False,
-            used_codex=False,
-            quality_flags=["market_weight_aligned", "guarded_output"],
-            issues=[],
-            intent="market_brief",
-        )
-        return guarded
+        supporting_context = render_cached_market_reply(text)
+        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
+    if intent.name == "weather_query":
+        supporting_context = render_weather_reply(text)
+        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
     if intent.name == "codex_task":
         return guard_wechat_output(render_codex_bridge())
     if intent.name == "normal_chat" and is_fast_greeting(text) and should_force_fallback_for_greeting(text):

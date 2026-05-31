@@ -290,7 +290,9 @@ class VelaDailyBriefingScriptTests(unittest.TestCase):
         commands = {item["name"]: item for item in data.get("commands", [])}
 
         self.assertIn("vela-daily-briefing", commands)
-        self.assertIn("vela_daily_briefing.py", commands["vela-daily-briefing"]["exec"])
+        self.assertIn("vela_router.py", commands["vela-daily-briefing"]["exec"])
+        self.assertIn("daily-briefing", commands["vela-daily-briefing"]["exec"])
+        self.assertNotIn("vela_daily_briefing.py", commands["vela-daily-briefing"]["exec"])
         self.assertNotIn("--send", commands["vela-daily-briefing"]["exec"])
         self.assertNotIn("--detach", commands["vela-daily-briefing"]["exec"])
 

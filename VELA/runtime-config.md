@@ -6,17 +6,57 @@ Keep secrets in the user or process environment, not in this repository.
 ## DeepSeek
 
 - `DEEPSEEK_API_KEY`: required for live DeepSeek replies.
-- `VELA_DEEPSEEK_MODEL`: optional; defaults to `deepseek-v4-flash`.
-- `VELA_DEEPSEEK_BASE_URL`: optional; defaults to `https://api.deepseek.com/chat/completions`.
+- `DEEPSEEK_MODEL`: optional; defaults to `deepseek-v4-flash`. `VELA_DEEPSEEK_MODEL` remains supported as a legacy alias.
+- `DEEPSEEK_BASE_URL`: optional; defaults to `https://api.deepseek.com/chat/completions`. `VELA_DEEPSEEK_BASE_URL` remains supported as a legacy alias.
   If a proxy root such as `https://proxy.example/v1` is supplied, VELA appends `/chat/completions`.
 - `VELA_DEEPSEEK_TIMEOUT_SECONDS`: optional; defaults to `20`, clamped to `5..45`.
+- `VELA_DEEPSEEK_FAST_TIMEOUT_SECONDS`: optional; defaults to `2`, clamped to `1..2` for fast foreground dialogue before fallback.
+- `VELA_DEEPSEEK_DEEP_TIMEOUT_SECONDS`: optional; defaults to `8`, clamped to `5..8` for deep foreground analysis before fallback/status-safe behavior.
 - `VELA_DEEPSEEK_THINKING`: optional; `disabled` by default for short WeChat replies, or `enabled` when deeper reasoning is useful.
 
 Adapter priority is:
 
-1. `VELA_GPT_COMMAND`
-2. `DEEPSEEK_API_KEY`
+1. `DEEPSEEK_API_KEY`
+2. `VELA_GPT_COMMAND`
 3. `VELA_OPENAI_API_KEY`
 4. `OPENAI_API_KEY`
 5. deterministic fallback replies
 
+Daily dialogue should use DeepSeek when `DEEPSEEK_API_KEY` is present. Command/Codex adapters are fallback or engineering lanes, not the default ordinary chat brain.
+Except for Codex-related instructions, WeChat-facing final wording should go through the DeepSeek dialogue adapter when configured. Local cache, freshness status, persona diagnostics, daily briefing output, and weather risk notes may be passed in as background context, but VELA/DeepSeek owns the final foreground wording.
+
+## Weather
+
+Weather does not require a dedicated weather API in this VELA runtime. Weather prompts keep their `weather_query` intent so they do not fall into casual chat, but they do not enable external retrieval. VELA must not invent realtime temperature, rain probability, or precise forecast data. The model should answer as a risk-framing companion: state the boundary, then give practical actions such as umbrella, temperature-gap caution, and schedule buffer.
+
+## Companion Core
+
+Every WeChat-facing reply should carry internal context that is not exposed to the user:
+
+- `need_interpretation`: the user's hidden need behind the surface intent, such as style-feedback reassurance, project continuity, or market risk judgement.
+- `humanization_layer_enabled=true`
+- `persona_distillation_mode=mechanism_only`
+- `copyrighted_quote_storage=false`
+- `character_roleplay=false`
+- `local_learning_update=true`
+- `deepseek_adapter_enabled=true`
+- `response_mode`: one of `daily_companion`, `strategic_depth`, `relationship_repair`, `quiet_support`, `project_operator`, or `market_brief`.
+- `human_tone_vector`: local control values for warmth, directness, strategic depth, emotional presence, clarification need, and memory reference need.
+- `pressure_scenario`: the current conversational pressure, such as fatigue, chaos, mechanical-tone correction, or strategic judgement.
+- `user_preferences`: confirmed preferences and recent style feedback candidates.
+- `strategic_memories`: confirmed long-term project/persona/decision memory, used only when relevant.
+
+These fields are prompt and learning inputs only. They must not appear in WeChat output as raw keys, schema names, paths, logs, or debug text.
+Mechanism distillation is abstract behavior only: VELA keeps her own identity, stores no source lines, and never roleplays a source character.
+
+## Persona Skeleton
+
+The runtime persona skeleton is mechanism-only:
+
+- `Evidence Gate`: evidence before judgement.
+- `Meaning Decoder`: decode ambiguity and hidden need before answering.
+- `Identity Core`: keep VELA coherent across local memory, DeepSeek, Codex, and tools.
+- `Boundary Engine`: accompany without appeasing; brake reckless shortcuts and hype.
+- `Witty Correction`: natural edge plus self-correction when evidence or feedback changes.
+
+These are control signals for the model, not character skins. Runtime prompts must not include source quotes, source-role claims, or source-persona names.

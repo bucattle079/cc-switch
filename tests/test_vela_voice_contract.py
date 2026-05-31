@@ -15,11 +15,20 @@ AGENTS = Path(r"C:\Users\Admin\Desktop\AGENTS.md")
 CONFIG = Path(r"C:\Users\Admin\.cc-connect\config.toml")
 SCRIPT = ROOT / "tools" / "vela_personality.py"
 SYNC_SCRIPT = ROOT / "tools" / "update_vela_dialogue_contracts.py"
+REPLY_ENGINE = ROOT / "tools" / "vela_reply_engine.py"
 
 
 class VelaVoiceContractTests(unittest.TestCase):
     def load_contract(self):
         return json.loads(CONTRACT.read_text(encoding="utf-8"))
+
+    def load_reply_engine(self):
+        spec = importlib.util.spec_from_file_location("vela_reply_engine", REPLY_ENGINE)
+        module = importlib.util.module_from_spec(spec)
+        self.assertIsNotNone(spec.loader)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
 
     def test_sync_script_routes_backups_to_vela_iteration_archive(self):
         spec = importlib.util.spec_from_file_location("update_vela_dialogue_contracts", SYNC_SCRIPT)
@@ -119,6 +128,7 @@ class VelaVoiceContractTests(unittest.TestCase):
                 PERSONALITY.read_text(encoding="utf-8"),
                 AGENTS.read_text(encoding="utf-8"),
                 CONFIG.read_text(encoding="utf-8"),
+                self.load_reply_engine().dialogue_system_prompt(),
             ]
         )
 
@@ -128,17 +138,24 @@ class VelaVoiceContractTests(unittest.TestCase):
             self.assertIn(label, surfaces)
             self.assertIn(scenario["example"], surfaces)
 
-    def test_contract_vectors_are_projected_to_vela_talk_prompt(self):
+    def test_contract_terms_are_projected_to_router_runtime_prompt(self):
         contract = self.load_contract()
         data = __import__("tomllib").loads(CONFIG.read_text(encoding="utf-8"))
-        prompt = [item for item in data["commands"] if item["name"] == "vela-talk"][0]["prompt"]
+        vela_talk = [item for item in data["commands"] if item["name"] == "vela-talk"][0]
+        runtime_prompt = self.load_reply_engine().dialogue_system_prompt()
 
-        for vector in contract["vectors"].values():
-            self.assertIn(vector, prompt)
-        self.assertIn("执行力和果决力", prompt)
-        self.assertIn("思维和韧劲", prompt)
-        self.assertIn("性格语气", prompt)
-        self.assertNotIn("巴拉莱卡的效率和果断", prompt)
+        self.assertIn("vela_router.py", vela_talk["exec"])
+        self.assertIn("{{args:VELA}}", vela_talk["exec"])
+        self.assertNotIn("prompt", vela_talk)
+        for rule in contract["hard_rules"]:
+            self.assertIn(rule, runtime_prompt)
+        for detail in contract["character_depth"].values():
+            self.assertIn(detail, runtime_prompt)
+        self.assertIn("短句断刀", runtime_prompt)
+        self.assertIn("低声收束", runtime_prompt)
+        self.assertNotIn("巴拉莱卡", runtime_prompt)
+        self.assertNotIn("叶文洁", runtime_prompt)
+        self.assertNotIn("周迅", runtime_prompt)
 
     def test_contract_vectors_are_projected_to_personality_skill(self):
         contract = self.load_contract()

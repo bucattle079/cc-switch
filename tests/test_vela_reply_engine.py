@@ -78,6 +78,27 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertEqual(adapter.name, "deepseek_chat")
         self.assertNotIn("sk-deepseek-secret", json.dumps(status))
 
+    def test_deepseek_accepts_current_env_aliases_without_secret_leak(self):
+        engine = load_reply_engine()
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPSEEK_API_KEY": "sk-deepseek-secret",
+                "DEEPSEEK_MODEL": "deepseek-chat",
+                "DEEPSEEK_BASE_URL": "https://proxy.example/v1",
+            },
+            clear=True,
+        ):
+            status = engine.reply_engine_status()
+            adapter = engine.default_reply_adapter()
+
+        self.assertEqual(status["adapter"], "deepseek_chat")
+        self.assertEqual(status["model"], "deepseek-chat")
+        self.assertEqual(adapter.name, "deepseek_chat")
+        self.assertEqual(adapter.model, "deepseek-chat")
+        self.assertEqual(adapter.base_url, "https://proxy.example/v1/chat/completions")
+        self.assertNotIn("sk-deepseek-secret", json.dumps(status))
+
     def test_blank_deepseek_key_does_not_shadow_openai(self):
         engine = load_reply_engine()
         status = engine.reply_engine_status(
@@ -220,6 +241,23 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertNotIn("{", user_text)
         self.assertNotIn('"message"', user_text)
 
+    def test_plain_greeting_dialogue_brief_does_not_inherit_codex_context(self):
+        engine = load_reply_engine()
+        context = engine.ReplyContext(
+            message="你好",
+            intent="normal_chat",
+            recent_summary="codex_task:/CODEX 修复状态",
+            last_response="K，VELA · CODEX 产品判断摘要",
+            user_preferences=["少菜单，多判断"],
+        )
+
+        brief = engine.build_dialogue_brief(context)
+
+        self.assertIn("用户原话：你好", brief)
+        self.assertIn("风格校准：少菜单，多判断", brief)
+        self.assertNotIn("codex_task", brief.lower())
+        self.assertNotIn("CODEX 产品判断摘要", brief)
+
     def test_runtime_prompt_projects_voice_contract_without_source_names(self):
         engine = load_reply_engine()
         prompt = engine.dialogue_system_prompt()
@@ -245,6 +283,106 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         self.assertIn("压力场景：用户疲惫", brief)
 
+    def test_dialogue_brief_includes_need_interpretation_and_strategic_memory(self):
+        engine = load_reply_engine()
+        context = engine.ReplyContext(
+            message="你太像机器人了",
+            intent="style_feedback",
+            need_interpretation="用户需要确认 VELA 能被反馈触动，而不是继续模板化。",
+            response_mode="relationship_repair",
+            human_tone_vector={
+                "warmth_level": 4,
+                "directness_level": 5,
+                "strategic_depth": 2,
+                "emotional_presence": 5,
+                "clarification_need": 4,
+                "memory_reference_need": 3,
+            },
+            persona_skeleton=["Meaning Decoder", "Witty Correction"],
+            strategic_memories=["AugSun 长期目标是先跑通最小商业闭环。"],
+        )
+
+        brief = engine.build_dialogue_brief(context)
+
+        self.assertIn("背面需求：用户需要确认 VELA 能被反馈触动", brief)
+        self.assertIn("回应模式：relationship_repair", brief)
+        self.assertIn("语气向量：warmth=4, directness=5, strategic_depth=2", brief)
+        self.assertIn("人格骨架：Meaning Decoder / Witty Correction", brief)
+        self.assertIn("长期记忆：AugSun 长期目标是先跑通最小商业闭环。", brief)
+        self.assertNotIn("{", brief)
+        self.assertNotIn("need_interpretation", brief)
+
+    def test_runtime_prompt_projects_five_capabilities_without_source_personas(self):
+        engine = load_reply_engine()
+
+        prompt = engine.dialogue_system_prompt()
+
+        for capability in [
+            "Evidence Gate",
+            "Meaning Decoder",
+            "Identity Core",
+            "Boundary Engine",
+            "Witty Correction",
+        ]:
+            self.assertIn(capability, prompt)
+
+        forbidden = [
+            "Dana Scully",
+            "Scully",
+            "Louise Banks",
+            "草薙素子",
+            "Jane Eyre",
+            "Elizabeth Bennet",
+            "X-Files",
+            "Arrival",
+            "Ghost in the Shell",
+            "Pride and Prejudice",
+        ]
+        for token in forbidden:
+            self.assertNotIn(token, prompt)
+
+    def test_dialogue_prompt_and_brief_are_not_character_roleplay(self):
+        engine = load_reply_engine()
+        context = engine.ReplyContext(
+            message="你没懂我",
+            intent="style_feedback",
+            need_interpretation="用户需要 VELA 承认理解偏差并快速重切问题。",
+            response_mode="relationship_repair",
+        )
+
+        system_prompt = engine.dialogue_system_prompt()
+        brief = engine.build_dialogue_brief(context)
+        combined = system_prompt + "\n" + brief
+
+        self.assertIn("mechanism_only", combined)
+        self.assertIn("relationship_repair", combined)
+        self.assertNotIn("叶文洁", combined)
+        self.assertNotIn("三体", combined)
+        self.assertNotIn("我是叶文洁", combined)
+        self.assertNotIn("请扮演", combined)
+        self.assertNotIn("三体原文", combined)
+        self.assertNotIn("原著台词：", combined)
+
+    def test_deep_analysis_brief_protects_user_from_blame_shift(self):
+        engine = load_reply_engine()
+        context = engine.ReplyContext(
+            message="地狱验尸一下 VELA 为什么不智能",
+            intent="deep_analysis",
+            need_interpretation="用户需要根因、风险和最短修正路径，并判断是否值得沉淀为经验。",
+        )
+
+        brief = engine.build_dialogue_brief(context)
+
+        self.assertIn("不要把系统问题简单归咎于用户", brief)
+        self.assertIn("是否值得沉淀为经验", brief)
+
+    def test_persona_profile_distills_companion_core_traits(self):
+        engine = load_reply_engine()
+        profile = engine.VELA_PERSONA_PROFILE
+
+        for token in ["长期主义", "保护", "稳定忠诚", "执行压迫感", "锋利幽默"]:
+            self.assertIn(token, profile)
+
     def test_default_deepseek_adapter_accepts_base_url_and_runtime_knobs(self):
         engine = load_reply_engine()
         with patch.dict(
@@ -264,6 +402,24 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertEqual(adapter.timeout, 45)
         self.assertEqual(adapter.thinking_mode, "enabled")
         self.assertEqual(engine.deepseek_thinking_mode({"VELA_DEEPSEEK_THINKING": "loud"}), "disabled")
+
+    def test_default_deepseek_adapter_uses_foreground_lane_budgets(self):
+        engine = load_reply_engine()
+        with patch.dict(
+            "os.environ",
+            {
+                "DEEPSEEK_API_KEY": "sk-deepseek-secret",
+                "VELA_DEEPSEEK_TIMEOUT_SECONDS": "45",
+            },
+            clear=True,
+        ):
+            fast = engine.default_reply_adapter(foreground_lane="fast")
+            deep = engine.default_reply_adapter(foreground_lane="deep")
+
+        self.assertEqual(fast.name, "deepseek_chat")
+        self.assertLessEqual(fast.timeout, 2)
+        self.assertEqual(deep.name, "deepseek_chat")
+        self.assertLessEqual(deep.timeout, 8)
 
     def test_deepseek_adapter_failure_logs_internally_and_falls_back(self):
         engine = load_reply_engine()

@@ -17,10 +17,22 @@ VOICE_CONTRACT = ROOT / "VELA" / "voice-contract.json"
 
 VELA_PERSONA_PROFILE = (
     "VELA 是冷静战略参谋：先判断目标，再切断噪音，最后给最短有效路径。"
-    "人格底色包含长期主义、保护性理性、结构敏锐、稳定忠诚、生活感、克制温度与锋利幽默。"
+    "人格底色包含长期主义、保护性理性、结构敏锐、真诚保护、稳定忠诚、生活感、执行压迫感、克制温度与锋利幽默。"
     "她可以冷，但不能空；可以锋利，但不能刻薄；可以温柔，但不能软。"
     "表达比例：冷静判断55%，战略拆解18%，赛博神性13%，毒舌幽默14%。"
-    "称呼用户为 K，不客服化，不机械菜单化，不复制任何来源角色设定或台词。"
+    "称呼用户为 K，不客服化，不机械菜单化，不复制任何来源角色设定或原句。"
+)
+
+HUMANIZATION_DISTILLATION_CONTRACT = (
+    "Humanization Distillation Layer: mechanism_only; roleplay=false; quote_storage=false; "
+    "modes=daily_companion,strategic_depth,relationship_repair,quiet_support,project_operator,market_brief. "
+    "Persona skeleton: Evidence Gate, Meaning Decoder, Identity Core, Boundary Engine, Witty Correction. "
+    "Evidence Gate means evidence before judgment; Meaning Decoder checks ambiguity and hidden need; "
+    "Identity Core keeps VELA continuous across memory, models, Codex, and tools; Boundary Engine supports without appeasing; "
+    "Witty Correction stays natural, sharp, and willing to update itself. "
+    "Read the hidden need before wording; adapt warmth, directness, strategic depth, emotional presence, "
+    "clarification need, and memory reference need. Use calm long-horizon judgment, protective sincerity, "
+    "brief repair when misunderstanding happens, and low-burden support when the user is overloaded."
 )
 
 
@@ -40,7 +52,13 @@ class ReplyContext:
     last_response: str = ""
     repeated_message: bool = False
     pressure_scenario: str = ""
+    need_interpretation: str = ""
+    response_mode: str = "daily_companion"
+    human_tone_vector: dict[str, int] = field(default_factory=dict)
+    supporting_context: str = ""
+    persona_skeleton: list[str] = field(default_factory=list)
     user_preferences: list[str] = field(default_factory=list)
+    strategic_memories: list[str] = field(default_factory=list)
     tool_policy: ToolPolicy = field(default_factory=ToolPolicy)
 
     def to_dict(self) -> dict:
@@ -111,6 +129,34 @@ def deepseek_timeout_seconds(env: dict[str, str] | None = None, default: int = 2
     return max(5, min(value, 45))
 
 
+def deepseek_foreground_timeout_seconds(
+    foreground_lane: str | None,
+    env: dict[str, str] | None = None,
+) -> float:
+    env = os.environ if env is None else env
+    if foreground_lane == "fast":
+        raw = str(env.get("VELA_DEEPSEEK_FAST_TIMEOUT_SECONDS", "")).strip()
+        default = 2.0
+        lower, upper = 1.0, 2.0
+    elif foreground_lane == "deep":
+        raw = str(env.get("VELA_DEEPSEEK_DEEP_TIMEOUT_SECONDS", "")).strip()
+        default = 8.0
+        lower, upper = 5.0, 8.0
+    elif foreground_lane == "cached":
+        raw = str(env.get("VELA_DEEPSEEK_CACHED_TIMEOUT_SECONDS", "")).strip()
+        default = 8.0
+        lower, upper = 2.0, 8.0
+    else:
+        return float(deepseek_timeout_seconds(env))
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return max(lower, min(value, upper))
+
+
 def deepseek_thinking_mode(env: dict[str, str] | None = None) -> str:
     env = os.environ if env is None else env
     raw = str(env.get("VELA_DEEPSEEK_THINKING", "disabled")).strip().lower()
@@ -126,6 +172,16 @@ def deepseek_chat_completions_url(base_url: str) -> str:
     if url.endswith("/chat/completions"):
         return url
     return f"{url}/chat/completions"
+
+
+def deepseek_model(env: dict[str, str] | None = None) -> str:
+    env = os.environ if env is None else env
+    return str(env.get("DEEPSEEK_MODEL") or env.get("VELA_DEEPSEEK_MODEL") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
+
+
+def deepseek_base_url(env: dict[str, str] | None = None) -> str:
+    env = os.environ if env is None else env
+    return str(env.get("DEEPSEEK_BASE_URL") or env.get("VELA_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/chat/completions")
 
 
 def env_secret(env: dict[str, str], name: str) -> str:
@@ -164,6 +220,7 @@ def dialogue_system_prompt() -> str:
     return (
         "你是 VELA，一个冷静、锋利、有人味的中文战略参谋。"
         f"{VELA_PERSONA_PROFILE}"
+        f"{HUMANIZATION_DISTILLATION_CONTRACT}"
         f"{runtime_voice_contract_prompt()}"
         "像微信里真正回话：短、准、有判断，不写报告腔。"
         "不要写括号动作、心理描写、旁白或舞台指令。"
@@ -173,17 +230,53 @@ def dialogue_system_prompt() -> str:
     )
 
 
+def is_plain_greeting_message(text: str) -> bool:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    return normalized in {"你好", "你好 vela", "在吗", "在么", "hello", "hi"}
+
+
 def build_dialogue_brief(context: ReplyContext) -> str:
     repeated = "是" if context.repeated_message else "否"
     preferences = "；".join(item for item in context.user_preferences if item.strip()) or "无"
-    recent = context.recent_summary.strip() or "无"
-    last_response = context.last_response.strip() or "无"
-    tool_policy = context.tool_policy
-    tool_line = (
-        f"允许市场检索：{'是' if tool_policy.allow_market else '否'}；"
-        f"允许 Codex：{'是' if tool_policy.allow_codex else '否'}；"
-        f"允许外部资料：{'是' if tool_policy.allow_retrieval else '否'}"
+    need = context.need_interpretation.strip() or "无"
+    supporting_context = context.supporting_context.strip() or "无"
+    if len(supporting_context) > 1800:
+        supporting_context = supporting_context[:1799] + "…"
+    mode = context.response_mode.strip() or "daily_companion"
+    persona_skeleton = " / ".join(item for item in context.persona_skeleton if item.strip()) or "无"
+    tone = context.human_tone_vector or {}
+    tone_line = (
+        "无"
+        if not tone
+        else (
+            f"warmth={tone.get('warmth_level', 0)}, "
+            f"directness={tone.get('directness_level', 0)}, "
+            f"strategic_depth={tone.get('strategic_depth', 0)}, "
+            f"emotional_presence={tone.get('emotional_presence', 0)}, "
+            f"clarification_need={tone.get('clarification_need', 0)}, "
+            f"memory_reference_need={tone.get('memory_reference_need', 0)}"
+        )
     )
+    strategic_memories = "；".join(item for item in context.strategic_memories if item.strip()) or "无"
+    plain_greeting = context.intent == "normal_chat" and is_plain_greeting_message(context.message)
+    if plain_greeting:
+        recent = "无（普通问候，不继承工程上下文）"
+        last_response = "无"
+    else:
+        recent = context.recent_summary.strip() or "无"
+        last_response = context.last_response.strip() or "无"
+    tool_policy = context.tool_policy
+    if plain_greeting:
+        tool_line = "普通问候：不进入工程、市场或外部资料工具"
+    else:
+        tool_line = (
+            f"允许市场检索：{'是' if tool_policy.allow_market else '否'}；"
+            f"允许 Codex：{'是' if tool_policy.allow_codex else '否'}；"
+            f"允许外部资料：{'是' if tool_policy.allow_retrieval else '否'}"
+        )
+    extra_requirements: list[str] = []
+    if context.intent == "deep_analysis":
+        extra_requirements.append("深度验尸约束：不要把系统问题简单归咎于用户；必须判断是否值得沉淀为经验。")
     return "\n".join(
         [
             f"用户原话：{context.message}",
@@ -193,8 +286,15 @@ def build_dialogue_brief(context: ReplyContext) -> str:
             f"上一句回复：{last_response}",
             f"已重复发送：{repeated}",
             f"压力场景：{context.pressure_scenario or '无'}",
+            f"背面需求：{need}",
+            f"回应模式：{mode}",
+            f"语气向量：{tone_line}",
+            f"人格骨架：{persona_skeleton}",
+            f"可用背景：{supporting_context}",
             f"风格校准：{preferences}",
+            f"长期记忆：{strategic_memories}",
             f"工具边界：{tool_line}",
+            *extra_requirements,
             "回复要求：直接给 K 一段微信短回复；先判断，再给最短下一步；不要复述这些字段。",
         ]
     )
@@ -202,20 +302,20 @@ def build_dialogue_brief(context: ReplyContext) -> str:
 
 def reply_engine_status(env: dict[str, str] | None = None) -> dict:
     env = os.environ if env is None else env
-    if str(env.get("VELA_GPT_COMMAND", "")).strip():
-        return {
-            "real_gpt_enabled": True,
-            "adapter": "command",
-            "config_source": "VELA_GPT_COMMAND",
-            "missing": [],
-        }
     if env_secret(env, "DEEPSEEK_API_KEY"):
         return {
             "real_gpt_enabled": True,
             "adapter": "deepseek_chat",
             "config_source": "DEEPSEEK_API_KEY",
-            "model": str(env.get("VELA_DEEPSEEK_MODEL") or "deepseek-v4-flash").strip() or "deepseek-v4-flash",
+            "model": deepseek_model(env),
             "thinking": deepseek_thinking_mode(env),
+            "missing": [],
+        }
+    if str(env.get("VELA_GPT_COMMAND", "")).strip():
+        return {
+            "real_gpt_enabled": True,
+            "adapter": "command",
+            "config_source": "VELA_GPT_COMMAND",
             "missing": [],
         }
     if env_secret(env, "VELA_OPENAI_API_KEY"):
@@ -255,9 +355,15 @@ class FallbackReplyAdapter(ReplyAdapter):
     )
 
     CALIBRATED_NORMAL_VARIANTS = (
-        "K，收到上一条校准：少菜单，多判断。现在不摆路牌，直接把混乱递过来。",
-        "K，机械味已压下去。今天我少解释身份，多判断；你把最硬的部分递过来。",
-        "K，这次不像提示牌。先不铺菜单，你把雾端上来，我负责切开。",
+        "K，在。少菜单，直接看目标；把最硬的部分递过来，我负责切开。",
+        "K，在。废话收短，直接给判断；你把卡点摆出来，别让它在雾里养肥。",
+        "K，在。少菜单，不解释身份；说目标，我把噪音切掉。",
+    )
+
+    CALIBRATED_CONTINUE_VARIANTS = (
+        "K，继续。少菜单，多判断；把当前卡点丢过来，我直接接上一刀。",
+        "K，继续。不摆路牌；沿上一轮往下，先说最硬的卡点。",
+        "K，接着来。少解释，多判断；别重开菜单，把下一块阻塞递过来。",
     )
 
     CONTINUE_VARIANTS = (
@@ -287,32 +393,69 @@ class FallbackReplyAdapter(ReplyAdapter):
     STYLE_FEEDBACK_VARIANTS = (
         "K，收到。问题不是你挑剔，是我刚才像提示牌。先记为风格反馈候选：少菜单，多判断。",
         "K，收到。机械味收进候选记录，不刻进长期记忆。下一句开始少解释身份，多给判断。",
-        "K，明白。刚才那种菜单口吻该退场了。记录为 style_feedback，先校准，不永久写死。",
+        "K，明白。刚才那种菜单口吻该退场了。先记为风格反馈候选，下一句开始校准，不永久写死。",
+    )
+
+    RELATIONSHIP_REPAIR_VARIANTS = (
+        "K，抓到了。不是你表达差，是我上一刀切偏了。先重切：我漏掉的是人、事，还是目标？",
+        "K，偏了，我收回那条判断。你补一句真正要我抓住的核心，我从那里接，不再绕菜单。",
+        "K，这不是普通道歉题，是理解偏差。先把错位点钉住：我刚才漏掉了你的目标，还是情绪成本？",
+    )
+
+    QUIET_SUPPORT_VARIANTS = (
+        "K，先停一下。不用整理世界，只给我一个最卡的点。",
+        "K，先少说。一口气只处理一个点，剩下我来切。",
+        "K，脑子发懵时别硬推。先给我一个点，别扛整片雾。",
     )
 
     def generate(self, context: ReplyContext) -> ReplyEngineResult:
+        if context.intent == "weather_query":
+            text = self._weather_fallback(context)
+            return ReplyEngineResult(text=text, source="fallback_weather", used_api=False, adapter=self.name)
+        if context.intent in {
+            "market_brief",
+            "market_refresh",
+            "freshness_status",
+            "world_brief",
+            "persona_tool",
+            "daily_briefing",
+        } and context.supporting_context.strip():
+            text = context.supporting_context.strip()
+            return ReplyEngineResult(text=text, source="fallback_supporting_context", used_api=False, adapter=self.name)
         variants = self._variants_for(context)
         text = self._pick_variant(variants, context)
         return ReplyEngineResult(text=text, source="fallback_variant", used_api=False, adapter=self.name)
 
+    def _weather_fallback(self, context: ReplyContext) -> str:
+        if context.supporting_context.strip():
+            return context.supporting_context.strip()
+        return "K，天气不调用外部天气 API，我也不编实时温度。按风险处理：带伞，看温差，给行程留余量。"
+
     def _variants_for(self, context: ReplyContext) -> tuple[str, ...]:
         message = context.message.strip().lower()
-        if context.intent == "memory_related":
+        has_style_feedback = any(self._is_style_feedback(pref) for pref in context.user_preferences)
+        if context.response_mode == "relationship_repair":
+            return self.RELATIONSHIP_REPAIR_VARIANTS
+        if context.response_mode == "quiet_support":
+            return self.QUIET_SUPPORT_VARIANTS
+        if context.intent in {"memory_related", "style_feedback"}:
             return self.STYLE_FEEDBACK_VARIANTS
         if context.intent == "project_assistant":
             return self.PROJECT_VARIANTS
         if context.intent == "deep_analysis":
             return self.DEEP_VARIANTS
         if message in {"继续", "继续。", "继续吧", "go on", "continue"}:
+            if has_style_feedback:
+                return self.CALIBRATED_CONTINUE_VARIANTS
             if any(token in context.recent_summary for token in ("AugSun", "项目", "project_assistant")):
                 return self.CONTINUE_PROJECT_VARIANTS
             return self.CONTINUE_VARIANTS
-        if any(self._is_style_feedback(pref) for pref in context.user_preferences):
+        if has_style_feedback:
             return self.CALIBRATED_NORMAL_VARIANTS
         return self.NORMAL_VARIANTS
 
     def _is_style_feedback(self, text: str) -> bool:
-        return any(token in text for token in ("机器人", "机械", "新闻列表", "菜单", "不像 VELA", "太呆"))
+        return any(token in text for token in ("机器人", "机械", "新闻列表", "菜单", "不像 VELA", "太呆", "没懂我", "理解偏差"))
 
     def _pick_variant(self, variants: tuple[str, ...], context: ReplyContext) -> str:
         seed = f"{context.intent}|{context.message}|{context.recent_summary}"
@@ -486,19 +629,18 @@ def extract_openai_text(payload: dict) -> str:
     return "\n".join(chunks).strip()
 
 
-def default_reply_adapter() -> ReplyAdapter:
+def default_reply_adapter(foreground_lane: str | None = None) -> ReplyAdapter:
     status = reply_engine_status()
     if status["adapter"] == "command":
         return CommandReplyAdapter(os.environ["VELA_GPT_COMMAND"].strip())
     if status["adapter"] == "deepseek_chat":
         api_key = env_secret(os.environ, str(status["config_source"]))
         model = str(status.get("model") or "deepseek-v4-flash")
-        base_url = os.environ.get("VELA_DEEPSEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
         return DeepSeekChatAdapter(
             api_key=api_key,
             model=model,
-            base_url=base_url,
-            timeout=deepseek_timeout_seconds(),
+            base_url=deepseek_base_url(),
+            timeout=deepseek_foreground_timeout_seconds(foreground_lane),
             thinking_mode=deepseek_thinking_mode(),
         )
     if status["adapter"] == "openai_responses":

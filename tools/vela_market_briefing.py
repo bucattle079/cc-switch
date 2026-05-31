@@ -731,19 +731,23 @@ def market_freshness_status(query: str = "", now: datetime | None = None) -> Mar
 def format_freshness_status(status: MarketFreshnessStatus) -> str:
     if status.data_status == "cached":
         first_line = f"不是实时直播。当前报告基于 {status.slot or '最近一次'} 缓存，适合做方向判断，不适合当秒级交易信号。"
+        cache_state = "当前时段缓存可用"
+        source = "本地市场缓存"
     elif status.data_status == "stale":
         first_line = f"不是实时直播。当前只有 {status.slot or '最近一次'} 旧缓存，可以参考方向，不能当最新盘面。"
+        cache_state = "只有旧缓存"
+        source = "本地市场缓存"
     else:
         first_line = "不是实时直播。当前没有可靠缓存，暂不生成新判断。"
+        cache_state = "无可用缓存"
+        source = "未接入实时源"
     return "\n".join(
         [
             first_line,
-            f"data_status: {status.data_status}",
-            f"last_updated: {status.last_updated}",
-            f"source_type: {status.source_type}",
-            f"refresh_available: {'true' if status.refresh_available else 'false'}",
-            f"refresh_in_progress: {'true' if status.refresh_in_progress else 'false'}",
-            f"confidence_note: {status.confidence_note}",
+            f"更新时间：{status.last_updated}",
+            f"数据来源：{source}，{cache_state}。",
+            f"刷新状态：{'可刷新，当前未在前台刷新。' if status.refresh_available else '暂不可刷新。'}",
+            f"可信度：{status.confidence_note}",
         ]
     )
 
@@ -899,23 +903,36 @@ def ensure_sentence(text: str) -> str:
     return text + "。"
 
 
+def cleanup_lock_file(path: str) -> None:
+    if not path:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def main(argv: list[str]) -> int:
     ensure_utf8_stdio()
     parser = argparse.ArgumentParser()
     parser.add_argument("query", nargs="*", help="market question")
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--refresh-slot", choices=["0900", "1230", "1700"], default="")
+    parser.add_argument("--lock-file", default="")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     now = now_china()
     if args.refresh_slot:
         hour, minute = {"0900": (9, 0), "1230": (12, 30), "1700": (17, 0)}[args.refresh_slot]
         now = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    brief = build_market_brief(" ".join(args.query), now=now, force_refresh=args.refresh or bool(args.refresh_slot))
-    if args.json:
-        print(json.dumps(asdict(brief), ensure_ascii=False, indent=2))
-    else:
-        print(format_market_brief(brief))
+    try:
+        brief = build_market_brief(" ".join(args.query), now=now, force_refresh=args.refresh or bool(args.refresh_slot))
+        if args.json:
+            print(json.dumps(asdict(brief), ensure_ascii=False, indent=2))
+        else:
+            print(format_market_brief(brief))
+    finally:
+        cleanup_lock_file(args.lock_file)
     return 0
 
 

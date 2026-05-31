@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import re
 from typing import Iterable
@@ -54,6 +55,13 @@ ENGINEERING_NOISE_TOKENS = (
     "schema_version",
     "tokens_used",
     "token_budget",
+    "data_status",
+    "last_updated:",
+    "source_type",
+    "refresh_available",
+    "refresh_in_progress",
+    "confidence_note",
+    "cache_path",
     "sandbox",
     "approval never",
     "approval on-request",
@@ -61,18 +69,26 @@ ENGINEERING_NOISE_TOKENS = (
     "<oai-mem-citation>",
 )
 
-WINDOWS_PATH_RE = re.compile(r"(?:[A-Za-z]:\\|\\\\)[^\s，。；,;]+")
+WINDOWS_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)[^\s，。；,;)]+")
 CODEX_RUNTIME_PATTERNS = (
     re.compile(r"用量\s*`?[\d,.\s]+tokens?`?[，,。；;\s]*", re.IGNORECASE),
     re.compile(r"耗时(?:约)?\s*`?[^，。；;|]+`?[，,。；;\s]*", re.IGNORECASE),
     re.compile(r"\btokens?(?:_used)?\s*[:=]?\s*`?[\d,./\s]+`?[，,。；;\s]*", re.IGNORECASE),
     re.compile(r"\btoken_budget\s*[:=]?\s*`?[\d,./\s]+`?[，,。；;\s]*", re.IGNORECASE),
+    re.compile(r"\bschema_version\b\s*[:=]?\s*[A-Za-z0-9_.:-]*", re.IGNORECASE),
     re.compile(r"\bsandbox\s+[^|，。；;,]+", re.IGNORECASE),
     re.compile(r"\bapproval\s+[^|，。；;,]+", re.IGNORECASE),
     re.compile(r"\bmodel\s+[A-Za-z0-9_.:-]+", re.IGNORECASE),
     re.compile(r"\bgpt-[A-Za-z0-9_.:-]+", re.IGNORECASE),
     re.compile(r"工作区\s*[:：]\s*[^\s，。；,;]+", re.IGNORECASE),
 )
+CODEX_COMMAND_LINE_RE = re.compile(
+    r"^\s*(?:pytest|rg|git|python(?:\.exe)?|py|pwsh|powershell|cmd|npm|pnpm|cargo|uv|Get-ChildItem|Select-String)\b",
+    re.IGNORECASE,
+)
+CODEX_LOG_LINE_RE = re.compile(r"^\s*(?:exit code|wall time|stdout|stderr|warning:)\b", re.IGNORECASE)
+CODEX_PATH_ONLY_RE = re.compile(r"^\s*(?:[A-Za-z]:\\|\\\\|\$[A-Z_]+[\\/])")
+CODEX_AUTOMATION_META_LINE_RE = re.compile(r"^\s*Automation (?:ID|memory)\s*:", re.IGNORECASE)
 STAGE_DIRECTION_RE = re.compile(r"[（(][^）)\n]{1,40}[）)]")
 EXTRA_FORBIDDEN_DIALOGUE_PHRASES = (
     "作为 VELA",
@@ -81,6 +97,12 @@ EXTRA_FORBIDDEN_DIALOGUE_PHRASES = (
     "首先",
     "其次",
     "根据设定",
+)
+ROLEPLAY_CLAIM_PATTERNS = (
+    re.compile(r"我是\s*叶文洁", re.IGNORECASE),
+    re.compile(r"我会?扮演", re.IGNORECASE),
+    re.compile(r"三体原文", re.IGNORECASE),
+    re.compile(r"原著台词", re.IGNORECASE),
 )
 
 
@@ -119,6 +141,68 @@ class LayeredResponse:
     quality_log: Path | None = None
     reply_adapter: str = ""
     real_gpt_enabled: bool = False
+
+
+@dataclass(frozen=True)
+class ToolSelection:
+    model_adapter: str
+    foreground_lane: str
+    allow_market: bool = False
+    allow_codex: bool = False
+    allow_retrieval: bool = False
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class LearningEvaluation:
+    should_record_candidate: bool
+    classification: str = ""
+    candidate_level: str = ""
+    should_affect_next_reply: bool = False
+    promote_to_strategic_memory: bool = False
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class HumanToneVector:
+    warmth_level: int
+    directness_level: int
+    strategic_depth: int
+    emotional_presence: int
+    clarification_need: int
+    memory_reference_need: int
+
+    def to_dict(self) -> dict[str, int]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class NeedInterpretation:
+    literal_need: str
+    implied_need: str
+    emotional_state: str
+    response_mode: str
+    should_clarify: bool
+    preferred_reply_shape: str
+    human_tone_vector: HumanToneVector
+    distillation_rules: list[str] = field(default_factory=list)
+    persona_skeleton: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.persona_skeleton:
+            text = " ".join([self.literal_need, self.implied_need, self.preferred_reply_shape])
+            object.__setattr__(
+                self,
+                "persona_skeleton",
+                persona_skeleton_for(response_mode=self.response_mode, text=text),
+            )
+
+    def to_brief(self) -> str:
+        return (
+            f"{self.implied_need} "
+            f"情绪状态：{self.emotional_state}；"
+            f"回复形态：{self.preferred_reply_shape}"
+        ).strip()
 
 
 @dataclass
@@ -186,6 +270,9 @@ def guard_wechat_output(text: str, max_chars: int = 3600) -> str:
         if any(token in lower for token in ENGINEERING_NOISE_TOKENS):
             noise_seen = True
             continue
+        if any(pattern.search(line) for pattern in ROLEPLAY_CLAIM_PATTERNS):
+            noise_seen = True
+            continue
         sanitized = WINDOWS_PATH_RE.sub("本地文件已保存", line)
         if sanitized != line:
             noise_seen = True
@@ -214,12 +301,25 @@ def guard_layered_output(
     used_retrieval: bool,
     max_chars: int = 3600,
 ) -> str:
+    lowered = str(text or "").lower()
+    codex_status_leak_markers = (
+        "codex 那边",
+        "vela · codex",
+        "codex 产品判断摘要",
+        "项目已标记完成",
+        "最后结论",
+        "截图已生成",
+        "文本备份",
+        "/goal",
+    )
     if intent != "market_brief" and "Market & World Briefing" in str(text or ""):
         return guard_wechat_output(ensure_k_address("这条不需要市场扫描。先回答当前问题，别把前台变成新闻传送带。"), max_chars=max_chars)
     if intent == "normal_chat" and any(
         token in str(text or "") for token in ("要看盘，说 A股、美股或韩国", "要动 Codex，用 /CODEX")
     ):
         return guard_wechat_output(ensure_k_address("菜单口吻已拦截。在线，说目标，我来收束。"), max_chars=max_chars)
+    if intent == "normal_chat" and any(marker in lowered for marker in codex_status_leak_markers):
+        return guard_wechat_output(ensure_k_address("在线。先不拉工程状态；你说目标，我给判断。"), max_chars=max_chars)
     if intent != "codex_task" and used_codex:
         return guard_wechat_output(ensure_k_address("这条不需要 Codex。工程手先收刀，前台只给判断。"), max_chars=max_chars)
     if intent == "normal_chat" and used_retrieval:
@@ -251,6 +351,9 @@ def record_reply_quality(
     issues: Iterable[str],
     intent: str | None = None,
     memory_candidate: bool = False,
+    need_interpretation: str = "",
+    response_mode: str = "",
+    human_tone_vector: dict | None = None,
     log_dir: Path | None = None,
 ) -> Path:
     log_dir = log_dir or LEARNING_LOOP_DIR
@@ -269,6 +372,12 @@ def record_reply_quality(
         "issues": list(issues),
         "memory_candidate": memory_candidate,
     }
+    if need_interpretation:
+        row["need_interpretation"] = need_interpretation
+    if response_mode:
+        row["response_mode"] = response_mode
+    if human_tone_vector:
+        row["human_tone_vector"] = human_tone_vector
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     return path
@@ -281,6 +390,9 @@ def record_interaction(
     response_text: str,
     used_codex: bool,
     used_retrieval: bool,
+    need_interpretation: str = "",
+    response_mode: str = "",
+    human_tone_vector: dict | None = None,
     log_dir: Path | None = None,
 ) -> Path:
     log_dir = log_dir or LEARNING_LOOP_DIR
@@ -294,6 +406,36 @@ def record_interaction(
         "response_preview": str(response_text or "").strip()[:800],
         "used_codex": used_codex,
         "used_retrieval": used_retrieval,
+    }
+    if need_interpretation:
+        row["need_interpretation"] = need_interpretation
+    if response_mode:
+        row["response_mode"] = response_mode
+    if human_tone_vector:
+        row["human_tone_vector"] = human_tone_vector
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return path
+
+
+def record_session_note(
+    message: str,
+    intent: str,
+    response_summary: str,
+    *,
+    log_dir: Path | None = None,
+) -> Path:
+    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / f"session-notes-{utc_now():%Y-%m-%d}.jsonl"
+    row = {
+        "created_at": utc_now().isoformat(),
+        "level": "Session Notes",
+        "message_summary": " ".join(str(message or "").split())[:240],
+        "intent": intent,
+        "response_summary": " ".join(str(response_summary or "").split())[:240],
+        "persistent": True,
+        "storage_policy": "short_term_local_context",
     }
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -325,8 +467,263 @@ def latest_learning_rows(pattern: str, log_dir: Path | None = None, limit: int =
     return rows[-limit:]
 
 
+RELATIONSHIP_REPAIR_MARKERS = (
+    "你没懂我",
+    "没懂我",
+    "你没听懂",
+    "没抓到",
+    "不是这个意思",
+    "理解错",
+    "偏了",
+)
+
+QUIET_SUPPORT_MARKERS = (
+    "脑子发懵",
+    "发懵",
+    "脑子懵",
+    "很累",
+    "有点累",
+    "撑不住",
+    "乱掉",
+)
+
+PERSONA_SKELETON_ORDER = [
+    "Evidence Gate",
+    "Meaning Decoder",
+    "Identity Core",
+    "Boundary Engine",
+    "Witty Correction",
+]
+
+
+def persona_skeleton_rules() -> list[str]:
+    return [
+        "Evidence Gate: evidence before judgment; separate known facts, uncertainty, and inference.",
+        "Meaning Decoder: check ambiguity, literal need, implied need, and emotional state before answering.",
+        "Identity Core: models, memory, Codex, and tools may change, but VELA keeps one coherent value spine.",
+        "Boundary Engine: accompany without appeasing; brake shortcuts, hype, reckless spend, and self-damaging momentum.",
+        "Witty Correction: natural edge, anti-template phrasing, and fast self-correction when feedback or evidence changes.",
+    ]
+
+
+def persona_skeleton_for(*, response_mode: str = "", text: str = "") -> list[str]:
+    raw = f"{response_mode} {text}".lower()
+    signals: set[str] = {"Identity Core"}
+    if any(token in raw for token in ["market", "weather", "evidence", "事实", "证据", "天气", "市场", "风险", "根因"]):
+        signals.add("Evidence Gate")
+    if any(token in raw for token in ["relationship_repair", "quiet_support", "meaning", "理解", "误读", "偏差", "歧义", "隐藏需求"]):
+        signals.add("Meaning Decoder")
+    if any(token in raw for token in ["project_operator", "strategic_depth", "market_brief", "boundary", "项目", "捷径", "烧钱", "上头", "冲", "代价", "风险"]):
+        signals.add("Boundary Engine")
+    if any(token in raw for token in ["relationship_repair", "daily_companion", "feedback", "style", "反馈", "修正", "自然", "模板"]):
+        signals.add("Witty Correction")
+    if response_mode == "daily_companion" and len(signals) == 1:
+        signals.update({"Meaning Decoder", "Witty Correction"})
+    return [item for item in PERSONA_SKELETON_ORDER if item in signals]
+
+
+def humanization_distillation_rules() -> list[str]:
+    return [
+        "mechanism_only: extract posture, pacing, conflict handling, and long-horizon judgment only.",
+        "roleplay=false: VELA keeps her own identity and never claims to be a source character.",
+        "quote_storage=false: do not store or output source lines; keep only abstract behavioral rules.",
+        "persona_skeleton: Evidence Gate + Meaning Decoder + Identity Core + Boundary Engine + Witty Correction.",
+        "need_first: infer literal need, implied need, emotional state, and clarification need before wording.",
+        "tone_vector: tune warmth, directness, depth, emotional presence, clarification, and memory reference.",
+        "hard_lane_boundary: weather, market, and Codex lanes keep their tool contracts before style rendering.",
+    ]
+
+
+def humanization_distillation_prompt(interpretation: NeedInterpretation | None = None) -> str:
+    mode = interpretation.response_mode if interpretation else "daily_companion"
+    return (
+        "Humanization Distillation Layer | mechanism_only | roleplay=false | quote_storage=false | "
+        "modes=daily_companion,strategic_depth,relationship_repair,quiet_support,project_operator,market_brief | "
+        "persona_skeleton=Evidence Gate,Meaning Decoder,Identity Core,Boundary Engine,Witty Correction | "
+        f"active_mode={mode} | "
+        "rules=" + "; ".join([*humanization_distillation_rules(), *persona_skeleton_rules()])
+    )
+
+
+def _tone(
+    *,
+    warmth: int,
+    directness: int,
+    depth: int,
+    presence: int,
+    clarify: int,
+    memory: int,
+) -> HumanToneVector:
+    return HumanToneVector(
+        warmth_level=max(1, min(warmth, 5)),
+        directness_level=max(1, min(directness, 5)),
+        strategic_depth=max(1, min(depth, 5)),
+        emotional_presence=max(1, min(presence, 5)),
+        clarification_need=max(1, min(clarify, 5)),
+        memory_reference_need=max(1, min(memory, 5)),
+    )
+
+
+def interpret_need(message: str, intent: str) -> NeedInterpretation:
+    text = " ".join(str(message or "").split())
+    lowered = text.lower()
+    rules = humanization_distillation_rules()
+
+    if any(marker in text for marker in RELATIONSHIP_REPAIR_MARKERS):
+        return NeedInterpretation(
+            literal_need="用户指出 VELA 没有理解真实意思。",
+            implied_need="用户需要先承认理解偏差，再快速重切问题，而不是普通道歉或解释身份。",
+            emotional_state="被误读后的不耐与校准需求",
+            response_mode="relationship_repair",
+            should_clarify=True,
+            preferred_reply_shape="短句承认偏差，提出一个澄清切口，立刻回到问题核心。",
+            human_tone_vector=_tone(warmth=4, directness=5, depth=2, presence=5, clarify=5, memory=3),
+            distillation_rules=rules,
+        )
+
+    if any(marker in text for marker in QUIET_SUPPORT_MARKERS):
+        return NeedInterpretation(
+            literal_need="用户处在认知负荷偏高状态。",
+            implied_need="用户需要低负担陪伴和一个最小可执行切口，而不是继续加信息量。",
+            emotional_state="疲惫、混乱、需要被稳住",
+            response_mode="quiet_support",
+            should_clarify=True,
+            preferred_reply_shape="低负担、短句、只问一个点，先降低压力。",
+            human_tone_vector=_tone(warmth=5, directness=4, depth=2, presence=5, clarify=3, memory=2),
+            distillation_rules=rules,
+        )
+
+    if intent == "style_feedback":
+        return NeedInterpretation(
+            literal_need="用户在反馈 VELA 的表达方式。",
+            implied_need="用户需要确认 VELA 能被反馈触动，而不是继续模板化。",
+            emotional_state="风格失望后的校准请求",
+            response_mode="relationship_repair",
+            should_clarify=False,
+            preferred_reply_shape="少自证，少菜单，下一轮直接用改变后的表达回应。",
+            human_tone_vector=_tone(warmth=4, directness=5, depth=2, presence=4, clarify=3, memory=4),
+            distillation_rules=rules,
+        )
+    if intent == "memory_related":
+        return NeedInterpretation(
+            literal_need="用户要求 VELA 记住或学习某条经验。",
+            implied_need="用户在交代可复用经验；需要先进入候选记忆，避免把一次性信息写死。",
+            emotional_state="希望被持续理解",
+            response_mode="daily_companion",
+            should_clarify=False,
+            preferred_reply_shape="确认候选边界，说明不直接永久化。",
+            human_tone_vector=_tone(warmth=4, directness=4, depth=3, presence=3, clarify=3, memory=5),
+            distillation_rules=rules,
+        )
+    if intent == "codex_task":
+        return NeedInterpretation(
+            literal_need="用户要接续工程执行或查看 Codex 状态。",
+            implied_need="用户想无缝接续项目，不想重新整理上下文或读后台日志。",
+            emotional_state="执行推进",
+            response_mode="project_operator",
+            should_clarify=False,
+            preferred_reply_shape="只取工程结论、风险和下一步，不暴露后台噪音。",
+            human_tone_vector=_tone(warmth=3, directness=5, depth=4, presence=3, clarify=2, memory=4),
+            distillation_rules=rules,
+        )
+    if intent in {"market_brief", "market_refresh", "freshness_status"}:
+        return NeedInterpretation(
+            literal_need="用户要今天的市场或资讯判断。",
+            implied_need="用户想判断今天金融市场是否存在风险或机会，而不是看新闻列表。",
+            emotional_state="需要外部世界的可行动判断",
+            response_mode="market_brief",
+            should_clarify=False,
+            preferred_reply_shape="先说明实时/缓存状态，再给中文化判断和下一观察点。",
+            human_tone_vector=_tone(warmth=2, directness=5, depth=4, presence=2, clarify=1, memory=3),
+            distillation_rules=rules,
+        )
+    if intent == "weather_query":
+        return NeedInterpretation(
+            literal_need="用户要天气或出行风险。",
+            implied_need="用户需要可执行的出行风险判断；无天气源时要明确边界，不编天气。",
+            emotional_state="日常决策",
+            response_mode="daily_companion",
+            should_clarify=False,
+            preferred_reply_shape="短句确认天气线，给数据边界和行动建议。",
+            human_tone_vector=_tone(warmth=3, directness=5, depth=2, presence=2, clarify=1, memory=1),
+            distillation_rules=rules,
+        )
+    if intent == "project_assistant":
+        return NeedInterpretation(
+            literal_need="用户要继续项目，把目标、风险和下一步压缩成可执行路径。",
+            implied_need="用户想推进项目目标，而不是被愿景、工程日志或工具状态拖住。",
+            emotional_state="战略推进",
+            response_mode="project_operator",
+            should_clarify=False,
+            preferred_reply_shape="目标、风险、下一步三段式，必要时再派 Codex。",
+            human_tone_vector=_tone(warmth=3, directness=5, depth=5, presence=3, clarify=2, memory=5),
+            distillation_rules=rules,
+        )
+    if intent == "deep_analysis":
+        return NeedInterpretation(
+            literal_need="用户要求深度根因分析。",
+            implied_need="用户需要根因、风险和最短修正路径，并判断是否值得沉淀为经验。",
+            emotional_state="要求真相，不要安慰剂",
+            response_mode="strategic_depth",
+            should_clarify=False,
+            preferred_reply_shape="先结论，再结构拆解，最后给修正路径。",
+            human_tone_vector=_tone(warmth=2, directness=5, depth=5, presence=3, clarify=2, memory=4),
+            distillation_rules=rules,
+        )
+    if intent == "daily_info":
+        return NeedInterpretation(
+            literal_need="用户要解释、整理或轻量检索。",
+            implied_need="用户要把零散信息整理成可理解、可行动的判断。",
+            emotional_state="需要清晰",
+            response_mode="daily_companion",
+            should_clarify=False,
+            preferred_reply_shape="短结论、必要依据、下一步。",
+            human_tone_vector=_tone(warmth=3, directness=4, depth=3, presence=3, clarify=2, memory=2),
+            distillation_rules=rules,
+        )
+    if intent == "normal_chat" and lowered in {"你好", "你好 vela", "在吗", "在么", "hello", "hi"}:
+        return NeedInterpretation(
+            literal_need="用户在打开连接感。",
+            implied_need="用户在校准连接感，需要短、自然、非菜单化回应。",
+            emotional_state="轻量连接",
+            response_mode="daily_companion",
+            should_clarify=False,
+            preferred_reply_shape="一句短回，不触发市场、Codex 或项目状态。",
+            human_tone_vector=_tone(warmth=4, directness=4, depth=2, presence=3, clarify=1, memory=1),
+            distillation_rules=rules,
+        )
+    return NeedInterpretation(
+        literal_need="用户需要日常沟通中的判断与陪伴。",
+        implied_need="用户需要日常沟通里的真实判断和陪伴感，而不是功能菜单。",
+        emotional_state="未明，需要保持轻量",
+        response_mode="daily_companion",
+        should_clarify=False,
+        preferred_reply_shape="先回应当下，再给最短下一步。",
+        human_tone_vector=_tone(warmth=4, directness=4, depth=2, presence=3, clarify=2, memory=2),
+        distillation_rules=rules,
+    )
+
+
+def interpret_user_need(message: str, intent: str) -> str:
+    return interpret_need(message, intent).implied_need
+
+
+def strategic_memory_summaries(log_dir: Path | None = None, limit: int = 4) -> list[str]:
+    summaries: list[str] = []
+    for row in latest_learning_rows("strategic-memory-*.jsonl", log_dir=log_dir, limit=limit):
+        summary = str(row.get("summary") or "").strip()
+        memory_type = str(row.get("memory_type") or "").strip()
+        if summary:
+            summaries.append(f"{memory_type}：{summary}" if memory_type else summary)
+    return summaries[-limit:]
+
+
 def infer_pressure_scenario(message: str, intent: str) -> str:
     text = str(message or "").lower()
+    if intent == "style_feedback":
+        return "机械纠偏"
+    if any(token in str(message or "") for token in RELATIONSHIP_REPAIR_MARKERS):
+        return "理解偏差修复"
     if intent == "memory_related" and any(token in text for token in ("机器", "机械", "不像", "太像")):
         return "机械纠偏"
     if any(token in text for token in ("累", "疲惫", "撑不住", "继续")):
@@ -338,11 +735,70 @@ def infer_pressure_scenario(message: str, intent: str) -> str:
     return ""
 
 
+def _env_has(env: dict[str, str], name: str) -> bool:
+    return bool(str(env.get(name) or "").strip())
+
+
+def _dialogue_adapter_for_env(env: dict[str, str]) -> str:
+    if _env_has(env, "DEEPSEEK_API_KEY"):
+        return "deepseek_chat"
+    if _env_has(env, "VELA_GPT_COMMAND"):
+        return "command"
+    if _env_has(env, "VELA_OPENAI_API_KEY") or _env_has(env, "OPENAI_API_KEY"):
+        return "openai_responses"
+    return "fallback"
+
+
+def select_model_and_tools(intent: str, env: dict[str, str] | None = None) -> ToolSelection:
+    env = os.environ if env is None else env
+    if intent == "codex_task":
+        return ToolSelection(
+            model_adapter="codex_bridge",
+            foreground_lane="deep",
+            allow_codex=True,
+            reason="Codex is reserved for engineering status and execution.",
+        )
+    if intent in {"market_brief", "market_refresh", "freshness_status"}:
+        return ToolSelection(
+            model_adapter=_dialogue_adapter_for_env(env),
+            foreground_lane="cached",
+            allow_market=True,
+            allow_retrieval=False,
+            reason="Market context can use local cache/status, but final wording goes through the dialogue model.",
+        )
+    if intent == "weather_query":
+        return ToolSelection(
+            model_adapter=_dialogue_adapter_for_env(env),
+            foreground_lane="fast",
+            allow_retrieval=False,
+            reason="Weather uses no external weather API; the dialogue model gives risk framing without fake realtime data.",
+        )
+    if intent == "world_brief":
+        return ToolSelection(
+            model_adapter=_dialogue_adapter_for_env(env),
+            foreground_lane="cached",
+            allow_retrieval=False,
+            reason="World brief final wording goes through the dialogue model unless it is a Codex task.",
+        )
+    if intent in {"project_assistant", "deep_analysis"}:
+        return ToolSelection(
+            model_adapter=_dialogue_adapter_for_env(env),
+            foreground_lane="deep",
+            reason="Strategic analysis uses the dialogue model and keeps tools explicit.",
+        )
+    return ToolSelection(
+        model_adapter=_dialogue_adapter_for_env(env),
+        foreground_lane="fast",
+        reason="Daily dialogue is model-backed when configured and tool-free by default.",
+    )
+
+
 def build_reply_context(
     message: str,
     *,
     intent: str,
     log_dir: Path | None = None,
+    supporting_context: str = "",
 ) -> ReplyContext:
     normalized_message = " ".join(str(message or "").split())
     interactions = latest_learning_rows("interaction-*.jsonl", log_dir=log_dir, limit=8)
@@ -360,8 +816,10 @@ def build_reply_context(
     preferences.extend(
         str(row.get("summary"))
         for row in latest_learning_rows("memory-candidates-*.jsonl", log_dir=log_dir, limit=8)
-        if row.get("classification") == "style_feedback" and row.get("summary")
+        if row.get("classification") in {"style_feedback", "relationship_repair"} and row.get("summary")
     )
+    selection = select_model_and_tools(intent)
+    interpretation = interpret_need(normalized_message, intent)
     return ReplyContext(
         message=normalized_message,
         intent=intent,
@@ -369,11 +827,17 @@ def build_reply_context(
         last_response=last_response,
         repeated_message=repeated_message,
         pressure_scenario=infer_pressure_scenario(normalized_message, intent),
+        need_interpretation=interpretation.to_brief(),
+        response_mode=interpretation.response_mode,
+        human_tone_vector=interpretation.human_tone_vector.to_dict(),
+        supporting_context=" ".join(str(supporting_context or "").split()),
+        persona_skeleton=interpretation.persona_skeleton,
         user_preferences=preferences[-6:],
+        strategic_memories=strategic_memory_summaries(log_dir=log_dir),
         tool_policy=ToolPolicy(
-            allow_market=intent == "market_brief",
-            allow_codex=intent == "codex_task",
-            allow_retrieval=intent in {"market_brief", "world_brief"},
+            allow_market=selection.allow_market,
+            allow_codex=selection.allow_codex,
+            allow_retrieval=selection.allow_retrieval,
         ),
     )
 
@@ -397,7 +861,9 @@ def build_memory_candidate(message: str) -> dict:
         "锋利",
         "毒舌",
     ]
-    if any(key in text for key in style_markers):
+    if any(key in text for key in RELATIONSHIP_REPAIR_MARKERS):
+        classification = "relationship_repair"
+    elif any(key in text for key in style_markers):
         classification = "style_feedback"
     elif any(key in text for key in ["A股", "美股", "韩国", "日本", "市场", "美债", "美元"]):
         classification = "market_focus"
@@ -411,16 +877,44 @@ def build_memory_candidate(message: str) -> dict:
     for prefix in ("记住：", "记住:", "以后：", "以后:"):
         if summary.startswith(prefix):
             summary = summary.removeprefix(prefix).strip()
+    if classification == "relationship_repair":
+        summary = "用户反馈 VELA 没抓住真实意思；下轮先承认偏差，再用一个问题重切核心。"
+    interpretation = interpret_need(
+        text,
+        "style_feedback" if classification in {"style_feedback", "relationship_repair"} else "memory_related",
+    )
     return {
         "created_at": utc_now().isoformat(),
         "level": "Preference Candidate",
         "classification": classification,
         "summary": summary,
+        "need_interpretation": interpretation.to_brief(),
+        "response_mode": interpretation.response_mode,
+        "human_tone_vector": interpretation.human_tone_vector.to_dict(),
+        "persona_skeleton": interpretation.persona_skeleton,
         "sensitive": sensitive,
         "requires_confirmation": sensitive or classification in {"strategic_goal"},
         "confirmed": False,
         "storage_policy": "candidate_first",
     }
+
+
+def evaluate_learning(message: str, intent: str) -> LearningEvaluation:
+    if intent not in {"memory_related", "style_feedback"}:
+        return LearningEvaluation(
+            should_record_candidate=False,
+            reason="No explicit memory or feedback trigger.",
+        )
+    candidate = build_memory_candidate(message)
+    classification = str(candidate.get("classification") or "")
+    return LearningEvaluation(
+        should_record_candidate=True,
+        classification=classification,
+        candidate_level=str(candidate.get("level") or "Preference Candidate"),
+        should_affect_next_reply=classification in {"style_feedback", "relationship_repair"},
+        promote_to_strategic_memory=False,
+        reason="Candidate-first learning; no long-term promotion without confirmation.",
+    )
 
 
 def record_memory_candidate(message: str, log_dir: Path | None = None) -> Path:
@@ -530,7 +1024,13 @@ def analysis_layer(message: str, intent: str, codex_summary: str = "") -> Analys
             facts=[f"用户要求深度验尸：{text or '未给出具体对象'}"],
             judgment="先找结构性故障，再分离噪音、风险和最短修正路径。",
             risks=["没有事实包就直接下结论，会把锋利变成表演。"],
-            next_actions=["列问题", "列风险", "给最短修正路径", "标出需要验证的数据"],
+            next_actions=[
+                "列问题",
+                "列风险",
+                "给最短修正路径",
+                "经验沉淀判断：反复出现的路由、记忆、语气或工具边界问题写入候选经验；不把一次吐槽直接固化为长期记忆。",
+                "标出需要验证的数据",
+            ],
             confidence="medium",
         )
     if intent == "codex_task":
@@ -585,12 +1085,38 @@ def render_deep_analysis_reply() -> str:
 
 def sanitize_codex_summary(codex_output: str) -> str:
     """Keep Codex status useful while removing runtime/accounting metadata."""
-    summary = " ".join(str(codex_output or "").split())
-    if not summary:
+    raw = str(codex_output or "")
+    if not raw.strip():
         return ""
-    summary = WINDOWS_PATH_RE.sub("本地路径已收起", summary)
-    for pattern in CODEX_RUNTIME_PATTERNS:
-        summary = pattern.sub("", summary)
+
+    kept_lines: list[str] = []
+    for raw_line in raw.replace("\r", "\n").splitlines():
+        line = " ".join(raw_line.split())
+        if not line:
+            continue
+        if (
+            CODEX_COMMAND_LINE_RE.search(line)
+            or CODEX_LOG_LINE_RE.search(line)
+            or CODEX_PATH_ONLY_RE.search(line)
+            or CODEX_AUTOMATION_META_LINE_RE.search(line)
+        ):
+            continue
+        line = re.sub(r"::[A-Za-z0-9_-]+\{[^}]*\}", "后台通知已收起。", line)
+        line = re.sub(r"\$[A-Z_]+[\\/][^\s，。；,;]+", "本地运行资料已收起", line)
+        line = re.sub(r"\[([^\]]+)\]\([A-Za-z]:[\\/][^)]+\)", r"\1", line)
+        line = re.sub(r"\bAutomation ID\s*:\s*\S+", "", line, flags=re.IGNORECASE)
+        line = re.sub(r"\bAutomation memory\s*:\s*\S+", "", line, flags=re.IGNORECASE)
+        line = re.sub(r"\bAutomation\s*:\s*", "自动任务：", line, flags=re.IGNORECASE)
+        line = re.sub(r"\bmarket cache\b", "市场缓存", line, flags=re.IGNORECASE)
+        line = re.sub(r"\bAuto…\s*", "", line)
+        line = WINDOWS_PATH_RE.sub("本地路径已收起", line)
+        for pattern in CODEX_RUNTIME_PATTERNS:
+            line = pattern.sub("", line)
+        line = line.strip(" |，,；;")
+        if line and line != "后台通知已收起。":
+            kept_lines.append(line)
+
+    summary = " ".join(kept_lines)
     summary = re.sub(r"\s*\|\s*", " ", summary)
     summary = re.sub(r"\s+([，。；,;])", r"\1", summary)
     summary = re.sub(r"\s{2,}", " ", summary)
@@ -604,7 +1130,7 @@ def render_codex_product_judgment(codex_output: str) -> str:
     if len(summary) > 520:
         summary = summary[:519] + "…"
     packet = analysis_layer("", "codex_task", codex_summary=summary)
-    return "VELA · CODEX 工程摘要\n" + render_vela_persona(packet)
+    return "VELA · CODEX 产品判断摘要\n" + render_vela_persona(packet)
 
 
 def engine_text_for_intent(
@@ -612,14 +1138,11 @@ def engine_text_for_intent(
     *,
     adapter: ReplyAdapter | None = None,
     codex_summary: str = "",
+    foreground_lane: str | None = None,
 ) -> tuple[str, str, bool]:
-    adapter = adapter or default_reply_adapter()
-    if context.intent == "normal_chat":
-        result = adapter.generate(context)
-        return result.text, result.adapter, result.used_api
-    if context.intent == "memory_related":
-        result = adapter.generate(context)
-        return result.text, result.adapter, result.used_api
+    adapter = adapter or default_reply_adapter(foreground_lane=foreground_lane)
+    if context.intent == "codex_task":
+        return render_codex_product_judgment(codex_summary), "codex_bridge", False
     if context.intent in {"project_assistant", "deep_analysis"}:
         result = adapter.generate(context)
         base = analysis_layer(context.message, context.intent, codex_summary=codex_summary)
@@ -633,11 +1156,8 @@ def engine_text_for_intent(
             source=f"reply_engine:{result.adapter}",
         )
         return render_vela_persona(packet), result.adapter, result.used_api
-    if context.intent == "codex_task":
-        return render_codex_product_judgment(codex_summary), "codex_bridge", False
-    if context.intent == "world_brief":
-        return render_world_brief_reply(), "local_world_brief", False
-    return render_vela_persona(analysis_layer(context.message, context.intent)), "analysis_layer", False
+    result = adapter.generate(context)
+    return result.text, result.adapter, result.used_api
 
 
 def avoid_repeated_reply(text: str, context: ReplyContext) -> str:
@@ -653,20 +1173,24 @@ def run_layered_response(
     codex_summary: str = "",
     log_dir: Path | None = None,
     reply_adapter: ReplyAdapter | None = None,
+    supporting_context: str = "",
 ) -> LayeredResponse:
     used_codex = intent == "codex_task"
-    used_retrieval = intent in {"world_brief"}
-    used_cache = intent == "market_brief"
-    memory_candidate = intent == "memory_related"
+    used_retrieval = False
+    used_cache = intent in {"market_brief", "market_refresh", "freshness_status"}
+    selection = select_model_and_tools(intent)
+    learning = evaluate_learning(message, intent)
+    memory_candidate = learning.should_record_candidate
 
-    context = build_reply_context(message, intent=intent, log_dir=log_dir)
+    context = build_reply_context(message, intent=intent, log_dir=log_dir, supporting_context=supporting_context)
 
-    if intent == "memory_related":
+    if learning.should_record_candidate:
         record_memory_candidate(message, log_dir=log_dir)
     rendered, adapter_name, adapter_used_api = engine_text_for_intent(
         context,
         adapter=reply_adapter,
         codex_summary=codex_summary,
+        foreground_lane=selection.foreground_lane,
     )
     rendered = avoid_repeated_reply(rendered, context)
     issues = dialogue_quality_issues(rendered)
@@ -677,6 +1201,20 @@ def run_layered_response(
         used_codex=used_codex,
         used_retrieval=used_retrieval,
     )
+    quality_flags = [
+        "reply_engine",
+        f"adapter:{adapter_name}",
+        f"tool_lane:{selection.foreground_lane}",
+        f"model_selector:{selection.model_adapter}",
+        f"response_mode:{context.response_mode}",
+        "humanization_layer",
+        "persona_rendered",
+        "guarded_output",
+    ]
+    if learning.should_record_candidate:
+        quality_flags.append(f"learning_eval:{learning.classification or 'candidate'}")
+    if learning.should_affect_next_reply:
+        quality_flags.append("affects_next_reply")
     quality_path = record_reply_quality(
         conversation_type=intent,
         user_goal=message,
@@ -684,10 +1222,13 @@ def run_layered_response(
         used_cache=used_cache,
         used_retrieval=used_retrieval,
         used_codex=used_codex,
-        quality_flags=["reply_engine", f"adapter:{adapter_name}", "persona_rendered", "guarded_output"],
+        quality_flags=quality_flags,
         issues=issues,
         intent=intent,
         memory_candidate=memory_candidate,
+        need_interpretation=context.need_interpretation,
+        response_mode=context.response_mode,
+        human_tone_vector=context.human_tone_vector,
         log_dir=log_dir,
     )
     record_interaction(
@@ -696,6 +1237,15 @@ def run_layered_response(
         response_text=guarded,
         used_codex=used_codex,
         used_retrieval=used_retrieval,
+        need_interpretation=context.need_interpretation,
+        response_mode=context.response_mode,
+        human_tone_vector=context.human_tone_vector,
+        log_dir=log_dir,
+    )
+    record_session_note(
+        message,
+        intent,
+        guarded,
         log_dir=log_dir,
     )
     return LayeredResponse(

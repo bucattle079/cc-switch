@@ -50,4 +50,5 @@ VELA/iteration-archive/**
 !VELA/iteration-archive/README.md
 VELA/learning-loop/
 VELA/market-cache/
+VELA/market-refresh/
 VELA/send-once/

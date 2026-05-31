@@ -65,6 +65,66 @@ class VelaIntentRouterTests(unittest.TestCase):
             self.assertEqual(intent.name, "market_brief", text)
             self.assertTrue(intent.market_allowed)
 
+    def test_weather_query_routes_to_weather_lane_not_chat(self):
+        router = load_module(ROUTER, "vela_router")
+
+        for text in ["明天晋江天气", "今天纽约冷吗"]:
+            intent = router.classify_intent(text)
+
+            self.assertEqual(intent.name, "weather_query", text)
+            self.assertIn("weather", intent.focus_tags)
+            self.assertFalse(intent.codex_allowed)
+            self.assertFalse(intent.market_allowed)
+
+        decision = router.route_decision("明天晋江天气")
+        self.assertEqual(decision.intent, "weather_query")
+        self.assertFalse(decision.needs_retrieval)
+        self.assertFalse(decision.needs_codex)
+
+    def test_weather_reply_uses_deepseek_layer_without_weather_api(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model weather")) as run:
+            reply = router.reply_for("明天晋江天气")
+
+        self.assertEqual(reply, "K model weather")
+        self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
+        self.assertIn("不调用外部天气 API", run.call_args.kwargs["supporting_context"])
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
+
+    def test_market_reply_uses_deepseek_layer_with_cache_context(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.object(router, "render_cached_market_reply", return_value="缓存市场判断"):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model market")) as run:
+                reply = router.reply_for("今天的资讯")
+
+        self.assertEqual(reply, "K model market")
+        self.assertEqual(run.call_args.kwargs["intent"], "market_brief")
+        self.assertIn("缓存市场判断", run.call_args.kwargs["supporting_context"])
+
+    def test_weather_reply_is_weather_surface_not_menu(self):
+        router = load_module(ROUTER, "vela_router")
+
+        reply = router.reply_for("明天晋江天气")
+
+        self.assertIn("晋江", reply)
+        self.assertIn("天气", reply)
+        self.assertNotIn("Market & World Briefing", reply)
+        self.assertNotIn("CODEX", reply)
+        self.assertNotIn("weather_query", reply)
+        self.assertNotIn("debug", reply.lower())
+
+    def test_daily_info_routes_to_deepseek_dialogue_lane(self):
+        router = load_module(ROUTER, "vela_router")
+
+        for text in ["解释一下这个概念", "帮我总结这段", "这是什么意思"]:
+            intent = router.classify_intent(text)
+
+            self.assertEqual(intent.name, "daily_info", text)
+            self.assertFalse(intent.codex_allowed)
+            self.assertFalse(intent.market_allowed)
+
     def test_natural_market_time_phrases_route_to_market_brief(self):
         router = load_module(ROUTER, "vela_router")
 
@@ -90,6 +150,35 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertEqual(intent.name, "codex_task")
         self.assertTrue(intent.codex_allowed)
         self.assertFalse(intent.market_allowed)
+
+    def test_codex_slash_without_leading_slash_enters_codex_bridge(self):
+        router = load_module(ROUTER, "vela_router")
+
+        intent = router.classify_intent("CODEX/")
+
+        self.assertEqual(intent.name, "codex_task")
+        self.assertTrue(intent.codex_allowed)
+        self.assertFalse(intent.market_allowed)
+
+    def test_today_news_is_market_risk_need_not_generic_chat(self):
+        router = load_module(ROUTER, "vela_router")
+
+        intent = router.classify_intent("今天的资讯")
+
+        self.assertEqual(intent.name, "market_brief")
+        self.assertTrue(intent.market_allowed)
+        self.assertFalse(intent.codex_allowed)
+
+    def test_market_lane_records_interaction_session_and_hidden_need(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.object(router, "render_cached_market_reply", return_value="K，缓存市场判断。"):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，模型市场判断。")) as run:
+                reply = router.reply_for("今天的资讯")
+
+        self.assertEqual(reply, "K，模型市场判断。")
+        self.assertEqual(run.call_args.kwargs["intent"], "market_brief")
+        self.assertIn("缓存市场判断", run.call_args.kwargs["supporting_context"])
 
     def test_project_discussion_routes_to_project_assistant(self):
         router = load_module(ROUTER, "vela_router")
@@ -132,7 +221,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         for text in ["你刚才太像新闻列表了", "你刚才太像机器人了", "这回复太机械"]:
             intent = router.classify_intent(text)
 
-            self.assertEqual(intent.name, "memory_related", text)
+            self.assertEqual(intent.name, "style_feedback", text)
             self.assertIn("style_feedback", intent.focus_tags)
             self.assertFalse(intent.codex_allowed)
             self.assertFalse(intent.market_allowed)
@@ -147,6 +236,16 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertFalse(intent.codex_allowed)
         self.assertFalse(intent.market_allowed)
 
+    def test_relationship_repair_feedback_routes_to_style_feedback(self):
+        router = load_module(ROUTER, "vela_router")
+
+        intent = router.classify_intent("你没懂我")
+
+        self.assertEqual(intent.name, "style_feedback")
+        self.assertIn("relationship_repair", intent.focus_tags)
+        self.assertFalse(intent.codex_allowed)
+        self.assertFalse(intent.market_allowed)
+
     def test_route_decision_is_structured_and_not_final_reply(self):
         router = load_module(ROUTER, "vela_router")
 
@@ -154,7 +253,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         payload = decision.to_dict()
 
         self.assertEqual(payload["intent"], "market_brief")
-        self.assertTrue(payload["needs_retrieval"])
+        self.assertFalse(payload["needs_retrieval"])
         self.assertFalse(payload["needs_codex"])
         self.assertTrue(payload["needs_deep_reasoning"])
         self.assertTrue(payload["cache_allowed"])
@@ -174,9 +273,10 @@ class VelaIntentRouterTests(unittest.TestCase):
         elapsed = time.perf_counter() - started
 
         self.assertLess(elapsed, 2.0)
-        self.assertIn("data_status", reply)
-        self.assertIn("last_updated", reply)
-        self.assertIn("source_type", reply)
+        self.assertIn("更新时间", reply)
+        self.assertIn("数据来源", reply)
+        self.assertNotIn("data_status", reply)
+        self.assertNotIn("source_type", reply)
         self.assertNotIn("Market & World Briefing", reply)
 
     def test_refresh_market_question_uses_refresh_lane_without_blocking(self):
@@ -187,28 +287,42 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertEqual(intent.name, "market_refresh")
         self.assertTrue(intent.market_allowed)
         started = time.perf_counter()
-        reply = router.reply_for("刷新最新市场资讯")
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(router, "MARKET_REFRESH_DIR", Path(tmp)):
+                with patch("subprocess.Popen") as popen:
+                    popen.return_value.pid = 12345
+                    reply = router.reply_for("刷新最新市场资讯")
+                    popen_args = popen.call_args.args[0]
         elapsed = time.perf_counter() - started
 
         self.assertLess(elapsed, 2.0)
-        self.assertIn("实时检索链路", reply)
-        self.assertIn("不返回缓存简报", reply)
+        self.assertIn("不拿缓存冒充实时", reply)
+        self.assertIn("前台先返回状态", reply)
+        self.assertIn("--lock-file", popen_args)
         self.assertNotIn("以下基于最近缓存", reply)
         self.assertNotIn("VELA 市场简报", reply)
         self.assertNotIn("Market & World Briefing", reply)
+        self.assertNotIn("data_status", reply)
+        self.assertNotIn("source_type", reply)
 
     def test_explicit_realtime_retrieval_request_does_not_return_cached_brief(self):
         router = load_module(ROUTER, "vela_router")
         text = "OK 明白了，开启检索，我需要实时的资讯"
 
         intent = router.classify_intent(text)
-        reply = router.reply_for(text)
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(router, "MARKET_REFRESH_DIR", Path(tmp)):
+                with patch("subprocess.Popen") as popen:
+                    popen.return_value.pid = 12345
+                    reply = router.reply_for(text)
 
         self.assertEqual(intent.name, "market_refresh")
-        self.assertIn("实时检索链路", reply)
-        self.assertIn("不返回缓存简报", reply)
+        self.assertIn("不拿缓存冒充实时", reply)
+        self.assertIn("前台先返回状态", reply)
         self.assertNotIn("以下基于最近缓存", reply)
         self.assertNotIn("VELA 市场简报", reply)
+        self.assertNotIn("data_status", reply)
+        self.assertNotIn("source_type", reply)
 
     def test_greeting_fast_lane_bypasses_slow_gpt_command(self):
         router = load_module(ROUTER, "vela_router")
@@ -237,14 +351,70 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertEqual(reply, "K real")
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
-    def test_plain_vela_keeps_fast_fallback_ping(self):
+    def test_plain_hello_can_use_real_adapter_when_available(self):
         router = load_module(ROUTER, "vela_router")
 
         with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
-                router.reply_for("VELA")
+                reply = router.reply_for("你好")
 
-        self.assertEqual(run.call_args.kwargs["reply_adapter"].name, "fallback")
+        self.assertEqual(reply, "K real")
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
+
+    def test_plain_vela_uses_deepseek_layer_when_available(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
+                reply = router.reply_for("VELA")
+
+        self.assertEqual(reply, "K real")
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
+
+    def test_persona_alias_routes_through_guarded_local_tool_lane(self):
+        router = load_module(ROUTER, "vela_router")
+
+        intent = router.classify_intent("语气")
+
+        self.assertEqual(intent.name, "persona_tool")
+        self.assertFalse(intent.codex_allowed)
+        with patch.object(router.subprocess, "run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout="VELA 语气校准\n少菜单，多判断。", stderr="")
+            reply = router.reply_for("语气")
+
+        self.assertIn("少菜单，多判断", reply)
+        self.assertNotIn("persona_tool", reply)
+        self.assertNotIn("debug", reply.lower())
+        argv = run.call_args.args[0]
+        self.assertIn(str(router.PERSONALITY_SCRIPT), argv)
+        self.assertIn("voice", argv)
+
+    def test_legacy_personality_command_name_still_enters_router_lane(self):
+        router = load_module(ROUTER, "vela_router")
+
+        intent = router.classify_intent("persona growth")
+
+        self.assertEqual(intent.name, "persona_tool")
+        with patch.object(router.subprocess, "run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout="成长日志已校准。", stderr="")
+            reply = router.reply_for("persona growth")
+
+        self.assertIn("成长日志", reply)
+        self.assertIn("growth", run.call_args.args[0])
+
+    def test_daily_briefing_command_name_enters_guarded_router_lane(self):
+        router = load_module(ROUTER, "vela_router")
+
+        intent = router.classify_intent("daily-briefing")
+
+        self.assertEqual(intent.name, "daily_briefing")
+        with patch.object(router.subprocess, "run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout="VELA 市场简报\n重点风险。", stderr="")
+            reply = router.reply_for("daily-briefing")
+
+        self.assertIn("重点风险", reply)
+        self.assertNotIn("daily_briefing", reply)
+        self.assertIn(str(router.DAILY_BRIEFING_SCRIPT), run.call_args.args[0])
 
     def test_non_realtime_news_summary_uses_cache_status_before_brief(self):
         router = load_module(ROUTER, "vela_router")
@@ -252,7 +422,8 @@ class VelaIntentRouterTests(unittest.TestCase):
         reply = router.reply_for("如果不是实时的重要资讯梳理给我")
 
         self.assertIn("以下基于最近缓存", reply)
-        self.assertIn("data_status", reply)
+        self.assertIn("更新时间", reply)
+        self.assertNotIn("data_status", reply)
         self.assertIn("VELA", reply)
         self.assertNotIn("direction:", reply)
         self.assertNotIn("score:", reply)
@@ -540,8 +711,10 @@ class VelaMarketBriefingTests(unittest.TestCase):
 
         self.assertEqual(status.data_status, "cached")
         self.assertEqual(status.source_type, "cache")
-        self.assertIn("last_updated", text)
-        self.assertIn("source_type", text)
+        self.assertIn("更新时间", text)
+        self.assertIn("数据来源", text)
+        self.assertNotIn("last_updated", text)
+        self.assertNotIn("source_type", text)
         self.assertIn("不是实时直播", text)
 
 

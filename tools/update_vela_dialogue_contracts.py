@@ -24,75 +24,137 @@ BACKUP_TARGETS = {
 PING_COMMAND = '''[[commands]]
 name = "vela-ping"
 description = "VELA exact calibration ping"
-exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_ping.py\\""
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" VELA"
+work_dir = "C:/Users/Admin/Desktop/CC-WECHAT"
+
+'''
+
+CLAWBOT_COMMAND = '''[[commands]]
+name = "clawbot"
+description = "VELA: guarded Codex bridge through intent router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" /CODEX {{args}}"
+work_dir = "C:/Users/Admin/Desktop/CC-WECHAT"
+
+'''
+
+VELA_COMMAND = '''[[commands]]
+name = "vela"
+description = "VELA: guarded Codex bridge through intent router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" /CODEX {{args}}"
+work_dir = "C:/Users/Admin/Desktop/CC-WECHAT"
+
+'''
+
+VELA_TALK_COMMAND = '''[[commands]]
+name = "vela-talk"
+description = "VELA guarded persona interaction through intent router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
 work_dir = "C:/Users/Admin/Desktop/CC-WECHAT"
 
 '''
 
 PING_ALIAS = '''[[aliases]]
 name = "VELA"
-command = "/vela-ping"
+command = "/vela-router VELA"
+
+'''
+
+STATUS_ALIAS = '''[[aliases]]
+name = "状态"
+command = "/vela-router Codex 状态查询"
+
+'''
+
+PROJECT_ALIAS = '''[[aliases]]
+name = "项目"
+command = "/vela-router Codex 项目进展"
+
+'''
+
+DIALOGUE_SUMMARY_ALIAS = '''[[aliases]]
+name = "对话"
+command = "/vela-router Codex 对话摘要"
+
+'''
+
+CODEX_ALIAS = '''[[aliases]]
+name = "/CODEX"
+command = "/vela-router /CODEX"
+
+'''
+
+CODEX_LOWER_ALIAS = '''[[aliases]]
+name = "/codex"
+command = "/vela-router /CODEX"
 
 '''
 
 VOICE_ALIAS = '''[[aliases]]
 name = "语气"
-command = "/vela-personality voice"
+command = "/vela-router 语气"
 
 '''
 
 PROBE_ALIAS = '''[[aliases]]
 name = "压测"
-command = "/vela-personality probe"
+command = "/vela-router 压测"
 
 '''
 
 LITMUS_ALIAS = '''[[aliases]]
 name = "真人压测"
-command = "/vela-personality litmus"
+command = "/vela-router 真人压测"
 
 '''
 
 LEARN_ALIAS = '''[[aliases]]
 name = "学习"
-command = "/vela-personality learn"
+command = "/vela-router 学习"
 
 '''
 
 PROFILE_ALIAS = '''[[aliases]]
 name = "画像"
-command = "/vela-personality profile"
+command = "/vela-router 画像"
 
 '''
 
 DIALOGUE_ALIAS = '''[[aliases]]
 name = "对白"
-command = "/vela-personality samples"
+command = "/vela-router 对白"
 
 '''
 
 MATERIAL_ALIAS = '''[[aliases]]
 name = "素材"
-command = "/vela-personality material"
+command = "/vela-router 素材"
 
 '''
 
 QUALITY_ALIAS = '''[[aliases]]
 name = "质检"
-command = "/vela-personality audit"
+command = "/vela-router 质检"
 
 '''
 
 LATEST_QUALITY_ALIAS = '''[[aliases]]
 name = "最近质检"
-command = "/vela-personality audit-last"
+command = "/vela-router 最近质检"
 
 '''
 
 PERSONALITY_COMMAND = '''[[commands]]
 name = "vela-personality"
 description = "VELA persona and growth notes"
-exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_personality.py\\" {{args:status}}"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" persona {{args:status}}"
+work_dir = "C:/Users/Admin/Desktop/CC-WECHAT"
+
+'''
+
+DAILY_COMMAND = '''[[commands]]
+name = "vela-daily-briefing"
+description = "VELA overnight intelligence briefing through intent router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" daily-briefing"
 work_dir = "C:/Users/Admin/Desktop/CC-WECHAT"
 
 '''
@@ -106,6 +168,8 @@ work_dir = "C:/Users/Admin/Desktop/CC-WECHAT"
 '''
 
 ROUTER_ALIASES = {
+    "人格": "/vela-router 人格",
+    "成长": "/vela-router 成长",
     "你好VELA": "/vela-router 你好 VELA",
     "你好 VELA": "/vela-router 你好 VELA",
     "你好，VELA": "/vela-router 你好 VELA",
@@ -481,10 +545,19 @@ def update_config() -> None:
     backup(CONFIG)
     contract = load_voice_contract()
     text = CONFIG.read_text(encoding="utf-8")
+    text = upsert_block(text, "clawbot", CLAWBOT_COMMAND, "commands")
+    text = upsert_block(text, "vela", VELA_COMMAND, "commands")
+    text = upsert_block(text, "vela-talk", VELA_TALK_COMMAND, "commands")
     text = upsert_block(text, "vela-ping", PING_COMMAND, "commands")
     text = upsert_block(text, "vela-personality", PERSONALITY_COMMAND, "commands")
+    text = upsert_block(text, "vela-daily-briefing", DAILY_COMMAND, "commands")
     text = upsert_block(text, "vela-router", ROUTER_COMMAND, "commands")
     text = upsert_block(text, "VELA", PING_ALIAS, "aliases")
+    text = upsert_block(text, "状态", STATUS_ALIAS, "aliases")
+    text = upsert_block(text, "项目", PROJECT_ALIAS, "aliases")
+    text = upsert_block(text, "对话", DIALOGUE_SUMMARY_ALIAS, "aliases")
+    text = upsert_block(text, "/CODEX", CODEX_ALIAS, "aliases")
+    text = upsert_block(text, "/codex", CODEX_LOWER_ALIAS, "aliases")
     text = upsert_block(text, "语气", VOICE_ALIAS, "aliases")
     text = upsert_block(text, "压测", PROBE_ALIAS, "aliases")
     text = upsert_block(text, "真人压测", LITMUS_ALIAS, "aliases")

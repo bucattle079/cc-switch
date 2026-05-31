@@ -8,8 +8,8 @@ CONFIG = Path(r"C:\Users\Admin\.cc-connect\config.toml")
 
 DAILY_COMMAND = '''[[commands]]
 name = "vela-daily-briefing"
-description = "VELA overnight intelligence briefing via local UTF-8 sender"
-exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_daily_briefing.py\\""
+description = "VELA overnight intelligence briefing through intent router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" daily-briefing"
 work_dir = "C:/Users/Admin/Desktop/CC-WECHAT"
 
 '''

@@ -71,26 +71,22 @@ class VelaSkillTextTests(unittest.TestCase):
         text = CONFIG.read_text(encoding="utf-8")
 
         self.assertIn('name = "vela-talk"', text)
-        self.assertIn("如果 USER_MESSAGE 为空", text)
-        self.assertIn("空白也算为空", text)
-        self.assertIn("多一个字都算失败", text)
+        data = tomllib.loads(text)
+        commands = {item["name"]: item for item in data.get("commands", [])}
+        self.assertIn("vela_router.py", commands["vela-talk"]["exec"])
+        self.assertIn("{{args:VELA}}", commands["vela-talk"]["exec"])
+        self.assertNotIn("prompt", commands["vela-talk"])
         self.assertIn('name = "/VELA"\ncommand = "/vela-router VELA"', text)
         self.assertNotIn('name = "VELA"\ncommand = "/vela-talk"', text)
 
-    def test_exact_vela_expands_to_empty_user_message(self):
-        text = CONFIG.read_text(encoding="utf-8")
-        prompt_match = re.search(
-            r'name = "vela-talk".*?prompt = """\n(.*?)\n"""',
-            text,
-            re.S,
-        )
-        self.assertIsNotNone(prompt_match)
+    def test_vela_talk_defaults_to_router_vela_message(self):
+        data = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+        commands = {item["name"]: item for item in data.get("commands", [])}
+        exec_line = commands["vela-talk"]["exec"]
 
-        expanded = prompt_match.group(1).replace("{{args}}", "")
-
-        self.assertIn("USER_MESSAGE=\n\nHard rules:", expanded)
-        self.assertIn("空消息输出契约", expanded)
-        self.assertIn("在。不是报到，是校准。今天磨哪块：判断、执行、记忆，还是语气？", expanded)
+        self.assertIn("vela_router.py", exec_line)
+        self.assertIn("{{args:VELA}}", exec_line)
+        self.assertNotIn("USER_MESSAGE", exec_line)
 
     def test_wechat_entrypoint_alias_contracts(self):
         data = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
@@ -105,27 +101,40 @@ class VelaSkillTextTests(unittest.TestCase):
 
         self.assertEqual(aliases["VELA"], "/vela-router VELA")
         self.assertEqual(aliases["/VELA"], "/vela-router VELA")
-        self.assertEqual(aliases["人格"], "/vela-personality")
-        self.assertEqual(aliases["成长"], "/vela-personality growth")
-        self.assertEqual(aliases["学习"], "/vela-personality learn")
-        self.assertEqual(aliases["画像"], "/vela-personality profile")
-        self.assertEqual(aliases["对白"], "/vela-personality samples")
-        self.assertEqual(aliases["语气"], "/vela-personality voice")
-        self.assertEqual(aliases["压测"], "/vela-personality probe")
-        self.assertEqual(aliases["素材"], "/vela-personality material")
-        self.assertEqual(aliases["质检"], "/vela-personality audit")
-        self.assertEqual(aliases["最近质检"], "/vela-personality audit-last")
-        self.assertEqual(aliases["/CODEX"], "/vela codex")
-        self.assertEqual(aliases["/codex"], "/vela codex")
+        self.assertEqual(aliases["人格"], "/vela-router 人格")
+        self.assertEqual(aliases["成长"], "/vela-router 成长")
+        self.assertEqual(aliases["学习"], "/vela-router 学习")
+        self.assertEqual(aliases["画像"], "/vela-router 画像")
+        self.assertEqual(aliases["对白"], "/vela-router 对白")
+        self.assertEqual(aliases["语气"], "/vela-router 语气")
+        self.assertEqual(aliases["压测"], "/vela-router 压测")
+        self.assertEqual(aliases["素材"], "/vela-router 素材")
+        self.assertEqual(aliases["质检"], "/vela-router 质检")
+        self.assertEqual(aliases["最近质检"], "/vela-router 最近质检")
+        self.assertEqual(aliases["/CODEX"], "/vela-router /CODEX")
+        self.assertEqual(aliases["/codex"], "/vela-router /CODEX")
+        self.assertEqual(aliases["状态"], "/vela-router Codex 状态查询")
+        self.assertEqual(aliases["项目"], "/vela-router Codex 项目进展")
+        self.assertEqual(aliases["对话"], "/vela-router Codex 对话摘要")
 
         commands = {item["name"]: item for item in data.get("commands", [])}
-        self.assertIn("clawbot_codex_console.py", commands["vela"]["exec"])
-        self.assertIn("{{args:status}}", commands["vela"]["exec"])
+        self.assertIn("vela_router.py", commands["clawbot"]["exec"])
+        self.assertIn("/CODEX", commands["clawbot"]["exec"])
+        self.assertIn("vela_router.py", commands["vela"]["exec"])
+        self.assertIn("/CODEX", commands["vela"]["exec"])
         self.assertIn("vela-ping", commands)
-        self.assertIn("vela_ping.py", commands["vela-ping"]["exec"])
+        self.assertIn("vela_router.py", commands["vela-ping"]["exec"])
+        self.assertIn("VELA", commands["vela-ping"]["exec"])
+        self.assertNotIn("vela_ping.py", commands["vela-ping"]["exec"])
         self.assertNotIn("codex", commands["vela-ping"]["exec"].lower())
         self.assertIn("vela-personality", commands)
-        self.assertIn("vela_personality.py", commands["vela-personality"]["exec"])
+        self.assertIn("vela_router.py", commands["vela-personality"]["exec"])
+        self.assertIn("{{args:status}}", commands["vela-personality"]["exec"])
+        self.assertNotIn("vela_personality.py", commands["vela-personality"]["exec"])
+        self.assertIn("vela-daily-briefing", commands)
+        self.assertIn("vela_router.py", commands["vela-daily-briefing"]["exec"])
+        self.assertIn("daily-briefing", commands["vela-daily-briefing"]["exec"])
+        self.assertNotIn("vela_daily_briefing.py", commands["vela-daily-briefing"]["exec"])
         self.assertIn("vela-router", commands)
         self.assertIn("vela_router.py", commands["vela-router"]["exec"])
 
@@ -184,56 +193,22 @@ class VelaSkillTextTests(unittest.TestCase):
         self.assertIn("do not pad with noise", text)
 
     def test_vela_talk_prompt_supports_growth_conversation(self):
-        text = CONFIG.read_text(encoding="utf-8")
-        prompt_match = re.search(
-            r'name = "vela-talk".*?prompt = """\n(.*?)\n"""',
-            text,
-            re.S,
-        )
-        self.assertIsNotNone(prompt_match)
-        prompt = prompt_match.group(1)
+        data = tomllib.loads(CONFIG.read_text(encoding="utf-8"))
+        commands = {item["name"]: item for item in data.get("commands", [])}
 
-        self.assertIn("非空 USER_MESSAGE 是对话校准", prompt)
-        self.assertIn("临时成长记录", prompt)
-        self.assertIn("长期记忆", prompt)
+        self.assertIn("vela-talk", commands)
+        self.assertIn("vela_router.py", commands["vela-talk"]["exec"])
+        self.assertIn("{{args:VELA}}", commands["vela-talk"]["exec"])
 
     def test_vela_talk_prompt_is_self_contained_and_non_mechanical(self):
         text = CONFIG.read_text(encoding="utf-8")
-        prompt_match = re.search(
-            r'name = "vela-talk".*?prompt = """\n(.*?)\n"""',
-            text,
-            re.S,
-        )
-        self.assertIsNotNone(prompt_match)
-        prompt = prompt_match.group(1)
+        data = tomllib.loads(text)
+        commands = {item["name"]: item for item in data.get("commands", [])}
 
-        self.assertNotIn("Use the VELA persona", prompt)
-        self.assertNotIn(".codex/skills", prompt)
-        self.assertNotIn("skill", prompt.lower())
-        self.assertIn("输出只给微信正文", prompt)
-        self.assertIn("少解释身份，多给判断", prompt)
-        self.assertIn("先判断，再动作", prompt)
-        self.assertIn("冷幽默", prompt)
-        self.assertIn("长期后果", prompt)
-        self.assertIn("人物质感", prompt)
-        self.assertIn("烟火气", prompt)
-        self.assertIn("执行力和果决力", prompt)
-        self.assertIn("思维和韧劲", prompt)
-        self.assertIn("性格语气", prompt)
-        self.assertIn("判断先于解释", prompt)
-        self.assertIn("冷幽默只切坏逻辑", prompt)
-        self.assertIn("每一行都要有用", prompt)
-        self.assertEqual(prompt.count("判断先于解释，动作先于姿态。"), 1)
-        self.assertIn("不要把所有回复压成同一个模板", prompt)
-        self.assertIn("补充人物素材", prompt)
-        self.assertIn("先蒸馏，不复读", prompt)
-        self.assertEqual(prompt.count("补充人物素材"), 1)
-        self.assertEqual(prompt.count("用户补充人物素材"), 1)
-        self.assertIn("用户疲惫", prompt)
-        self.assertIn("计划很虚", prompt)
-        self.assertIn("嫌你机械", prompt)
-        self.assertIn("战略判断", prompt)
-        self.assertNotIn("。；", prompt)
+        self.assertNotIn("USER_MESSAGE=", text)
+        self.assertNotIn("Hard rules:", text)
+        self.assertNotIn("Use the VELA persona", text)
+        self.assertIn("vela_router.py", commands["vela-talk"]["exec"])
 
     def test_plain_vela_is_handled_by_agent_instructions(self):
         text = AGENTS.read_text(encoding="utf-8")
