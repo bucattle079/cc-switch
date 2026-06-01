@@ -1340,16 +1340,30 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("raw payload", result.text.lower())
         self.assertNotIn("diff --git", result.text)
 
-    def test_deep_analysis_surfaces_experience_memory_judgement(self):
+    def test_deep_analysis_hides_memory_mechanics_from_frontstage(self):
         product = load_product_module()
 
         result = product.run_layered_response(
             "地狱验尸一下 VELA 为什么不智能",
             intent="deep_analysis",
+            reply_adapter=product.FallbackReplyAdapter(),
         )
 
-        self.assertIn("经验沉淀判断", result.text)
-        self.assertIn("最短修正路径", result.text)
+        self.assertIn("根因", result.text)
+        self.assertTrue(any(token in result.text for token in ["修正路径", "下一步"]))
+        for internal in [
+            "经验沉淀判断",
+            "候选经验",
+            "长期记忆",
+            "事实包",
+            "router",
+            "context",
+            "reply engine",
+            "fallback",
+            "last_response",
+            "adapter",
+        ]:
+            self.assertNotIn(internal, result.text)
 
     def test_session_notes_are_persisted_locally(self):
         product = load_product_module()

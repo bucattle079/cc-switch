@@ -209,6 +209,20 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertNotIn("你表达差", result.text)
         self.assertNotIn("我漏掉", result.text)
 
+    def test_deep_analysis_variants_hide_raw_internal_layer_names(self):
+        engine = load_reply_engine()
+        variants = engine.FallbackReplyAdapter.DEEP_VARIANTS
+        forbidden = ["router", "context", "reply engine", "fallback", "last_response", "adapter", "persona", "GPT"]
+
+        self.assertGreaterEqual(len(variants), 3)
+        for text in variants:
+            with self.subTest(text=text):
+                self.assertIn("K", text)
+                self.assertTrue(any(token in text for token in ["根因", "验尸"]))
+                self.assertTrue(any(token in text for token in ["修正路径", "下一步"]))
+                for token in forbidden:
+                    self.assertNotIn(token, text)
+
     def test_openai_adapter_failure_logs_internally_and_falls_back(self):
         engine = load_reply_engine()
         context = engine.ReplyContext(message="你好", intent="normal_chat")

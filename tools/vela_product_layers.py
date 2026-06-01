@@ -1576,13 +1576,12 @@ def analysis_layer(message: str, intent: str, codex_summary: str = "") -> Analys
             intent=intent,
             facts=[f"用户要求深度验尸：{text or '未给出具体对象'}"],
             judgment="先找结构性故障，再分离噪音、风险和最短修正路径。",
-            risks=["没有事实包就直接下结论，会把锋利变成表演。"],
+            risks=["没有证据边界就直接下结论，会把锋利变成表演。"],
             next_actions=[
-                "列问题",
-                "列风险",
+                "列出误判点",
+                "标出上下文断点",
                 "给最短修正路径",
-                "经验沉淀判断：反复出现的路由、记忆、语气或工具边界问题写入候选经验；不把一次吐槽直接固化为长期记忆。",
-                "标出需要验证的数据",
+                "用真实场景复测下一轮是否改变",
             ],
             confidence="medium",
         )
