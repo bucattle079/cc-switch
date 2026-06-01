@@ -24,6 +24,7 @@ Adapter priority is:
 
 Daily dialogue should use DeepSeek when `DEEPSEEK_API_KEY` is present. Command/Codex adapters are fallback or engineering lanes, not the default ordinary chat brain.
 Except for Codex-related instructions, ordinary WeChat-facing dialogue should go through the DeepSeek dialogue adapter when configured. Hard status lanes are stricter: freshness status, market refresh state, and weather source boundaries keep local foreground wording so a model cannot blur cache, realtime availability, or unavailable data.
+The local cc-connect startup script maps canonical `DEEPSEEK_MODEL` and `DEEPSEEK_BASE_URL` into the legacy `VELA_DEEPSEEK_*` aliases for compatibility; the canonical names stay authoritative.
 
 ## Weather
 

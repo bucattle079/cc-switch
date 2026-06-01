@@ -10,6 +10,7 @@ PERSONALITY = Path(r"C:\Users\Admin\.codex\skills\vela-personality\SKILL.md")
 DAILY = Path(r"C:\Users\Admin\.codex\skills\vela-daily-briefing\SKILL.md")
 AGENTS = Path(r"C:\Users\Admin\Desktop\AGENTS.md")
 CONFIG = Path(r"C:\Users\Admin\.cc-connect\config.toml")
+CC_CONNECT_START = Path(r"C:\Users\Admin\.cc-connect\start-cc-connect.ps1")
 CC_CONNECT_I18N = Path(r"C:\Users\Admin\Desktop\cc-connect\core\i18n.go")
 VELA_PING = Path(r"C:\Users\Admin\Desktop\CC-WECHAT\tools\vela_ping.py")
 VELA_PERSONALITY_SCRIPT = Path(r"C:\Users\Admin\Desktop\CC-WECHAT\tools\vela_personality.py")
@@ -141,6 +142,17 @@ class VelaSkillTextTests(unittest.TestCase):
         project = next(item for item in data.get("projects", []) if item["name"] == "VELA")
         self.assertTrue(project["intent_router"]["enabled"])
         self.assertIn("vela_router.py", project["intent_router"]["command"])
+
+    def test_cc_connect_startup_uses_canonical_deepseek_env_names(self):
+        text = CC_CONNECT_START.read_text(encoding="utf-8")
+
+        self.assertIn('GetEnvironmentVariable("DEEPSEEK_API_KEY", "User")', text)
+        self.assertIn('GetEnvironmentVariable("DEEPSEEK_MODEL", "User")', text)
+        self.assertIn('GetEnvironmentVariable("DEEPSEEK_BASE_URL", "User")', text)
+        self.assertRegex(text, r"\$env:DEEPSEEK_MODEL\s*=")
+        self.assertRegex(text, r"\$env:DEEPSEEK_BASE_URL\s*=")
+        self.assertIn("$env:VELA_DEEPSEEK_MODEL = $env:DEEPSEEK_MODEL", text)
+        self.assertIn("$env:VELA_DEEPSEEK_BASE_URL = $env:DEEPSEEK_BASE_URL", text)
 
     def test_vela_ping_is_fast_plain_text_calibration(self):
         completed = subprocess.run(
