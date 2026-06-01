@@ -96,7 +96,8 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         self.assertEqual(reply, "K model weather")
         self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
-        self.assertIn("不调用外部天气 API", run.call_args.kwargs["supporting_context"])
+        self.assertIn("实时源：未接入", run.call_args.kwargs["supporting_context"])
+        self.assertIn("不编实时温度", run.call_args.kwargs["supporting_context"])
         self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
 
     def test_market_reply_uses_local_boundary_adapter_with_cache_context(self):
@@ -148,6 +149,26 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertNotIn("CODEX", reply)
         self.assertNotIn("weather_query", reply)
         self.assertNotIn("debug", reply.lower())
+
+    def test_weather_reply_uses_natural_boundary_for_real_trip_question(self):
+        router = load_module(ROUTER, "vela_router")
+
+        reply = router.render_weather_reply("明天晋江会不会下雨，能不能出门")
+
+        self.assertIn("K，晋江", reply)
+        self.assertIn("实时源：未接入", reply)
+        self.assertIn("不编实时温度", reply)
+        self.assertNotIn("天气线", reply)
+        self.assertNotIn("模型仅生成", reply)
+        self.assertNotIn("weather_query", reply)
+        self.assertNotIn("晋江会不会下雨", reply)
+
+    def test_weather_location_extraction_handles_trip_actions(self):
+        router = load_module(ROUTER, "vela_router")
+
+        self.assertEqual(router.weather_location_from_text("明天晋江会不会下雨，能不能出门"), "晋江")
+        self.assertEqual(router.weather_location_from_text("今天纽约冷吗，出门要不要加外套"), "纽约")
+        self.assertEqual(router.weather_location_from_text("明天晋江要见客户，天气不准也给我出门风险"), "晋江")
 
     def test_daily_info_routes_to_deepseek_dialogue_lane(self):
         router = load_module(ROUTER, "vela_router")
