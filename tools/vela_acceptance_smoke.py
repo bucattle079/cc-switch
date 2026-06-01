@@ -358,6 +358,27 @@ def latest_inbound_message(log_path: Path) -> dict[str, Any]:
     return {"timestamp": latest.isoformat(), "found": True}
 
 
+def weixin_poll_state(vela_project: dict[str, Any], *, max_age_minutes: int = 15) -> dict[str, Any]:
+    platforms = [item for item in vela_project.get("platforms", []) if isinstance(item, dict)]
+    weixin = next((item for item in platforms if item.get("type") == "weixin"), {})
+    options = weixin.get("options") if isinstance(weixin.get("options"), dict) else {}
+    state_dir_raw = str(options.get("state_dir") or "").strip()
+    if not state_dir_raw:
+        return runtime_check(False, "weixin state_dir missing")
+    state_dir = Path(state_dir_raw)
+    poll_file = state_dir / "get_updates.buf"
+    if not poll_file.exists():
+        return runtime_check(False, "weixin poll buffer missing")
+    try:
+        mtime = datetime.fromtimestamp(poll_file.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return runtime_check(False, "weixin poll buffer unreadable")
+    age_minutes = max(0.0, (datetime.now(timezone.utc) - mtime).total_seconds() / 60)
+    fresh = age_minutes <= max_age_minutes
+    detail = f"poll buffer {'fresh' if fresh else 'stale'}: {age_minutes:.1f}m"
+    return runtime_check(fresh, detail)
+
+
 def run_runtime_audit(
     *,
     cc_home: Path | None = None,
@@ -395,6 +416,7 @@ def run_runtime_audit(
     command_names = ("vela-router", "vela-talk")
     commands_ok = all("vela_router.py" in str((commands.get(name) or {}).get("exec") or "") for name in command_names)
     checks["commands"] = runtime_check(commands_ok, ", ".join(name for name in command_names if name in commands))
+    checks["weixin_poll_state"] = weixin_poll_state(vela_project)
 
     running = detect_cc_connect_process() if process_running is None else bool(process_running)
     checks["cc_connect_process"] = runtime_check(running, "running" if running else "not running")

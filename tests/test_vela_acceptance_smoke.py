@@ -345,6 +345,51 @@ timeout_seconds = 75
         self.assertIn("normal_chat", report["checks"]["router_command_dry_run"]["detail"])
         self.assertNotIn("DEEPSEEK_API_KEY", json.dumps(report, ensure_ascii=False))
 
+    def test_runtime_audit_reports_weixin_poll_state_without_leaking_cursor(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            (cc_home / "sessions").mkdir(parents=True)
+            state_dir = cc_home / "weixin" / "codex-wechat" / "bot"
+            state_dir.mkdir(parents=True)
+            (state_dir / "get_updates.buf").write_text("opaque-poll-cursor", encoding="utf-8")
+            (cc_home / "config.toml").write_text(
+                f"""
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args}}}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args:VELA}}}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+
+[[projects.platforms]]
+type = "weixin"
+
+[projects.platforms.options]
+state_dir = "{str(state_dir).replace("\\", "/")}"
+token = "test-token"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=True,
+                max_session_age_hours=9999,
+            )
+
+        self.assertTrue(report["checks"]["weixin_poll_state"]["ok"], report)
+        self.assertIn("poll buffer fresh", report["checks"]["weixin_poll_state"]["detail"])
+        self.assertNotIn("opaque-poll-cursor", json.dumps(report, ensure_ascii=False))
+
 
 if __name__ == "__main__":
     unittest.main()
