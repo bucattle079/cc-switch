@@ -767,6 +767,22 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("菜单", result.text)
         self.assertFalse(result.memory_candidate)
 
+    def test_pure_greeting_does_not_become_task_intake(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "你好 VELA",
+                intent="normal_chat",
+                log_dir=Path(tmp),
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+        self.assertIn("K", result.text)
+        self.assertLessEqual(len(result.text), 40)
+        self.assertTrue(any(token in result.text for token in ["在", "听着", "醒着"]))
+        for tasky in ["目标", "卡点", "开刀", "硌手", "混乱", "雾端", "菜单", "市场", "Codex"]:
+            self.assertNotIn(tasky, result.text)
+
     def test_fallback_reply_adapter_has_natural_variants(self):
         reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
         adapter = reply_engine.FallbackReplyAdapter()

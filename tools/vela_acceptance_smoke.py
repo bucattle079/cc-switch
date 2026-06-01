@@ -87,6 +87,17 @@ SINGLE_TURN_CASES = [
         "id": "normal_hello",
         "message": "你好 VELA",
         "expected_intent": "normal_chat",
+        "required_reply_tokens": ["在", "听着", "醒着"],
+        "forbidden_reply_tokens": ["目标", "卡点", "开刀", "硌手", "混乱", "雾端", "菜单", "市场", "Codex"],
+        "max_reply_chars": 40,
+    },
+    {
+        "id": "normal_plain_hello",
+        "message": "你好",
+        "expected_intent": "normal_chat",
+        "required_reply_tokens": ["在", "听着", "醒着"],
+        "forbidden_reply_tokens": ["目标", "卡点", "开刀", "硌手", "混乱", "雾端", "菜单", "市场", "Codex"],
+        "max_reply_chars": 40,
     },
     {
         "id": "normal_one_next_step",

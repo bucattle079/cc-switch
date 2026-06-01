@@ -380,6 +380,26 @@ class FallbackReplyAdapter(ReplyAdapter):
         "K，在。问候收到了。别急，先让脑子比情绪早到半步。",
     )
 
+    PURE_GREETING_MESSAGES = (
+        "你好",
+        "你好vela",
+        "你好 vela",
+        "在吗",
+        "在么",
+        "hello",
+        "hi",
+        "嗨",
+        "早",
+        "早上好",
+        "晚上好",
+    )
+
+    GREETING_VARIANTS = (
+        "K，在。今天先慢一点，你说。",
+        "K，在，我听着。",
+        "K，醒着。别急，你慢慢说。",
+    )
+
     CALIBRATED_NORMAL_VARIANTS = (
         "K，在。少菜单，直接看目标；把最硬的部分递过来，我负责切开。",
         "K，在。废话收短，直接给判断；你把卡点摆出来，别让它在雾里养肥。",
@@ -569,7 +589,16 @@ class FallbackReplyAdapter(ReplyAdapter):
             return self.CONTINUE_VARIANTS
         if has_style_feedback:
             return self.CALIBRATED_NORMAL_VARIANTS
+        if self._is_pure_greeting(context):
+            return self.GREETING_VARIANTS
         return self.NORMAL_VARIANTS
+
+    def _is_pure_greeting(self, context: ReplyContext) -> bool:
+        if context.intent != "normal_chat":
+            return False
+        compact = "".join(str(context.message or "").strip().lower().split())
+        compact = compact.replace("，", "").replace(",", "").replace("。", "").replace("！", "").replace("!", "")
+        return compact in {item.replace(" ", "") for item in self.PURE_GREETING_MESSAGES}
 
     def _is_listening_support(self, context: ReplyContext) -> bool:
         raw = " ".join(
