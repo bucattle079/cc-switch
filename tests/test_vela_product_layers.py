@@ -1144,6 +1144,95 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("美股", joined)
         self.assertIn("韩国", joined)
 
+    def test_confirming_latest_preference_candidate_promotes_it_without_frontstage_mechanics(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.run_layered_response(
+                "记住：以后市场分析默认先看A股、美股、韩国",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            result = product.run_layered_response(
+                "确认，把这条偏好固定下来",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+            confirmed_rows = [
+                json.loads(line)
+                for line in next(log_dir.glob("confirmed-preferences-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            candidate_rows = [
+                json.loads(line)
+                for line in next(log_dir.glob("memory-candidates-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            context = product.build_reply_context(
+                "今天市场怎么看",
+                intent="market_brief",
+                log_dir=log_dir,
+            )
+
+        self.assertFalse(result.memory_candidate)
+        self.assertEqual(len(candidate_rows), 1)
+        self.assertEqual(confirmed_rows[-1]["level"], "Confirmed User Preference")
+        self.assertTrue(confirmed_rows[-1]["confirmed"])
+        self.assertIn("A股", confirmed_rows[-1]["summary"])
+        self.assertIn("美股", confirmed_rows[-1]["summary"])
+        self.assertIn("韩国", confirmed_rows[-1]["summary"])
+        self.assertIn("固定", result.text)
+        self.assertIn("A股", result.text)
+        joined = " ".join(context.user_preferences)
+        self.assertIn("A股", joined)
+        self.assertNotIn("候选偏好", joined)
+        for internal in ["候选记忆", "候选类型", "schema", "jsonl"]:
+            self.assertNotIn(internal, result.text)
+
+    def test_confirming_latest_strategic_candidate_promotes_it_without_frontstage_schema(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.run_layered_response(
+                "记住：AugSun 长期目标是先跑通最小商业闭环",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            result = product.run_layered_response(
+                "确认，这条长期方向固定下来",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+            strategic_rows = [
+                json.loads(line)
+                for line in next(log_dir.glob("strategic-memory-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            context = product.build_reply_context(
+                "继续 AugSun 项目",
+                intent="project_assistant",
+                log_dir=log_dir,
+            )
+
+        self.assertFalse(result.memory_candidate)
+        self.assertEqual(strategic_rows[-1]["level"], "Strategic Memory")
+        self.assertEqual(strategic_rows[-1]["memory_type"], "project_goal")
+        self.assertTrue(strategic_rows[-1]["confirmed"])
+        self.assertIn("AugSun", strategic_rows[-1]["summary"])
+        self.assertIn("固定", result.text)
+        self.assertIn("AugSun", result.text)
+        strategic_context = " ".join(context.strategic_memories)
+        self.assertIn("AugSun", strategic_context)
+        self.assertNotIn("战略候选", strategic_context)
+        for internal in ["Strategic Memory Candidate", "候选类型", "schema", "jsonl"]:
+            self.assertNotIn(internal, result.text)
+
     def test_product_constants_preserve_market_weights_and_confirmed_schedule(self):
         product = load_product_module()
 

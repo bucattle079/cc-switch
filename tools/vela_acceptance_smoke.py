@@ -20,7 +20,7 @@ if str(ROOT / "tools") not in sys.path:
 
 import vela_router as router
 import vela_reply_engine as reply_engine
-from vela_product_layers import FallbackReplyAdapter, run_layered_response
+from vela_product_layers import FallbackReplyAdapter, build_reply_context, run_layered_response
 
 
 DEFAULT_CC_CONNECT_HOME = Path(os.environ.get("VELA_CC_CONNECT_HOME", r"C:\Users\Admin\.cc-connect"))
@@ -377,6 +377,19 @@ TWO_TURN_CASES = [
         "followup": "继续",
         "expected_intent": "normal_chat",
         "required_reply_tokens": ["少菜单", "多判断", "不摆路牌", "少解释"],
+    },
+]
+
+
+MEMORY_CONFIRMATION_CASES = [
+    {
+        "id": "memory_confirm_market_preference",
+        "setup": "记住：以后市场分析默认先看A股、美股、韩国",
+        "confirmation": "确认，把这条偏好固定下来",
+        "expected_intent": "memory_related",
+        "required_reply_tokens": ["固定", "A股"],
+        "forbidden_reply_tokens": ["候选记忆", "候选类型", "schema", "jsonl"],
+        "max_reply_chars": 180,
     },
 ]
 
@@ -1221,6 +1234,103 @@ def run_entrypoint_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> di
     }, started_at)
 
 
+def confirmed_preference_rows(log_dir: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for path in sorted(log_dir.glob("confirmed-preferences-*.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return rows
+
+
+def run_memory_confirmation_case(
+    case: dict[str, Any],
+    base_log_dir: Path,
+    *,
+    use_entrypoint: bool = False,
+) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    case_log_dir = base_log_dir / case["id"]
+    case_log_dir.mkdir(parents=True, exist_ok=True)
+    confirmation = case["confirmation"]
+
+    if use_entrypoint:
+        original_run = router.run_layered_response
+
+        def run_with_case_log(message: str, *args: Any, **kwargs: Any) -> Any:
+            kwargs.setdefault("log_dir", case_log_dir)
+            kwargs.setdefault("reply_adapter", FallbackReplyAdapter())
+            return original_run(message, *args, **kwargs)
+
+        router.run_layered_response = run_with_case_log
+        try:
+            router.reply_for(case["setup"])
+            intent = route_case(confirmation)
+            reply = router.reply_for(confirmation)
+        finally:
+            router.run_layered_response = original_run
+    else:
+        run_layered_response(
+            case["setup"],
+            intent="memory_related",
+            log_dir=case_log_dir,
+            reply_adapter=FallbackReplyAdapter(),
+        )
+        intent = route_case(confirmation)
+        result = run_layered_response(
+            confirmation,
+            intent=intent.name,
+            log_dir=case_log_dir,
+            reply_adapter=FallbackReplyAdapter(),
+        )
+        reply = result.text
+
+    rows = confirmed_preference_rows(case_log_dir)
+    context = build_reply_context("今天市场怎么看", intent="market_brief", log_dir=case_log_dir)
+    preference_context = " ".join(context.user_preferences)
+    confirmed_written = any(
+        row.get("confirmed") and all(token in str(row.get("summary") or "") for token in ("A股", "美股", "韩国"))
+        for row in rows
+    )
+    context_uses_confirmed = all(token in preference_context for token in ("A股", "美股", "韩国")) and "候选偏好" not in preference_context
+    constraints = output_constraints(reply, case)
+    leaks = find_leaks(reply)
+    route_ok = intent.name == case["expected_intent"]
+    required_ok = required_tokens_present(reply, case.get("required_reply_tokens"))
+    return attach_latency({
+        "id": case["id"],
+        "kind": "entrypoint_memory_confirmation" if use_entrypoint else "memory_confirmation",
+        "message": confirmation,
+        "setup": case["setup"],
+        "intent": intent.name,
+        "expected_intent": case["expected_intent"],
+        "market_allowed": intent.market_allowed,
+        "codex_allowed": intent.codex_allowed,
+        "side_effects_allowed": True,
+        "bridge_executed": False,
+        "reply_preview": preview(reply),
+        "latest_iteration_signal": latest_iteration_signal(case_log_dir),
+        "latest_quality_log": latest_quality_log(case_log_dir),
+        "confirmed_preference_written": confirmed_written,
+        "confirmed_preference_in_context": context_uses_confirmed,
+        "leaks": leaks,
+        **constraints,
+        "ok": (
+            route_ok
+            and required_ok
+            and confirmed_written
+            and context_uses_confirmed
+            and constraints["max_reply_chars_ok"]
+            and not constraints["forbidden_reply_tokens_found"]
+            and not leaks
+        ),
+    }, started_at)
+
+
 def run_smoke_suite(
     log_dir: Path | None = None,
     *,
@@ -1243,9 +1353,11 @@ def run_smoke_suite(
             single_cases.extend(ENTRYPOINT_ONLY_CASES)
             cases = [run_entrypoint_single_case(case, base_log_dir) for case in single_cases]
             cases.extend(run_entrypoint_two_turn_case(case, base_log_dir) for case in TWO_TURN_CASES)
+            cases.extend(run_memory_confirmation_case(case, base_log_dir, use_entrypoint=True) for case in MEMORY_CONFIRMATION_CASES)
         else:
             cases = [run_single_case(case, base_log_dir) for case in single_cases]
             cases.extend(run_two_turn_case(case, base_log_dir) for case in TWO_TURN_CASES)
+            cases.extend(run_memory_confirmation_case(case, base_log_dir) for case in MEMORY_CONFIRMATION_CASES)
         failed = [case["id"] for case in cases if not case["ok"]]
         return {
             "ok": not failed,

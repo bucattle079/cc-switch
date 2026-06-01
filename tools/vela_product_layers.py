@@ -686,6 +686,10 @@ def latest_learning_rows(pattern: str, log_dir: Path | None = None, limit: int =
     return rows[-limit:]
 
 
+def normalize_memory_summary(value: str) -> str:
+    return " ".join(str(value or "").split())
+
+
 RELATIONSHIP_REPAIR_MARKERS = (
     "你没懂我",
     "没懂我",
@@ -861,6 +865,13 @@ def _is_identity_core_question(text: str) -> bool:
 
 def _is_explicit_memory_instruction(text: str) -> bool:
     return _has_any(text, ("记住", "以后", "默认", "别忘", "学习一下", "沉淀"))
+
+
+def _is_memory_confirmation_instruction(text: str) -> bool:
+    compact = " ".join(str(text or "").split())
+    if not _has_any(compact, ("确认", "固定", "就这么记", "可以记", "正式记")):
+        return False
+    return _has_any(compact, ("这条", "偏好", "长期方向", "长期目标", "固定下来"))
 
 
 def interpret_need(message: str, intent: str) -> NeedInterpretation:
@@ -1093,7 +1104,7 @@ def interpret_user_need(message: str, intent: str) -> str:
 def strategic_memory_summaries(log_dir: Path | None = None, limit: int = 4) -> list[str]:
     summaries: list[str] = []
     for row in latest_learning_rows("strategic-memory-*.jsonl", log_dir=log_dir, limit=limit):
-        summary = str(row.get("summary") or "").strip()
+        summary = normalize_memory_summary(str(row.get("summary") or ""))
         memory_type = str(row.get("memory_type") or "").strip()
         if summary:
             summaries.append(f"{memory_type}：{summary}" if memory_type else summary)
@@ -1102,11 +1113,16 @@ def strategic_memory_summaries(log_dir: Path | None = None, limit: int = 4) -> l
 
 def strategic_candidate_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
     summaries: list[str] = []
+    confirmed = {
+        normalize_memory_summary(str(row.get("summary") or ""))
+        for row in latest_learning_rows("strategic-memory-*.jsonl", log_dir=log_dir, limit=12)
+        if row.get("summary")
+    }
     for row in latest_learning_rows("memory-candidates-*.jsonl", log_dir=log_dir, limit=limit * 3):
         if row.get("sensitive") or str(row.get("classification") or "") != "strategic_goal":
             continue
-        summary = str(row.get("summary") or "").strip()
-        if not summary:
+        summary = normalize_memory_summary(str(row.get("summary") or ""))
+        if not summary or summary in confirmed:
             continue
         memory_type = str(row.get("strategic_memory_type") or "strategic_goal").strip()
         summaries.append(f"战略候选（未确认，{memory_type}）：{summary}"[:360])
@@ -1271,16 +1287,20 @@ def build_reply_context(
         + interaction_diagnostic_summaries(log_dir=log_dir, limit=3)
         + session_note_summaries(log_dir=log_dir, limit=3)
     )
-    preferences = [
-        str(row.get("summary"))
+    confirmed_preference_summaries = [
+        normalize_memory_summary(str(row.get("summary") or ""))
         for row in latest_learning_rows("confirmed-preferences-*.jsonl", log_dir=log_dir, limit=8)
         if row.get("summary")
     ]
+    confirmed_preference_set = set(confirmed_preference_summaries)
+    preferences = [summary for summary in confirmed_preference_summaries if summary]
     for row in latest_learning_rows("memory-candidates-*.jsonl", log_dir=log_dir, limit=8):
         if row.get("sensitive") or row.get("requires_confirmation"):
             continue
         classification = str(row.get("classification") or "").strip()
-        summary = str(row.get("summary") or "").strip()
+        summary = normalize_memory_summary(str(row.get("summary") or ""))
+        if summary in confirmed_preference_set:
+            continue
         if classification in {
             "style_feedback",
             "relationship_repair",
@@ -1439,6 +1459,14 @@ def evaluate_learning(message: str, intent: str) -> LearningEvaluation:
             should_record_candidate=False,
             reason="No explicit memory or feedback trigger.",
         )
+    if intent == "memory_related" and _is_memory_confirmation_instruction(message):
+        return LearningEvaluation(
+            should_record_candidate=False,
+            classification="memory_confirmation",
+            should_affect_next_reply=False,
+            promote_to_strategic_memory=False,
+            reason="Explicit confirmation promotes the latest candidate instead of creating a new candidate.",
+        )
     if intent == "memory_related" and _is_identity_core_question(message) and not _is_explicit_memory_instruction(message):
         return LearningEvaluation(
             should_record_candidate=False,
@@ -1523,6 +1551,48 @@ def record_strategic_memory(
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     return path
+
+
+def latest_promotable_memory_candidate(log_dir: Path | None = None) -> dict | None:
+    for row in reversed(latest_learning_rows("memory-candidates-*.jsonl", log_dir=log_dir, limit=16)):
+        if row.get("sensitive"):
+            continue
+        summary = normalize_memory_summary(str(row.get("summary") or ""))
+        if not summary:
+            continue
+        classification = str(row.get("classification") or "").strip()
+        level = str(row.get("level") or "").strip()
+        if classification == "strategic_goal" or level == "Strategic Memory Candidate":
+            return {**row, "summary": summary}
+        if classification in {
+            "style_feedback",
+            "relationship_repair",
+            "behavior_preference",
+            "market_focus",
+            "project_state",
+            "preference",
+        }:
+            return {**row, "summary": summary}
+    return None
+
+
+def promote_latest_memory_candidate(log_dir: Path | None = None) -> dict | None:
+    candidate = latest_promotable_memory_candidate(log_dir=log_dir)
+    if not candidate:
+        return None
+    summary = normalize_memory_summary(str(candidate.get("summary") or ""))
+    classification = str(candidate.get("classification") or "").strip()
+    level = str(candidate.get("level") or "").strip()
+    if classification == "strategic_goal" or level == "Strategic Memory Candidate":
+        record_strategic_memory(
+            summary,
+            memory_type=str(candidate.get("strategic_memory_type") or "decision_principle"),
+            confirmed_by_user=True,
+            log_dir=log_dir,
+        )
+        return {**candidate, "promoted_to": "strategic_memory"}
+    record_confirmed_preference(summary, confirmed_by_user=True, log_dir=log_dir)
+    return {**candidate, "promoted_to": "confirmed_preference"}
 
 
 def render_vela_persona(packet: AnalysisPacket) -> str:
@@ -1620,6 +1690,16 @@ def render_memory_reply(message: str) -> str:
     if candidate["classification"] in {"market_focus", "behavior_preference", "project_state"}:
         return f"收到。先按待确认偏好处理：{summary}。你确认后我再固定。"
     return f"收到。先按待确认经验处理：{summary}。后续我会用表现验证，不急着写死。"
+
+
+def render_memory_confirmation_reply(message: str, log_dir: Path | None = None) -> str:
+    candidate = promote_latest_memory_candidate(log_dir=log_dir)
+    if not candidate:
+        return "K，我没找到上一条可固定的偏好。把要固定的内容重发一次，我只记明确内容。"
+    summary = normalize_memory_summary(str(candidate.get("summary") or ""))
+    if str(candidate.get("promoted_to") or "") == "strategic_memory":
+        return f"K，固定为长期方向：{summary}。后续推进按这条校准。"
+    return f"K，固定。以后按这条偏好处理：{summary}。"
 
 
 def render_world_brief_reply() -> str:
@@ -1764,14 +1844,21 @@ def run_layered_response(
 
     context = build_reply_context(message, intent=intent, log_dir=log_dir, supporting_context=supporting_context)
 
-    if learning.should_record_candidate:
-        record_memory_candidate(message, log_dir=log_dir)
-    rendered, adapter_name, adapter_used_api = engine_text_for_intent(
-        context,
-        adapter=reply_adapter,
-        codex_summary=codex_summary,
-        foreground_lane=selection.foreground_lane,
-    )
+    if intent == "memory_related" and _is_memory_confirmation_instruction(message):
+        rendered, adapter_name, adapter_used_api = (
+            render_memory_confirmation_reply(message, log_dir=log_dir),
+            "local_memory_confirm",
+            False,
+        )
+    else:
+        if learning.should_record_candidate:
+            record_memory_candidate(message, log_dir=log_dir)
+        rendered, adapter_name, adapter_used_api = engine_text_for_intent(
+            context,
+            adapter=reply_adapter,
+            codex_summary=codex_summary,
+            foreground_lane=selection.foreground_lane,
+        )
     rendered = avoid_repeated_reply(rendered, context)
     issues = dialogue_quality_issues(rendered)
 

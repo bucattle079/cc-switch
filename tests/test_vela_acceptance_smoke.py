@@ -61,6 +61,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "project_minimum_loop",
             "deep_root_cause_not_mysticism",
             "style_feedback_say_human",
+            "memory_confirm_market_preference",
             "feedback_smarter_then_hello",
             "feedback_misread_then_hello",
             "feedback_push_then_continue",
@@ -89,6 +90,12 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         codex = next(case for case in report["cases"] if case["id"] == "codex_status_route_only")
         self.assertFalse(codex["side_effects_allowed"])
         self.assertFalse(codex["bridge_executed"])
+
+        memory_confirm = next(case for case in report["cases"] if case["id"] == "memory_confirm_market_preference")
+        self.assertTrue(memory_confirm["confirmed_preference_written"], memory_confirm)
+        self.assertIn("A股", memory_confirm["reply_preview"])
+        self.assertNotIn("候选记忆", memory_confirm["reply_preview"])
+        self.assertNotIn("schema", memory_confirm["reply_preview"])
 
     def test_smoke_runner_cli_json_is_machine_readable(self):
         with tempfile.TemporaryDirectory() as tmp:
