@@ -662,6 +662,24 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("quality_issues", row)
         self.assertIsInstance(row["quality_issues"], list)
 
+    def test_context_builder_reads_interaction_diagnostic_signals(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            product.run_layered_response(
+                "\u4f60\u6ca1\u61c2\u6211",
+                intent="style_feedback",
+                log_dir=Path(tmp),
+            )
+            context = product.build_reply_context(
+                "\u4f60\u597d",
+                intent="normal_chat",
+                log_dir=Path(tmp),
+            )
+
+        self.assertIn("\u4e92\u52a8\u8bca\u65ad", context.recent_summary)
+        self.assertIn("meaning_misread", context.recent_summary)
+        self.assertIn("\u5019\u9009\u8bb0\u5fc6", context.recent_summary)
+
     def test_quiet_support_reply_is_short_and_low_burden(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:

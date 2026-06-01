@@ -1040,6 +1040,28 @@ def session_note_summaries(log_dir: Path | None = None, limit: int = 3) -> list[
     return summaries[-limit:]
 
 
+def interaction_diagnostic_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
+    summaries: list[str] = []
+    for row in latest_learning_rows("interaction-*.jsonl", log_dir=log_dir, limit=limit * 3):
+        signals: list[str] = []
+        feedback_type = str(row.get("feedback_type") or "").strip()
+        if feedback_type and feedback_type != "none":
+            signals.append(f"反馈:{feedback_type}")
+        if row.get("repeated_message"):
+            signals.append("重复消息")
+        if row.get("memory_candidate"):
+            signals.append("候选记忆")
+        issues = row.get("quality_issues") if isinstance(row.get("quality_issues"), list) else []
+        if issues:
+            signals.append("质量问题:" + ",".join(str(item) for item in issues[:3]))
+        if not signals:
+            continue
+        intent = str(row.get("intent") or "unknown").strip()
+        message = str(row.get("message_summary") or "").strip()
+        summaries.append(f"互动诊断:{intent}:{message}（{'；'.join(signals)}）"[:360])
+    return summaries[-limit:]
+
+
 def iteration_preference_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
     summaries: list[str] = []
     for row in latest_learning_rows("human-iteration-*.jsonl", log_dir=log_dir, limit=limit * 3):
@@ -1143,6 +1165,7 @@ def build_reply_context(
         [
             f"{row.get('intent', 'unknown')}:{row.get('message_summary', '')}" for row in interactions[-3:]
         ]
+        + interaction_diagnostic_summaries(log_dir=log_dir, limit=3)
         + session_note_summaries(log_dir=log_dir, limit=3)
     )
     preferences = [
