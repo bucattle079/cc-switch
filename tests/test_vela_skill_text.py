@@ -324,6 +324,25 @@ class VelaSkillTextTests(unittest.TestCase):
         self.assertIn("思维和韧劲", text)
         self.assertIn("性格语气", text)
 
+    def test_personality_skill_projects_persona_skeleton(self):
+        text = PERSONALITY.read_text(encoding="utf-8")
+
+        self.assertIn("## Persona Skeleton", text)
+        for capability in [
+            "Evidence Gate",
+            "Meaning Decoder",
+            "Identity Core",
+            "Boundary Engine",
+            "Witty Correction",
+        ]:
+            self.assertIn(capability, text)
+        self.assertIn("mechanism-only", text)
+        self.assertNotIn("Dana Scully", text)
+        self.assertNotIn("Louise Banks", text)
+        self.assertNotIn("草薙素子", text)
+        self.assertNotIn("Jane Eyre", text)
+        self.assertNotIn("Elizabeth Bennet", text)
+
     def test_personality_skill_contains_source_material_intake(self):
         text = PERSONALITY.read_text(encoding="utf-8")
 

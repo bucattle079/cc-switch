@@ -196,6 +196,8 @@ AGENTS_TEXT = """# VELA WeChat Codex Instructions
 
 微信入口规则：
 
+- Intent Router 是前置边界：普通寒暄进 normal_chat；市场、资讯、A股、美股、韩国、日本、汇率、美债、油价、黄金、VIX、AI/半导体进入 market_brief；`你好 VELA` 不触发市场检索。
+- Market & World Briefing 使用北京时间窗口：12:30 前按前一日 18:00 到当日 09:00；12:30 至 17:00 前按当日 09:00 到 12:30；17:00 后按当日 09:00 到 17:00。后台可保留 impact_score 和 direction 供排序判断，微信前台必须翻译成中文判断，不暴露字段名。
 - `你好VELA` / `你好 VELA` / `你好，VELA` / `早安VELA` / `早上好VELA`：normal_chat，只做简洁回应，不触发市场检索。市场问题进入 Market & World Briefing，按 09:00 / 12:30 / 17:00 缓存窗口处理。
 - 简报主体中文，风格靠近图片2：每条只写核心事实和来源，不要在每条后面追加 `意义：...` 这种呆板注解。意义分析、A股判断、美股判断、日本/韩国判断和下一步观察统一放到最后的 `VELA 判断`。
 - 金融市场重点盯美股、A股、韩国市场、日本市场：S&P 500、Nasdaq、Dow、美债、美元、上证、深成指、创业板、沪深300、人民币、KOSPI、三星、SK海力士、Nikkei、TOPIX、日元、BOJ。
@@ -349,6 +351,20 @@ def render_agents_source_material_intake(contract: dict | None = None) -> str:
     )
 
 
+def render_agents_persona_skeleton(contract: dict | None = None) -> str:
+    contract = contract or load_voice_contract()
+    skeleton = contract.get("persona_skeleton") or {}
+    lines = [
+        "真人化人格骨架：",
+        "",
+        "- 这五项是机制，不是角色扮演、皮肤或台词库。",
+    ]
+    for name, item in skeleton.items():
+        if isinstance(item, dict):
+            lines.append(f"- {name}：{item.get('rule', '').rstrip('。')}；前台信号：{item.get('frontstage_signal', '').rstrip('。')}。")
+    return "\n".join(lines) + "\n\n"
+
+
 def render_skill_pressure_scenarios(contract: dict | None = None) -> str:
     contract = contract or load_voice_contract()
     lines = [
@@ -422,6 +438,26 @@ def render_skill_contract_vectors(contract: dict | None = None) -> str:
     )
 
 
+def render_skill_persona_skeleton(contract: dict | None = None) -> str:
+    contract = contract or load_voice_contract()
+    skeleton = contract.get("persona_skeleton") or {}
+    lines = [
+        "## Persona Skeleton",
+        "",
+        "mechanism-only companion core. These capabilities are distilled into VELA; do not roleplay source personas, store source quotes, or expose source names in runtime replies.",
+        "",
+    ]
+    for name, item in skeleton.items():
+        if isinstance(item, dict):
+            lines.extend(
+                [
+                    f"- {name}: {item.get('rule', '')}",
+                    f"  Frontstage signal: {item.get('frontstage_signal', '')}",
+                ]
+            )
+    return "\n".join(lines) + "\n\n"
+
+
 def render_skill_source_material_intake(contract: dict | None = None) -> str:
     contract = contract or load_voice_contract()
     intake = contract["source_material_intake"]
@@ -482,6 +518,16 @@ def render_prompt_source_material_line(contract: dict | None = None) -> str:
     contract = contract or load_voice_contract()
     intake = contract["source_material_intake"]
     return f"- {intake['rule']} {intake['copyright_boundary']} 示例口径：{intake['example']}\n"
+
+
+def render_prompt_persona_skeleton_line(contract: dict | None = None) -> str:
+    contract = contract or load_voice_contract()
+    skeleton = contract.get("persona_skeleton") or {}
+    clauses = []
+    for name, item in skeleton.items():
+        if isinstance(item, dict):
+            clauses.append(f"{name}={item.get('frontstage_signal', '').rstrip('。')}")
+    return f"- 真人化人格骨架：{'；'.join(clauses)}。这是机制，不是角色扮演或台词库。\n"
 
 
 def render_prompt_litmus_line(contract: dict | None = None) -> str:
@@ -585,6 +631,7 @@ def update_config() -> None:
     pressure_line = render_prompt_pressure_line(contract)
     voice_line = render_prompt_voice_line(contract)
     source_line = render_prompt_source_material_line(contract)
+    skeleton_line = render_prompt_persona_skeleton_line(contract)
     litmus_line = render_prompt_litmus_line(contract)
     if "声音内核" in text:
         text = re.sub(
@@ -624,7 +671,15 @@ def update_config() -> None:
             text,
         )
     else:
-        text = text.replace(source_line, source_line + litmus_line)
+        text = text.replace(source_line, source_line + skeleton_line + litmus_line)
+    if "真人化人格骨架" in text:
+        text = re.sub(
+            r"- 真人化人格骨架：.*\n",
+            skeleton_line,
+            text,
+        )
+    else:
+        text = text.replace(source_line, source_line + skeleton_line)
     CONFIG.write_text(text.strip() + "\n", encoding="utf-8")
 
 
@@ -636,6 +691,7 @@ def update_agents() -> None:
         render_agents_character_depth(contract)
         + render_agents_cadence_palette(contract)
         + render_agents_source_material_intake(contract)
+        + render_agents_persona_skeleton(contract)
         + render_agents_pressure_scenarios(contract),
         AGENTS_TEXT,
         flags=re.S,
@@ -650,7 +706,12 @@ def update_personality() -> None:
     text = re.sub(r"## Public Modes\n.*?## Voice\n", PUBLIC_MODES + "## Voice\n", text, flags=re.S)
     text = re.sub(r"## Contract Snapshot\n.*?(?=## Balalaika Vector\n)", "", text, flags=re.S)
     text = re.sub(r"## Contract Vectors\n.*?(?=## Balalaika Vector\n)", "", text, flags=re.S)
-    text = text.replace("## Balalaika Vector\n", render_skill_contract_vectors(contract) + "## Balalaika Vector\n", 1)
+    text = re.sub(r"## Persona Skeleton\n.*?(?=## Balalaika Vector\n)", "", text, flags=re.S)
+    text = text.replace(
+        "## Balalaika Vector\n",
+        render_skill_contract_vectors(contract) + render_skill_persona_skeleton(contract) + "## Balalaika Vector\n",
+        1,
+    )
     text = re.sub(r"## Source Material Intake\n.*?(?=## Character Depth\n|## Cadence Palette\n|## Pressure Scenarios\n|## Anti-Mechanical Gate\n)", "", text, flags=re.S)
     text = re.sub(r"## Live Dialogue Litmus\n.*?(?=## Character Depth\n|## Cadence Palette\n|## Pressure Scenarios\n|## Anti-Mechanical Gate\n)", "", text, flags=re.S)
     text = re.sub(r"## Character Depth\n.*?(?=## Pressure Scenarios\n|## Anti-Mechanical Gate\n)", "", text, flags=re.S)

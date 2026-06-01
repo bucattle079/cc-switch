@@ -10,6 +10,7 @@ import unittest
 
 ROOT = Path(r"C:\Users\Admin\Desktop\CC-WECHAT")
 CONTRACT = ROOT / "VELA" / "voice-contract.json"
+SOURCE_MATERIAL = ROOT / "VELA" / "source-material.md"
 PERSONALITY = Path(r"C:\Users\Admin\.codex\skills\vela-personality\SKILL.md")
 AGENTS = Path(r"C:\Users\Admin\Desktop\AGENTS.md")
 CONFIG = Path(r"C:\Users\Admin\.cc-connect\config.toml")
@@ -121,6 +122,48 @@ class VelaVoiceContractTests(unittest.TestCase):
         self.assertIn("反机械", gates["dimensions"])
         self.assertIn("有什么可以帮", gates["forbidden_phrases"])
 
+    def test_voice_contract_contains_mechanism_only_persona_skeleton(self):
+        contract = self.load_contract()
+
+        skeleton = contract["persona_skeleton"]
+        self.assertEqual(
+            list(skeleton),
+            ["Evidence Gate", "Meaning Decoder", "Identity Core", "Boundary Engine", "Witty Correction"],
+        )
+        for capability, item in skeleton.items():
+            self.assertIn("rule", item, capability)
+            self.assertIn("frontstage_signal", item, capability)
+            self.assertNotIn("台词", item["rule"])
+
+        serialized = json.dumps(skeleton, ensure_ascii=False)
+        for forbidden in [
+            "Dana Scully",
+            "Scully",
+            "Louise Banks",
+            "草薙素子",
+            "Jane Eyre",
+            "Elizabeth Bennet",
+        ]:
+            self.assertNotIn(forbidden, serialized)
+
+    def test_source_material_records_five_archetype_distillation_without_quotes(self):
+        text = SOURCE_MATERIAL.read_text(encoding="utf-8")
+
+        self.assertIn("2026-06-01", text)
+        self.assertIn("真人化人格骨架", text)
+        self.assertIn("不是角色扮演", text)
+        for capability in [
+            "Evidence Gate",
+            "Meaning Decoder",
+            "Identity Core",
+            "Boundary Engine",
+            "Witty Correction",
+        ]:
+            self.assertIn(capability, text)
+
+        for quote_marker in ["20句", "核心短引", "原句：", "quote library", "台词库："]:
+            self.assertNotIn(quote_marker, text)
+
     def test_contract_terms_are_projected_to_runtime_surfaces(self):
         contract = self.load_contract()
         surfaces = "\n".join(
@@ -197,6 +240,23 @@ class VelaVoiceContractTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("契约源：VELA/voice-contract.json", completed.stdout)
+
+    def test_personality_script_status_reports_persona_skeleton(self):
+        completed = subprocess.run(
+            [sys.executable, "-X", "utf8", str(SCRIPT), "status"],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("真人化人格骨架", completed.stdout)
+        self.assertIn("Evidence Gate", completed.stdout)
+        self.assertIn("Meaning Decoder", completed.stdout)
+        self.assertIn("Boundary Engine", completed.stdout)
+        self.assertNotIn("Dana Scully", completed.stdout)
+        self.assertNotIn("Jane Eyre", completed.stdout)
 
     def test_personality_script_reports_character_profile(self):
         completed = subprocess.run(

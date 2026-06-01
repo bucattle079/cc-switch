@@ -22,11 +22,19 @@ def render_status() -> str:
     contract = load_contract()
     vectors = contract["vectors"]
     rules = "\n".join(f"- {rule}" for rule in contract["hard_rules"])
+    skeleton = contract.get("persona_skeleton") or {}
+    skeleton_lines = "\n".join(
+        f"- {name}：{item.get('rule', '').strip()}"
+        for name, item in skeleton.items()
+        if isinstance(item, dict) and item.get("rule")
+    )
     return (
         "VELA 人格状态\n\n"
         f"骨架：{vectors['decisiveness']}\n"
         f"视野：{vectors['long_horizon']}\n"
         f"质地：{vectors['texture']}\n\n"
+        "真人化人格骨架：\n"
+        f"{skeleton_lines}\n\n"
         "当前硬规则：\n"
         f"{rules}\n\n"
         f"契约源：{contract['contract_source']}"
