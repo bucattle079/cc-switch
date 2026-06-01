@@ -41,6 +41,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "weather_jinjiang",
             "weather_new_york_cold",
             "market_add_position",
+            "market_current_a_share_realtime_compact",
             "market_no_raw_english",
             "freshness_status",
             "codex_status_route_only",
@@ -123,7 +124,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
 
         self.assertTrue(report["ok"], report)
         self.assertTrue(report["entrypoint"])
-        hard_lane_ids = {"weather_jinjiang", "market_add_position", "freshness_status"}
+        hard_lane_ids = {"weather_jinjiang", "market_add_position", "market_current_a_share_realtime_compact", "freshness_status"}
         for case in report["cases"]:
             if case["id"] in hard_lane_ids:
                 with self.subTest(case["id"]):
@@ -132,7 +133,10 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
                         {"adapter:fallback", "adapter:local_status"},
                     )
                     self.assertNotEqual(case["latest_quality_log"]["quality_flags"][1], "adapter:deepseek_chat")
-                    self.assertIn("实时源：未接入", case["reply_preview"])
+                    if case["id"].startswith("market_"):
+                        self.assertIn("实时源", case["reply_preview"])
+                    else:
+                        self.assertIn("实时源：未接入", case["reply_preview"])
                     self.assertFalse(case["leaks"], case)
 
         refresh = next(case for case in report["cases"] if case["id"] == "market_refresh_entry")
@@ -147,7 +151,14 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
 
         by_id = {case["id"]: case for case in report["cases"]}
         fast_ids = {"normal_hello", "normal_one_next_step", "freshness_status"}
-        cached_ids = {"market_add_position", "market_no_raw_english", "market_policy_not_news_list", "market_impulse_brake", "market_refresh_entry"}
+        cached_ids = {
+            "market_add_position",
+            "market_current_a_share_realtime_compact",
+            "market_no_raw_english",
+            "market_policy_not_news_list",
+            "market_impulse_brake",
+            "market_refresh_entry",
+        }
 
         for case_id in fast_ids:
             with self.subTest(case_id):

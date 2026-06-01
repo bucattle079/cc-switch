@@ -251,6 +251,97 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertNotIn("Samsung", reply)
         self.assertNotIn("Nvidia", reply)
 
+    def test_current_a_share_market_uses_live_snapshot_not_cache_dump(self):
+        router = load_module(ROUTER, "vela_router")
+        live = SimpleNamespace(
+            ok=True,
+            as_of="2026-06-01 19:15 北京时间",
+            source="新浪财经行情快照",
+            lines=[
+                "上证指数 4057.74（-10.83，-0.27%）",
+                "深证成指 15340.36（-234.78，-1.51%）",
+                "创业板指 3950.94（-87.01，-2.15%）",
+            ],
+            source_status="实时源：已接入",
+            note="",
+            error="",
+        )
+
+        with patch.object(router, "fetch_live_market_snapshot", return_value=live):
+            reply = router.render_cached_market_reply("今天的A股市场如何")
+
+        self.assertLess(len(reply), 520)
+        self.assertIn("实时源：已接入", reply)
+        self.assertIn("上证指数", reply)
+        self.assertIn("判断：", reply)
+        self.assertIn("下一步：", reply)
+        self.assertNotIn("以下基于最近缓存", reply)
+        self.assertNotIn("VELA 市场简报", reply)
+        self.assertNotIn("状态边界：", reply)
+        self.assertNotIn("关键风险\n1.", reply)
+
+        with patch.object(router, "fetch_live_market_snapshot", return_value=live):
+            market_info_reply = router.render_cached_market_reply("现在的市场资讯")
+        self.assertIn("实时源：已接入", market_info_reply)
+        self.assertNotIn("以下基于最近缓存", market_info_reply)
+
+    def test_current_market_reply_preserves_wechat_line_breaks(self):
+        router = load_module(ROUTER, "vela_router")
+        live = SimpleNamespace(
+            ok=True,
+            as_of="2026-06-01 19:15 北京时间",
+            source="新浪财经行情快照",
+            lines=[
+                "上证指数 4057.74（-10.83，-0.27%）",
+                "深证成指 15340.36（-234.78，-1.51%）",
+            ],
+            source_status="实时源：已接入",
+            note="",
+            error="",
+        )
+
+        with patch.object(router, "fetch_live_market_snapshot", return_value=live):
+            reply = router.reply_for("今天的A股市场如何")
+
+        self.assertIn("\nA股快照：\n", reply)
+        self.assertIn("\n- 上证指数", reply)
+        self.assertIn("\n判断：", reply)
+        self.assertIn("\n下一步：", reply)
+
+    def test_current_market_live_failure_is_compact_cache_degrade(self):
+        router = load_module(ROUTER, "vela_router")
+        live = SimpleNamespace(
+            ok=False,
+            as_of="",
+            source="新浪财经行情快照",
+            lines=[],
+            source_status="实时源：暂不可用",
+            note="",
+            error="timeout",
+        )
+
+        with patch.object(router, "fetch_live_market_snapshot", return_value=live):
+            reply = router.render_cached_market_reply("今天的A股市场如何")
+
+        self.assertLess(len(reply), 620)
+        self.assertIn("实时源：暂不可用", reply)
+        self.assertIn("缓存降级", reply)
+        self.assertIn("判断：", reply)
+        self.assertIn("下一步：", reply)
+        self.assertNotIn("以下基于最近缓存", reply)
+        self.assertNotIn("VELA 市场简报", reply)
+        self.assertNotIn("状态边界：", reply)
+
+    def test_current_foreign_market_does_not_use_a_share_snapshot(self):
+        router = load_module(ROUTER, "vela_router")
+
+        reply = router.render_cached_market_reply("现在美股市场如何")
+
+        self.assertIn("实时源：暂不可用", reply)
+        self.assertIn("缓存降级", reply)
+        self.assertNotIn("A股快照", reply)
+        self.assertNotIn("上证指数", reply)
+
     def test_expanded_market_news_can_return_full_report(self):
         router = load_module(ROUTER, "vela_router")
 
@@ -592,10 +683,12 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         reply = router.reply_for("如果不是实时的重要资讯梳理给我")
 
-        self.assertIn("以下基于最近缓存", reply)
-        self.assertIn("更新时间", reply)
+        self.assertIn("不是实时直播", reply)
+        self.assertIn("实时源：未接入", reply)
+        self.assertIn("最近缓存", reply)
         self.assertNotIn("data_status", reply)
         self.assertIn("60秒判断", reply)
+        self.assertNotIn("以下基于最近缓存", reply)
         self.assertNotIn("VELA 市场简报", reply)
         self.assertNotIn("direction:", reply)
         self.assertNotIn("score:", reply)

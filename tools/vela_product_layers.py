@@ -1323,7 +1323,7 @@ def build_reply_context(
         need_interpretation=interpretation.to_brief(),
         response_mode=interpretation.response_mode,
         human_tone_vector=interpretation.human_tone_vector.to_dict(),
-        supporting_context=" ".join(str(supporting_context or "").split()),
+        supporting_context=normalize_supporting_context(supporting_context),
         persona_skeleton=interpretation.persona_skeleton,
         active_persona_capabilities=interpretation.persona_skeleton,
         detected_user_state=interpretation.emotional_state,
@@ -1345,6 +1345,12 @@ def build_reply_context(
             allow_retrieval=selection.allow_retrieval,
         ),
     )
+
+
+def normalize_supporting_context(text: str) -> str:
+    lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    cleaned_lines = [" ".join(line.split()) for line in lines]
+    return "\n".join(cleaned_lines).strip()
 
 
 def build_memory_candidate(message: str) -> dict:

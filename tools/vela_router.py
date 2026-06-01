@@ -14,7 +14,9 @@ import time
 from vela_market_briefing import (
     build_cached_market_brief,
     build_market_brief,
+    fetch_live_market_snapshot,
     format_freshness_status,
+    format_live_market_frontstage,
     format_market_brief,
     format_market_frontstage_summary,
     format_status_boundary,
@@ -176,6 +178,8 @@ REFRESH_KEYWORDS = [
     "需要实时",
     "要实时",
 ]
+CURRENT_MARKET_TIME_KEYWORDS = ["今天", "现在", "目前", "当下", "此刻", "最新", "实时", "盘中", "早盘", "午盘", "收盘"]
+CURRENT_MARKET_SURFACE_KEYWORDS = ["a股", "a 股", "上证", "沪深300", "深成指", "创业板", "市场", "盘面"]
 WORLD_KEYWORDS = ["世界", "全球", "军政", "地缘", "外交", "战争", "制裁", "航运", "能源安全", "世界简报"]
 CODEX_KEYWORDS = [
     "codex",
@@ -432,6 +436,13 @@ def is_market_refresh_request(text: str) -> bool:
     return contains_any(text, REFRESH_KEYWORDS)
 
 
+def is_current_market_query(text: str) -> bool:
+    norm = normalize(text)
+    if is_expanded_market_query(norm):
+        return False
+    return contains_any(norm, CURRENT_MARKET_TIME_KEYWORDS) and contains_any(norm, CURRENT_MARKET_SURFACE_KEYWORDS)
+
+
 def is_weather_query(text: str) -> bool:
     return contains_any(normalize(text), WEATHER_KEYWORDS)
 
@@ -557,16 +568,26 @@ def render_cached_market_reply(text: str) -> str:
             "下一步：写下最大亏损线和撤退条件；写不出来，就别冲。",
         ]
         return guard_wechat_output("\n".join(lines))
+    if is_current_market_query(text):
+        live = fetch_live_market_snapshot(text)
+        brief = build_cached_market_brief(text)
+        return guard_wechat_output(format_live_market_frontstage(live, fallback_brief=brief, fallback_status=status))
     brief = build_cached_market_brief(text)
-    status_text = format_freshness_status(status)
     if brief is None:
-        return guard_wechat_output(status_text + "\n\n当前没有可用市场缓存；需要刷新链路接入外部检索/API 后再生成报告。")
-    prefix = "以下基于最近缓存，先给可用判断；这不是实时直播。"
+        lines = [
+            f"不是实时直播；实时源：未接入；最近缓存：{status.last_updated}。",
+            "判断：当前没有可用市场缓存，不生成新的盘面结论。",
+            "下一步：先刷新外部源/API；没有数据就别硬猜，市场不会因为我们嘴硬就变清楚。",
+        ]
+        return guard_wechat_output("\n".join(lines))
     if is_expanded_market_query(text):
+        status_text = format_freshness_status(status)
         body = format_market_brief(brief, detail=True)
+        return guard_wechat_output(f"{status_text}\n\n{body}")
     else:
+        prefix = f"不是实时直播；实时源：未接入；最近缓存：{status.last_updated}。"
         body = format_market_frontstage_summary(brief)
-    return guard_wechat_output(f"{prefix}\n{status_text}\n\n{body}")
+    return guard_wechat_output(f"{prefix}\n\n{body}")
 
 
 def render_market_refresh_reply(text: str) -> str:

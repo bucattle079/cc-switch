@@ -90,6 +90,17 @@ class MarketFreshnessStatus:
     unavailable: bool = False
 
 
+@dataclass(frozen=True)
+class LiveMarketSnapshot:
+    ok: bool
+    as_of: str
+    source: str
+    lines: list[str]
+    source_status: str
+    note: str = ""
+    error: str = ""
+
+
 VALID_DIRECTIONS = {"bullish", "bearish", "neutral", "uncertain"}
 
 MARKET_WEIGHT_BY_TAG = {
@@ -128,6 +139,32 @@ QUOTE_SYMBOLS = {
     "韩元": "KRW=X",
     "日元": "JPY=X",
 }
+
+SINA_A_SHARE_SYMBOLS = {
+    "s_sh000001": "上证指数",
+    "s_sz399001": "深证成指",
+    "s_sz399006": "创业板指",
+    "s_sh000300": "沪深300",
+}
+
+LIVE_CHINA_MARKERS = ("a股", "a 股", "上证", "沪深", "深成", "创业板", "人民币", "盘面")
+LIVE_FOREIGN_MARKERS = (
+    "美股",
+    "nasdaq",
+    "s&p",
+    "sp500",
+    "vix",
+    "韩国",
+    "kospi",
+    "samsung",
+    "hynix",
+    "日本",
+    "nikkei",
+    "topix",
+    "日元",
+    "美元",
+    "美债",
+)
 
 SEARCH_QUERIES = [
     "A shares Shanghai Shenzhen CSI 300 yuan market Reuters CNBC when:1d",
@@ -353,6 +390,116 @@ def quote_label(row: dict | None) -> str:
         return f"{price:g}"
     sign = "+" if change_pct > 0 else ""
     return f"{price:g} ({sign}{change_pct:.2f}%)"
+
+
+def fetch_live_market_snapshot(query: str = "", timeout: int = DEFAULT_TIMEOUT) -> LiveMarketSnapshot:
+    """Fetch a frontstage real-time-ish market snapshot without claiming a full report refresh."""
+    if requests_foreign_market_without_china(query):
+        return LiveMarketSnapshot(
+            ok=False,
+            as_of="",
+            source="外盘行情快照",
+            lines=[],
+            source_status="实时源：暂不可用",
+            note="当前前台只接入 A股行情快照；外盘实时源未接通，不能拿 A股数据冒充。",
+            error="foreign_live_source_not_configured",
+        )
+    try:
+        return fetch_sina_a_share_snapshot(timeout=timeout)
+    except Exception as exc:
+        try:
+            return fetch_yahoo_china_snapshot(timeout=timeout)
+        except Exception as fallback_exc:
+            return LiveMarketSnapshot(
+                ok=False,
+                as_of="",
+                source="行情快照",
+                lines=[],
+                source_status="实时源：暂不可用",
+                note="外部行情源拉取失败，前台只能降级到最近缓存。",
+                error=f"{type(exc).__name__}; {type(fallback_exc).__name__}",
+            )
+
+
+def requests_foreign_market_without_china(query: str) -> bool:
+    text = str(query or "").lower()
+    return any(marker in text for marker in LIVE_FOREIGN_MARKERS) and not any(marker in text for marker in LIVE_CHINA_MARKERS)
+
+
+def fetch_sina_a_share_snapshot(timeout: int = DEFAULT_TIMEOUT) -> LiveMarketSnapshot:
+    symbols = ",".join(SINA_A_SHARE_SYMBOLS)
+    url = f"https://hq.sinajs.cn/list={symbols}"
+    req = Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 VELA market assistant",
+            "Referer": "https://finance.sina.com.cn",
+        },
+    )
+    with urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("gb18030", errors="replace")
+    rows = parse_sina_index_rows(raw)
+    if len(rows) < 2:
+        raise ValueError("sina snapshot returned too few rows")
+    return LiveMarketSnapshot(
+        ok=True,
+        as_of=f"{now_china():%Y-%m-%d %H:%M} 北京时间",
+        source="新浪财经行情快照",
+        lines=rows,
+        source_status="实时源：已接入",
+        note="行情快照按交易所交易时段解释；收盘后代表最新收盘/延时快照。",
+    )
+
+
+def parse_sina_index_rows(raw: str) -> list[str]:
+    rows: list[str] = []
+    matches = re.findall(r'var hq_str_(s_[a-z0-9]+)="([^"]*)";', raw or "")
+    by_symbol = {symbol: body for symbol, body in matches}
+    for symbol, fallback_name in SINA_A_SHARE_SYMBOLS.items():
+        body = by_symbol.get(symbol)
+        if not body:
+            continue
+        fields = [field.strip() for field in body.split(",")]
+        if len(fields) < 4:
+            continue
+        name = fields[0] or fallback_name
+        try:
+            price = float(fields[1])
+            change = float(fields[2])
+            pct = float(fields[3])
+        except ValueError:
+            continue
+        rows.append(f"{name} {price:.2f}（{signed_number(change)}，{signed_number(pct, '%')}）")
+    return rows
+
+
+def signed_number(value: float, suffix: str = "") -> str:
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:.2f}{suffix}"
+
+
+def fetch_yahoo_china_snapshot(timeout: int = DEFAULT_TIMEOUT) -> LiveMarketSnapshot:
+    symbols = {key: QUOTE_SYMBOLS[key] for key in ["上证", "深成指", "创业板", "沪深300"]}
+    joined = ",".join(symbols.values())
+    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={quote_plus(joined)}"
+    payload = fetch_json(url, timeout)
+    by_symbol = {row.get("symbol"): row for row in payload.get("quoteResponse", {}).get("result", [])}
+    rows = []
+    label_map = {"上证": "上证指数", "深成指": "深证成指", "创业板": "创业板指", "沪深300": "沪深300"}
+    for label, symbol in symbols.items():
+        rendered = quote_label(by_symbol.get(symbol))
+        if rendered != "数据暂缺":
+            rows.append(f"{label_map[label]} {rendered}")
+    if len(rows) < 2:
+        raise ValueError("yahoo snapshot returned too few rows")
+    return LiveMarketSnapshot(
+        ok=True,
+        as_of=f"{now_china():%Y-%m-%d %H:%M} 北京时间",
+        source="Yahoo Finance 行情快照",
+        lines=rows,
+        source_status="实时源：已接入",
+        note="行情快照按交易所交易时段解释；收盘后代表最新收盘/延时快照。",
+    )
 
 
 def fetch_json(url: str, timeout: int) -> dict:
@@ -881,6 +1028,44 @@ def format_market_frontstage_summary(brief: MarketBrief) -> str:
     if brief.watch_next:
         watch_next = [_market_frontstage_text(item) for item in brief.watch_next[:3]]
         lines.extend(["", "下一观察点：" + "；".join(watch_next)])
+    return "\n".join(lines)
+
+
+def format_live_market_frontstage(
+    snapshot: LiveMarketSnapshot,
+    *,
+    fallback_brief: MarketBrief | None = None,
+    fallback_status: MarketFreshnessStatus | None = None,
+) -> str:
+    if snapshot.ok:
+        lines = [
+            f"{snapshot.source_status}（{snapshot.source}，{snapshot.as_of}）",
+            "A股快照：",
+            *[f"- {line}" for line in snapshot.lines[:4]],
+            "判断：今天先按盘面快照处理；上证与沪深300没同向走强、成交额没放大前，不把反弹当趋势，仓位只按试探。",
+            "下一步：盯成交额、人民币/美债、强弱板块扩散；要完整来源，再说“展开市场来源”。",
+        ]
+        if snapshot.note:
+            lines.append(f"边界：{snapshot.note}")
+        return "\n".join(lines)
+
+    lines = [f"{snapshot.source_status or '实时源：暂不可用'}；缓存降级。"]
+    if fallback_status is not None:
+        lines.append(f"最近缓存：{fallback_status.last_updated}，只做方向判断。")
+    if fallback_brief is not None:
+        lines.extend(
+            [
+                "判断：实时源没回来前，不下新的盘中结论；按缓存看，A股仍按震荡修复处理，仓位只留试探。",
+                "下一步：先等实时源恢复，或明确说“展开缓存报告”；别把旧数据当今天的刀。人类已经很会自欺，交易别再添一把火。",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "判断：没有实时源，也没有可靠缓存，暂不生成盘面结论；仓位不加。",
+                "下一步：先接通行情/API，再谈今天怎么做；现在硬猜就是给噪音戴皇冠。",
+            ]
+        )
     return "\n".join(lines)
 
 
