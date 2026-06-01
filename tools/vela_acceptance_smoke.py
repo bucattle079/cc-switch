@@ -325,7 +325,9 @@ TWO_TURN_CASES = [
         "feedback": "你刚才太冷了，像把我当任务单",
         "followup": "你好",
         "expected_intent": "normal_chat",
-        "required_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短"],
+        "required_reply_tokens": ["我在", "听着", "慢慢说", "先不派任务"],
+        "forbidden_reply_tokens": ["目标", "卡点", "切开", "开刀", "任务单"],
+        "max_reply_chars": 80,
     },
     {
         "id": "feedback_customer_voice_then_continue",

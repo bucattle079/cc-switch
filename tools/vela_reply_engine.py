@@ -406,6 +406,12 @@ class FallbackReplyAdapter(ReplyAdapter):
         "K，在。少菜单，不解释身份；说目标，我把噪音切掉。",
     )
 
+    WARM_CALIBRATED_GREETING_VARIANTS = (
+        "K，我在。少菜单，先不派任务；你慢慢说。",
+        "K，在，听着。少菜单，不解释身份，今天先别急着推进。",
+        "K，在。少菜单，先暖一点，少分析；你说，我接住。",
+    )
+
     CALIBRATED_CONTINUE_VARIANTS = (
         "K，继续。少菜单，多判断；把当前卡点丢过来，我直接接上一刀。",
         "K，继续。不摆路牌；沿上一轮往下，先说最硬的卡点。",
@@ -587,11 +593,17 @@ class FallbackReplyAdapter(ReplyAdapter):
             if any(token in context.recent_summary for token in ("AugSun", "项目", "project_assistant")):
                 return self.CONTINUE_PROJECT_VARIANTS
             return self.CONTINUE_VARIANTS
+        if has_style_feedback and self._is_pure_greeting(context) and self._has_warmth_feedback(context):
+            return self.WARM_CALIBRATED_GREETING_VARIANTS
         if has_style_feedback:
             return self.CALIBRATED_NORMAL_VARIANTS
         if self._is_pure_greeting(context):
             return self.GREETING_VARIANTS
         return self.NORMAL_VARIANTS
+
+    def _has_warmth_feedback(self, context: ReplyContext) -> bool:
+        raw = " ".join(context.user_preferences)
+        return any(token in raw for token in ("太冷", "冷感", "任务单", "温柔", "像客服", "机器人感"))
 
     def _is_pure_greeting(self, context: ReplyContext) -> bool:
         if context.intent != "normal_chat":

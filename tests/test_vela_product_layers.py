@@ -316,6 +316,30 @@ class VelaProductLayerTests(unittest.TestCase):
                 self.assertNotIn("response_quality_signals", next_reply.text)
                 self.assertNotIn("要看盘，说 A股、美股或韩国", next_reply.text)
 
+    def test_too_cold_feedback_warms_next_greeting_without_task_intake(self):
+        product = load_product_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.run_layered_response(
+                "你刚才太冷了，像把我当任务单",
+                intent="style_feedback",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            next_reply = product.run_layered_response(
+                "你好",
+                intent="normal_chat",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+        self.assertIn("K", next_reply.text)
+        self.assertTrue(any(token in next_reply.text for token in ["我在", "听着", "慢一点", "不派任务"]))
+        self.assertTrue(any(token in next_reply.text for token in ["少菜单", "不解释身份", "先不派任务"]))
+        for tasky in ["目标", "卡点", "切开", "开刀", "任务单"]:
+            self.assertNotIn(tasky, next_reply.text)
+
     def test_continue_uses_recent_context_instead_of_menu(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
