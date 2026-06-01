@@ -757,7 +757,7 @@ def reply_for(text: str) -> str:
             reply_adapter=FallbackReplyAdapter(),
         ).text
     if intent.name == "codex_task":
-        return guard_wechat_output(render_codex_bridge())
+        return guard_wechat_output(render_codex_bridge(text))
     if intent.name == "normal_chat" and is_fast_greeting(text) and should_force_fallback_for_greeting(text):
         return run_layered_response(text, intent=intent.name, reply_adapter=FallbackReplyAdapter()).text
     return run_layered_response(text, intent=intent.name).text
@@ -915,7 +915,7 @@ def claim_request_once(
     return True
 
 
-def render_codex_bridge() -> str:
+def render_codex_bridge(text: str = "Codex 状态查询") -> str:
     try:
         completed = subprocess.run(
             [sys.executable, "-X", "utf8", str(CODEX_CONSOLE), "codex", "--no-send"],
@@ -928,13 +928,13 @@ def render_codex_bridge() -> str:
         )
     except Exception as exc:
         return run_layered_response(
-            "Codex 桥接异常",
+            text,
             intent="codex_task",
             codex_summary=f"Codex 桥接暂时没接稳：{exc}",
         ).text
     output = (completed.stdout or "").strip()
     return run_layered_response(
-        "Codex 状态查询",
+        text,
         intent="codex_task",
         codex_summary=output or "CODEX 桥接没有返回内容。要继续派任务，用 /CODEX 开头。",
     ).text

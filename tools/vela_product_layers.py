@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 from typing import Iterable
 
 from vela_reply_engine import (
@@ -419,6 +420,8 @@ def record_interaction(
     feedback_type: str = "",
     memory_candidate: bool | None = None,
     quality_issues: Iterable[str] | None = None,
+    latency_ms: int | None = None,
+    foreground_lane: str = "",
     log_dir: Path | None = None,
 ) -> Path:
     log_dir = log_dir or LEARNING_LOOP_DIR
@@ -449,6 +452,10 @@ def record_interaction(
         row["memory_candidate"] = bool(memory_candidate)
     if quality_issues is not None:
         row["quality_issues"] = list(quality_issues)
+    if latency_ms is not None:
+        row["latency_ms"] = max(0, int(latency_ms))
+    if foreground_lane:
+        row["foreground_lane"] = foreground_lane
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     return path
@@ -1051,6 +1058,13 @@ def interaction_diagnostic_summaries(log_dir: Path | None = None, limit: int = 3
             signals.append("重复消息")
         if row.get("memory_candidate"):
             signals.append("候选记忆")
+        latency = row.get("latency_ms")
+        try:
+            latency_int = int(latency)
+        except (TypeError, ValueError):
+            latency_int = 0
+        if latency_int >= 8000:
+            signals.append(f"延迟:{latency_int}ms")
         issues = row.get("quality_issues") if isinstance(row.get("quality_issues"), list) else []
         if issues:
             signals.append("质量问题:" + ",".join(str(item) for item in issues[:3]))
@@ -1595,6 +1609,7 @@ def run_layered_response(
     reply_adapter: ReplyAdapter | None = None,
     supporting_context: str = "",
 ) -> LayeredResponse:
+    started_at = time.perf_counter()
     used_codex = intent == "codex_task"
     used_retrieval = False
     used_cache = intent in {"market_brief", "market_refresh", "freshness_status"}
@@ -1621,6 +1636,7 @@ def run_layered_response(
         used_codex=used_codex,
         used_retrieval=used_retrieval,
     )
+    latency_ms = int((time.perf_counter() - started_at) * 1000)
     quality_flags = [
         "reply_engine",
         f"adapter:{adapter_name}",
@@ -1674,6 +1690,8 @@ def run_layered_response(
         feedback_type=iteration_signal.user_feedback_type,
         memory_candidate=memory_candidate,
         quality_issues=issues,
+        latency_ms=latency_ms,
+        foreground_lane=selection.foreground_lane,
         log_dir=log_dir,
     )
     record_session_note(

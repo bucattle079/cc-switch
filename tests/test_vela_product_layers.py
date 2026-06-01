@@ -661,6 +661,9 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertFalse(row.get("repeated_message"))
         self.assertIn("quality_issues", row)
         self.assertIsInstance(row["quality_issues"], list)
+        self.assertIn("latency_ms", row)
+        self.assertGreaterEqual(row["latency_ms"], 0)
+        self.assertEqual(row.get("foreground_lane"), "fast")
 
     def test_context_builder_reads_interaction_diagnostic_signals(self):
         product = load_product_module()
@@ -679,6 +682,29 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("\u4e92\u52a8\u8bca\u65ad", context.recent_summary)
         self.assertIn("meaning_misread", context.recent_summary)
         self.assertIn("\u5019\u9009\u8bb0\u5fc6", context.recent_summary)
+
+    def test_context_builder_reads_slow_interaction_as_diagnostic_signal(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            product.record_interaction(
+                message="深度分析一下",
+                intent="deep_analysis",
+                response_text="K，结论先给。",
+                used_codex=False,
+                used_retrieval=False,
+                latency_ms=9000,
+                foreground_lane="deep",
+                log_dir=Path(tmp),
+            )
+            context = product.build_reply_context(
+                "继续",
+                intent="normal_chat",
+                log_dir=Path(tmp),
+            )
+
+        self.assertIn("互动诊断", context.recent_summary)
+        self.assertIn("延迟", context.recent_summary)
+        self.assertIn("9000ms", context.recent_summary)
 
     def test_quiet_support_reply_is_short_and_low_burden(self):
         product = load_product_module()

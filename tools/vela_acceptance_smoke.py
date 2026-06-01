@@ -573,7 +573,7 @@ def run_entrypoint_single_case(case: dict[str, Any], base_log_dir: Path) -> dict
     def fake_refresh(_text: str) -> Any:
         return router.MarketRefreshJob(started=True, in_progress=False, pid=12345, reason="smoke_stub")
 
-    def fake_codex() -> str:
+    def fake_codex(_text: str = "") -> str:
         return "K，VELA · CODEX 产品判断摘要\n事实：- Codex smoke 只验证路由。\n判断：路由正确，不执行真实桥接。"
 
     router.run_layered_response = run_with_case_log

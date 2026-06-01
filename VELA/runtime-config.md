@@ -62,7 +62,7 @@ Learning-loop candidates are soft context, not permanent truth. Sensitive memory
 
 Session notes are short-term local context, not permanent memory. Each foreground reply writes a session note, and the context builder reads recent session notes alongside interaction logs, candidate preferences, human-iteration next-turn signals, and strategic memory before the next reply. This lets VELA continue a thread without promoting temporary context into long-term truth.
 
-Interaction logs are local diagnostic memory. They mark repeated messages, feedback type, candidate-memory status, and response quality issues so the next turn can adapt without exposing raw schema or promoting one-off feedback into permanent truth.
+Interaction logs are local diagnostic memory. They mark repeated messages, feedback type, candidate-memory status, response latency, foreground lane, and response quality issues so the next turn can adapt without exposing raw schema or promoting one-off feedback into permanent truth.
 
 ## Factual Status Boundary
 

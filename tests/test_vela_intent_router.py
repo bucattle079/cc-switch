@@ -230,6 +230,23 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertTrue(intent.codex_allowed)
         self.assertFalse(intent.market_allowed)
 
+    def test_codex_bridge_preserves_original_user_request_for_learning(self):
+        router = load_module(ROUTER, "vela_router")
+        user_text = "Codex 状态，别把 Git 日志整段贴给我"
+
+        with patch.object(
+            router.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout="Codex 摘要：路由干净。", stderr=""),
+        ):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，Codex 摘要。")) as run:
+                reply = router.reply_for(user_text)
+
+        self.assertEqual(reply, "K，Codex 摘要。")
+        self.assertEqual(run.call_args.args[0], user_text)
+        self.assertEqual(run.call_args.kwargs["intent"], "codex_task")
+        self.assertIn("Codex 摘要", run.call_args.kwargs["codex_summary"])
+
     def test_world_brief_routes_without_market_or_codex(self):
         router = load_module(ROUTER, "vela_router")
 
