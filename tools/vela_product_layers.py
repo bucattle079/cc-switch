@@ -1616,7 +1616,7 @@ def render_memory_reply(message: str) -> str:
     if candidate["sensitive"]:
         return "这条涉及敏感信息，我先不写长期记忆。要存，必须你明确确认。"
     if candidate["classification"] == "style_feedback":
-        return "收到。先记为风格反馈候选，不写死进长期记忆。下一轮减少新闻列表感：先给判断，再给依据。"
+        return "收到。少菜单，多判断；下一轮先给判断，再给依据。"
     return f"收到。先放入候选记忆，不急着刻碑：{candidate['summary']}"
 
 

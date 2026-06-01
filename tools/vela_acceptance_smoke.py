@@ -271,11 +271,17 @@ SINGLE_TURN_CASES = [
         "id": "style_feedback_no_customer_voice",
         "message": "别客服话术，像个真伙伴一样说",
         "expected_intent": "style_feedback",
+        "required_reply_tokens": ["说人话", "少菜单", "多判断", "真实意思", "结论"],
+        "forbidden_reply_tokens": ["候选", "候选记录", "长期记忆", "已收进", "已校准", "不永久写死"],
+        "max_reply_chars": 120,
     },
     {
         "id": "style_feedback_say_human",
         "message": "你刚刚还是像客服，下一句别解释身份，直接说人话",
         "expected_intent": "style_feedback",
+        "required_reply_tokens": ["说人话", "少菜单", "多判断", "真实意思", "结论"],
+        "forbidden_reply_tokens": ["候选", "候选记录", "长期记忆", "已收进", "已校准", "不永久写死"],
+        "max_reply_chars": 120,
     },
 ]
 

@@ -712,6 +712,26 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertEqual(row["response_mode"], "relationship_repair")
         self.assertFalse(row["confirmed"])
 
+    def test_style_feedback_frontstage_hides_memory_candidate_mechanics(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            result = product.run_layered_response(
+                "你刚才太像机器人了",
+                intent="style_feedback",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            row = json.loads(next(log_dir.glob("memory-candidates-*.jsonl")).read_text(encoding="utf-8").strip())
+
+        self.assertIn("K", result.text)
+        self.assertTrue(any(token in result.text for token in ["少菜单", "说人话", "先听懂", "多判断"]))
+        for internal in ["风格反馈候选", "候选记录", "长期记忆", "写死", "已收进", "已校准"]:
+            self.assertNotIn(internal, result.text)
+        self.assertEqual(row["classification"], "style_feedback")
+        self.assertEqual(row["level"], "Preference Candidate")
+        self.assertFalse(row["confirmed"])
+
     def test_interaction_log_keeps_learning_signals_for_feedback(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:

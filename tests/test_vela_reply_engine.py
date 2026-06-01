@@ -203,7 +203,9 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         result = adapter.generate(context)
 
-        self.assertIn("风格反馈候选", result.text)
+        self.assertTrue(any(token in result.text for token in ["少菜单", "说人话", "先听懂", "多判断"]))
+        for internal in ["风格反馈候选", "行为偏好候选", "候选记录", "长期记忆", "已收进", "已校准"]:
+            self.assertNotIn(internal, result.text)
         self.assertNotIn("你表达差", result.text)
         self.assertNotIn("我漏掉", result.text)
 
