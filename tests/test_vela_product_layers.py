@@ -808,6 +808,28 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("preference_or_feedback_adapted", text)
         self.assertNotIn("[", text)
 
+    def test_guardrail_rewrites_behavior_pack_schema_leaks_before_wechat(self):
+        product = load_product_module()
+
+        text = product.guard_wechat_output(
+            "response_behavior_mode=project_operator\n"
+            "should_use_evidence_gate=True\n"
+            "detected_user_state=misread frustration\n"
+            "tone_adjustment_reason=too robotic\n"
+            "inferred_hidden_need=less template"
+        )
+
+        self.assertIn("K", text)
+        for token in (
+            "response_behavior_mode",
+            "should_use_evidence_gate",
+            "detected_user_state",
+            "tone_adjustment_reason",
+            "inferred_hidden_need",
+        ):
+            self.assertNotIn(token, text)
+        self.assertNotIn("=", text)
+
     def test_codex_summary_hides_runtime_metadata_before_wechat(self):
         product = load_product_module()
 
