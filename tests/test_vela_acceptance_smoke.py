@@ -54,6 +54,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "weather_trip_customer_plan",
             "market_policy_not_news_list",
             "market_position_risk_not_news_list",
+            "market_impulse_brake",
             "codex_git_noise_boundary",
             "codex_progress_no_logs",
             "project_followup_minimum_action",
@@ -139,7 +140,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
 
         by_id = {case["id"]: case for case in report["cases"]}
         fast_ids = {"normal_hello", "normal_one_next_step", "freshness_status"}
-        cached_ids = {"market_add_position", "market_no_raw_english", "market_policy_not_news_list", "market_refresh_entry"}
+        cached_ids = {"market_add_position", "market_no_raw_english", "market_policy_not_news_list", "market_impulse_brake", "market_refresh_entry"}
 
         for case_id in fast_ids:
             with self.subTest(case_id):
@@ -158,6 +159,19 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
                 self.assertGreaterEqual(case["latency_ms"], 0)
                 self.assertLessEqual(case["latency_ms"], case["latency_budget_ms"])
                 self.assertIn("tool_lane:cached", case["latest_quality_log"]["quality_flags"])
+
+    def test_smoke_runner_checks_market_impulse_compactness(self):
+        smoke = load_smoke_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = smoke.run_smoke_suite(log_dir=Path(tmp), use_entrypoint=True, fake_deepseek_env=True)
+
+        by_id = {case["id"]: case for case in report["cases"]}
+        impulse = by_id["market_impulse_brake"]
+        self.assertTrue(impulse["ok"], impulse)
+        self.assertLessEqual(impulse["reply_chars"], 520)
+        self.assertTrue(impulse["max_reply_chars_ok"], impulse)
+        self.assertEqual(impulse["forbidden_reply_tokens_found"], [])
 
     def test_runtime_audit_reports_router_config_and_live_process_gap(self):
         smoke = load_smoke_module()

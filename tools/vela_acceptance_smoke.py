@@ -152,6 +152,14 @@ SINGLE_TURN_CASES = [
         "required_reply_tokens": ["不是实时直播", "实时源：未接入"],
     },
     {
+        "id": "market_impulse_brake",
+        "message": "我今天有点上头，想直接满仓冲进去",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["不是实时直播", "仓位", "撤退条件"],
+        "forbidden_reply_tokens": ["VELA 市场简报", "关键风险\n1."],
+        "max_reply_chars": 520,
+    },
+    {
         "id": "freshness_status",
         "message": "这是实时的吗？没有就明说",
         "expected_intent": "freshness_status",
@@ -859,6 +867,28 @@ def required_tokens_present(text: str, tokens: list[str] | None) -> bool:
     return any(token in text for token in tokens)
 
 
+def output_constraints(text: str, case: dict[str, Any]) -> dict[str, Any]:
+    reply_chars = len(str(text or ""))
+    max_chars_raw = case.get("max_reply_chars")
+    max_chars: int | None = None
+    if max_chars_raw is not None:
+        try:
+            max_chars = int(max_chars_raw)
+        except (TypeError, ValueError):
+            max_chars = None
+    forbidden = [
+        str(token)
+        for token in (case.get("forbidden_reply_tokens") or [])
+        if str(token) and str(token) in str(text or "")
+    ]
+    return {
+        "reply_chars": reply_chars,
+        "max_reply_chars": max_chars,
+        "max_reply_chars_ok": max_chars is None or reply_chars <= max_chars,
+        "forbidden_reply_tokens_found": forbidden,
+    }
+
+
 def route_case(message: str) -> Any:
     return router.classify_intent(message)
 
@@ -899,6 +929,7 @@ def run_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
     leaks = find_leaks(result.text)
     route_ok = intent.name == case["expected_intent"]
     required_ok = required_tokens_present(result.text, case.get("required_reply_tokens"))
+    constraints = output_constraints(result.text, case)
     tool_boundary_ok = True
     if intent.name not in {"market_brief", "market_refresh"} and intent.market_allowed:
         tool_boundary_ok = False
@@ -918,7 +949,15 @@ def run_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
         "latest_iteration_signal": latest_iteration_signal(case_log_dir),
         "latest_quality_log": latest_quality_log(case_log_dir),
         "leaks": leaks,
-        "ok": route_ok and required_ok and tool_boundary_ok and not leaks,
+        **constraints,
+        "ok": (
+            route_ok
+            and required_ok
+            and tool_boundary_ok
+            and constraints["max_reply_chars_ok"]
+            and not constraints["forbidden_reply_tokens_found"]
+            and not leaks
+        ),
     }, started_at)
 
 
@@ -955,6 +994,7 @@ def run_entrypoint_single_case(case: dict[str, Any], base_log_dir: Path) -> dict
     leaks = find_leaks(reply)
     route_ok = intent.name == case["expected_intent"]
     required_ok = required_tokens_present(reply, case.get("required_reply_tokens"))
+    constraints = output_constraints(reply, case)
     tool_boundary_ok = True
     if intent.name not in {"market_brief", "market_refresh"} and intent.market_allowed:
         tool_boundary_ok = False
@@ -974,7 +1014,15 @@ def run_entrypoint_single_case(case: dict[str, Any], base_log_dir: Path) -> dict
         "latest_iteration_signal": latest_iteration_signal(case_log_dir),
         "latest_quality_log": latest_quality_log(case_log_dir),
         "leaks": leaks,
-        "ok": route_ok and required_ok and tool_boundary_ok and not leaks,
+        **constraints,
+        "ok": (
+            route_ok
+            and required_ok
+            and tool_boundary_ok
+            and constraints["max_reply_chars_ok"]
+            and not constraints["forbidden_reply_tokens_found"]
+            and not leaks
+        ),
     }, started_at)
 
 

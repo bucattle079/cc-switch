@@ -546,6 +546,16 @@ def render_freshness_reply(text: str) -> str:
 
 def render_cached_market_reply(text: str) -> str:
     status = market_freshness_status(text)
+    if is_market_impulse_query(text):
+        lines = [
+            "不是实时直播。先刹车：你问的是仓位冲动，不是普通资讯请求。",
+            f"更新时间：{status.last_updated}",
+            format_status_boundary(status),
+            "判断：没有新增实时确认前，不满仓；先把仓位降成可撤退的试探单。",
+            "观察：成交量、美元/美债、AI/半导体链没有共振前，别把上头包装成战略。",
+            "下一步：写下最大亏损线和撤退条件；写不出来，就别冲。",
+        ]
+        return guard_wechat_output("\n".join(lines))
     brief = build_cached_market_brief(text)
     status_text = format_freshness_status(status)
     if brief is None:
@@ -790,6 +800,24 @@ def reply_for(text: str) -> str:
 def is_expanded_market_query(text: str) -> bool:
     norm = normalize(text)
     return any(token in norm for token in ("展开", "详细", "全部", "来源", "新闻来源"))
+
+
+def is_market_impulse_query(text: str) -> bool:
+    norm = normalize(text)
+    return any(
+        token in norm
+        for token in (
+            "上头",
+            "满仓",
+            "重仓",
+            "梭哈",
+            "all in",
+            "all-in",
+            "直接冲",
+            "冲进去",
+            "冲进",
+        )
+    )
 
 
 def normalized_request_text(text: str) -> str:

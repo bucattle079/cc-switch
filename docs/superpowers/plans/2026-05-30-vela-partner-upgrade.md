@@ -56,4 +56,5 @@
 - [x] Run all Python unit tests.
 - [x] Run the eight WeChat acceptance prompts through `tools/vela_router.py` or `reply_for()` with send-once state isolated when needed.
 - [x] Add runtime audit dispatch trace for Weixin inbound gaps: session file and context-token movement are reported without exposing message content, IDs, cursors, tokens, or local paths.
+- [x] Add realistic market-impulse acceptance: "上头/满仓冲进去" stays market-routed but returns a compact cache-boundary + position brake instead of dumping the full market brief.
 - [x] Report remaining production risks: live external search/API freshness, persistent cc-connect env injection, and any screenshot limitations.

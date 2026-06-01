@@ -224,6 +224,17 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertTrue(intent.market_allowed)
         self.assertFalse(intent.codex_allowed)
 
+    def test_market_impulse_reply_brakes_without_dumping_full_brief(self):
+        router = load_module(ROUTER, "vela_router")
+
+        reply = router.render_cached_market_reply("我今天有点上头，想直接满仓冲进去")
+
+        self.assertLess(len(reply), 520)
+        self.assertIn("不是实时直播", reply)
+        self.assertTrue(any(token in reply for token in ["满仓", "仓位", "刹车", "先别冲"]))
+        self.assertNotIn("VELA 市场简报", reply)
+        self.assertNotIn("关键风险\n1.", reply)
+
     def test_market_lane_records_interaction_session_and_hidden_need(self):
         router = load_module(ROUTER, "vela_router")
 
