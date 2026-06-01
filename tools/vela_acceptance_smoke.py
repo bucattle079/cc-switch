@@ -294,11 +294,17 @@ SINGLE_TURN_CASES = [
         "id": "project_followup_minimum_action",
         "message": "继续 AugSun，先别开大工程，给最小推进动作",
         "expected_intent": "project_assistant",
+        "required_reply_tokens": ["最小闭环", "新模块", "触发", "反馈"],
+        "forbidden_reply_tokens": ["把 Codex 输出当产品判断", "需要代码执行时再交给 /CODEX"],
+        "max_reply_chars": 620,
     },
     {
         "id": "project_minimum_loop",
         "message": "继续 AugSun，但不要开新模块，先查最小闭环",
         "expected_intent": "project_assistant",
+        "required_reply_tokens": ["最小闭环", "新模块", "触发", "反馈"],
+        "forbidden_reply_tokens": ["把 Codex 输出当产品判断", "需要代码执行时再交给 /CODEX"],
+        "max_reply_chars": 620,
     },
     {
         "id": "deep_autopsy_vela",

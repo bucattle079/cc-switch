@@ -1643,20 +1643,41 @@ def render_normal_chat_persona(message: str) -> str:
     return FallbackReplyAdapter().generate(context).text
 
 
+def project_analysis_packet(message: str, intent: str) -> AnalysisPacket:
+    text = " ".join(str(message or "").split())
+    if _has_any(text, ("最小闭环", "最小推进", "最小动作", "不要开新模块", "别开大工程", "不堆叠代码", "别讲愿景")):
+        return AnalysisPacket(
+            intent=intent,
+            facts=["用户要推进 AugSun / ROLLQIIA 或 VELA 产品化事项。", "当前约束：不新开模块，先验证最小闭环。"],
+            judgment="先锁最小闭环：一个触发、一个回应、一个反馈记录；不新开模块，不让愿景抢方向盘。",
+            risks=[
+                "新模块会稀释验收口径，让项目看起来更忙，实际更难证明用户价值。",
+                "只讲愿景、不看触发-回应-反馈，VELA 会继续像工具，而不是会迭代的伙伴。",
+                "没有真实前台样例，工程完成会被误判成产品完成。",
+            ],
+            next_actions=[
+                "选一个真实入口，验证从触发到反馈记录是否闭合",
+                "确认 VELA 回应是否影响下一轮，而不是只写日志",
+                "只在闭环失败点派 Codex，先别开新模块",
+            ],
+        )
+    return AnalysisPacket(
+        intent=intent,
+        facts=["用户要推进 AugSun / ROLLQIIA 或 VELA 产品化事项。"],
+        judgment="先把目标、约束、当前卡点和最小下一步拆开，别让愿景压扁执行。",
+        risks=[
+            "把 Codex 输出当产品判断，会让前台变成工程日志。",
+            "只讲愿景不锁最小闭环，项目会继续漂亮地原地打转。",
+            "反馈只写日志不改变下一轮，VELA 会退回会说话的工具。",
+        ],
+        next_actions=["列出当前目标", "标出最大阻塞", "需要代码执行时再交给 /CODEX"],
+    )
+
+
 def analysis_layer(message: str, intent: str, codex_summary: str = "") -> AnalysisPacket:
     text = " ".join(str(message or "").split())
     if intent == "project_assistant":
-        return AnalysisPacket(
-            intent=intent,
-            facts=["用户要推进 AugSun / ROLLQIIA 或 VELA 产品化事项。"],
-            judgment="先把目标、约束、当前卡点和最小下一步拆开，别让愿景压扁执行。",
-            risks=[
-                "把 Codex 输出当产品判断，会让前台变成工程日志。",
-                "只讲愿景不锁最小闭环，项目会继续漂亮地原地打转。",
-                "反馈只写日志不改变下一轮，VELA 会退回会说话的工具。",
-            ],
-            next_actions=["列出当前目标", "标出最大阻塞", "需要代码执行时再交给 /CODEX"],
-        )
+        return project_analysis_packet(message, intent)
     if intent == "deep_analysis":
         return AnalysisPacket(
             intent=intent,
@@ -1817,19 +1838,30 @@ def render_codex_product_judgment(codex_output: str) -> str:
     return "VELA · CODEX 产品判断摘要\n" + render_vela_persona(packet)
 
 
-def deep_lane_model_reply_is_frontstage_ready(text: str) -> bool:
+def deep_lane_model_reply_is_frontstage_ready(text: str, *, intent: str = "", message: str = "") -> bool:
     raw = normalize_supporting_context(text)
     if not raw:
         return False
-    has_next = bool(re.search(r"(^|\n)\s*(下一步|修正路径)\s*[:：]", raw))
-    has_judgment = bool(re.search(r"(^|\n)\s*(K\s*[,，:：]\s*)?(目标|判断|根因|结论)\s*[:：]", raw))
-    has_boundary = bool(re.search(r"(^|\n)\s*(风险|依据|边界|误判点|上下文断点)\s*[:：]", raw))
+    has_next = bool(re.search(r"(^|\n)\s*(?:\*\*)?(下一步|修正路径|最短路径)(?:\*\*)?\s*[:：]", raw))
+    has_judgment = bool(
+        re.search(r"(^|\n)\s*(K\s*[,，:：]\s*)?(?:\*\*)?(目标|判断|根因|结论)(?:\*\*)?\s*[:：]", raw)
+    )
+    has_boundary = bool(
+        re.search(r"(^|\n)\s*(?:\*\*)?(风险|依据|边界|阻塞|误判点|上下文断点)(?:\*\*)?\s*[:：]", raw)
+    )
+    if intent == "project_assistant" and not _has_any(message, ("风险", "三条风险")):
+        return has_next and has_judgment
     return has_next and has_judgment and has_boundary
 
 
 def normalize_model_frontstage_reply(text: str) -> str:
     cleaned = normalize_supporting_context(text)
     cleaned = re.sub(r"(?im)^\s*(system|assistant|user)\s*[:：].*$", "", cleaned)
+    cleaned = re.sub(
+        r"\*\*(目标|判断|根因|结论|风险|依据|边界|阻塞|误判点|上下文断点|下一步|修正路径|最短路径)\*\*\s*[:：]",
+        r"\1：",
+        cleaned,
+    )
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
@@ -1854,7 +1886,11 @@ def engine_text_for_intent(
     if context.intent in {"project_assistant", "deep_analysis"}:
         result = adapter.generate(context)
         base = analysis_layer(context.message, context.intent, codex_summary=codex_summary)
-        if result.used_api and deep_lane_model_reply_is_frontstage_ready(result.text):
+        if result.used_api and deep_lane_model_reply_is_frontstage_ready(
+            result.text,
+            intent=context.intent,
+            message=context.message,
+        ):
             return normalize_model_frontstage_reply(result.text), result.adapter, result.used_api
         judgment = result.text or base.judgment
         if should_surface_deep_lane_status(result):

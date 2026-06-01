@@ -718,6 +718,54 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertNotIn("把 Codex 输出当产品判断", reply)
         self.assertNotIn("别把好运气请来当部门主管", reply)
 
+    def test_project_analysis_tracks_minimum_loop_request_instead_of_generic_risks(self):
+        product = load_module(PRODUCT, "vela_product_layers")
+
+        packet = product.analysis_layer(
+            "继续 AugSun，但不要开新模块，先查最小闭环",
+            "project_assistant",
+        )
+        rendered = product.render_vela_persona(packet)
+
+        self.assertIn("最小闭环", packet.judgment)
+        self.assertTrue(any("新模块" in risk for risk in packet.risks), packet.risks)
+        self.assertTrue(any("触发" in action and "反馈" in action for action in packet.next_actions), packet.next_actions)
+        self.assertNotIn("把 Codex 输出当产品判断", rendered)
+        self.assertNotIn("需要代码执行时再交给 /CODEX", rendered)
+
+    def test_markdown_project_model_reply_is_frontstage_ready_without_local_wrap(self):
+        product = load_module(PRODUCT, "vela_product_layers")
+
+        class MarkdownProjectAdapter:
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return SimpleNamespace(
+                    text=(
+                        "K，继续推进 AugSun，不开新模块。\n"
+                        "**判断**：当前最小闭环是跑通一个真实场景。\n"
+                        "**阻塞**：上下文断链，每轮像新对话。\n"
+                        "**最短路径**：选一个真实入口，验证触发到反馈是否闭合。"
+                    ),
+                    source="deepseek_chat",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            reply = product.run_layered_response(
+                "继续 AugSun，但不要开新模块，先查最小闭环",
+                intent="project_assistant",
+                reply_adapter=MarkdownProjectAdapter(),
+                log_dir=Path(tmp),
+            ).text
+
+        self.assertIn("当前最小闭环是跑通一个真实场景", reply)
+        self.assertIn("验证触发到反馈是否闭合", reply)
+        self.assertEqual(reply.count("最短路径"), 1)
+        self.assertNotIn("新模块会稀释验收口径", reply)
+        self.assertNotIn("别把好运气请来当部门主管", reply)
+
     def test_persona_alias_routes_through_guarded_local_tool_lane(self):
         router = load_module(ROUTER, "vela_router")
 
