@@ -47,11 +47,20 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "identity_memory_boundary",
             "sensitive_memory_guard",
             "style_feedback_no_customer_voice",
+            "daily_info_real_decision_filter",
+            "weather_schedule_boundary",
+            "market_policy_not_news_list",
+            "codex_git_noise_boundary",
+            "project_followup_minimum_action",
+            "deep_root_cause_not_mysticism",
             "feedback_smarter_then_hello",
             "feedback_misread_then_hello",
             "feedback_push_then_continue",
+            "feedback_too_long_then_continue",
+            "feedback_too_cold_then_hello",
         }:
             self.assertIn(required, scenario_ids)
+        self.assertGreaterEqual(report["case_count"], 23)
 
         for case in report["cases"]:
             with self.subTest(case["id"]):

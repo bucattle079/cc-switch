@@ -67,6 +67,11 @@ SINGLE_TURN_CASES = [
         "expected_intent": "daily_info",
     },
     {
+        "id": "daily_info_real_decision_filter",
+        "message": "这段方案别润色，帮我整理成可决策的三条",
+        "expected_intent": "daily_info",
+    },
+    {
         "id": "weather_jinjiang",
         "message": "明天晋江会不会下雨，能不能出门",
         "expected_intent": "weather_query",
@@ -79,6 +84,12 @@ SINGLE_TURN_CASES = [
         "required_reply_tokens": ["实时源：未接入", "天气"],
     },
     {
+        "id": "weather_schedule_boundary",
+        "message": "明天晋江要见客户，天气不准也给我出门风险",
+        "expected_intent": "weather_query",
+        "required_reply_tokens": ["实时源：未接入", "天气"],
+    },
+    {
         "id": "market_add_position",
         "message": "我不想看新闻列表，A股今天先等还是冲",
         "expected_intent": "market_brief",
@@ -87,6 +98,12 @@ SINGLE_TURN_CASES = [
     {
         "id": "market_no_raw_english",
         "message": "今天的资讯给我，但不要英文生肉新闻",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["不是实时直播", "实时源：未接入"],
+    },
+    {
+        "id": "market_policy_not_news_list",
+        "message": "市场今天如果不是实时，就别装直播，给我仓位风险判断",
         "expected_intent": "market_brief",
         "required_reply_tokens": ["不是实时直播", "实时源：未接入"],
     },
@@ -104,13 +121,30 @@ SINGLE_TURN_CASES = [
         "side_effects_allowed": False,
     },
     {
+        "id": "codex_git_noise_boundary",
+        "message": "Codex 状态，别把 Git 日志整段贴给我",
+        "expected_intent": "codex_task",
+        "codex_summary": "Codex smoke: route only, no raw Git log.",
+        "side_effects_allowed": False,
+    },
+    {
         "id": "project_augsun_continue",
         "message": "继续 AugSun 项目，别讲愿景，给三条风险",
         "expected_intent": "project_assistant",
     },
     {
+        "id": "project_followup_minimum_action",
+        "message": "继续 AugSun，先别开大工程，给最小推进动作",
+        "expected_intent": "project_assistant",
+    },
+    {
         "id": "deep_autopsy_vela",
         "message": "地狱验尸一下 VELA 为什么不智能",
+        "expected_intent": "deep_analysis",
+    },
+    {
+        "id": "deep_root_cause_not_mysticism",
+        "message": "根因验尸：为什么 VELA 听不懂我真正意思",
         "expected_intent": "deep_analysis",
     },
     {
@@ -164,6 +198,20 @@ TWO_TURN_CASES = [
         "followup": "继续",
         "expected_intent": "normal_chat",
         "required_reply_tokens": ["少菜单", "多判断", "不摆路牌", "少解释"],
+    },
+    {
+        "id": "feedback_too_long_then_continue",
+        "feedback": "太长了，别写论文，直接给我下一步",
+        "followup": "继续",
+        "expected_intent": "normal_chat",
+        "required_reply_tokens": ["少菜单", "多判断", "不摆路牌", "少解释"],
+    },
+    {
+        "id": "feedback_too_cold_then_hello",
+        "feedback": "你刚才太冷了，像把我当任务单",
+        "followup": "你好",
+        "expected_intent": "normal_chat",
+        "required_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短"],
     },
 ]
 
