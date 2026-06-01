@@ -358,6 +358,13 @@ def latest_session_reply_detail(latest_reply: dict[str, Any], *, max_session_age
 
 
 def runtime_next_action(failed: list[str]) -> dict[str, Any]:
+    if "inbound_to_reply" in failed:
+        return {
+            "kind": "inspect_weixin_reply_dispatch",
+            "checks": ["inbound_to_reply", "latest_session_reply", "cc_connect_process"],
+            "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
+            "wait_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90",
+        }
     if "weixin_inbound_seen" in failed or "latest_session_reply" in failed:
         return {
             "kind": "send_weixin_prompt",

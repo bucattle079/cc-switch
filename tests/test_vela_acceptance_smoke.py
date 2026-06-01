@@ -504,6 +504,9 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
         self.assertFalse(report["checks"]["inbound_to_reply"]["ok"])
         self.assertIn("message received", report["checks"]["inbound_to_reply"]["detail"])
         self.assertNotIn("content_len", report["checks"]["inbound_to_reply"]["detail"])
+        self.assertEqual(report["next_action"]["kind"], "inspect_weixin_reply_dispatch")
+        self.assertIn("inbound_to_reply", report["next_action"]["checks"])
+        self.assertIn("cc_connect_process", report["next_action"]["checks"])
 
     def test_runtime_audit_requires_weixin_inbound_not_only_internal_session_send(self):
         smoke = load_smoke_module()
