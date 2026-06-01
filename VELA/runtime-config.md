@@ -67,6 +67,10 @@ Market, weather, and realtime-info lanes must distinguish:
 
 The raw field names stay inside local state and tests. WeChat output uses plain Chinese status labels, such as whether realtime source is connected, whether cache is available, whether the answer is only a model risk suggestion, and what the user can do next.
 
+## Local Acceptance Smoke
+
+Run `python -X utf8 tools/vela_acceptance_smoke.py` for a local, side-effect-safe smoke check of foreground behavior. It uses temporary learning-loop storage by default, verifies route boundaries, two-turn feedback adaptation, weather/market freshness wording, Codex route gating without executing the bridge, and foreground leakage checks. Use `--json --log-dir <dir>` when a machine-readable report or retained smoke logs are needed.
+
 ## Persona Skeleton
 
 The runtime persona skeleton is mechanism-only:
