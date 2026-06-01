@@ -1180,7 +1180,15 @@ def select_model_and_tools(intent: str, env: dict[str, str] | None = None) -> To
             allow_codex=True,
             reason="Codex is reserved for engineering status and execution.",
         )
-    if intent in {"market_brief", "market_refresh", "freshness_status"}:
+    if intent == "freshness_status":
+        return ToolSelection(
+            model_adapter=_dialogue_adapter_for_env(env),
+            foreground_lane="fast",
+            allow_market=True,
+            allow_retrieval=False,
+            reason="Freshness checks return local source status immediately instead of waiting on market refresh.",
+        )
+    if intent in {"market_brief", "market_refresh"}:
         return ToolSelection(
             model_adapter=_dialogue_adapter_for_env(env),
             foreground_lane="cached",
@@ -1310,6 +1318,9 @@ def build_memory_candidate(message: str) -> dict:
         "不像",
         "不够直接",
         "客服话术",
+        "像客服",
+        "说人话",
+        "别解释身份",
         "真伙伴",
         "更像真人",
         "像真人",

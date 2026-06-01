@@ -122,6 +122,12 @@ SINGLE_TURN_CASES = [
         "required_reply_tokens": ["实时源：未接入", "天气"],
     },
     {
+        "id": "weather_trip_customer_plan",
+        "message": "明天晋江出差，上午见客户，天气会不会影响行程？",
+        "expected_intent": "weather_query",
+        "required_reply_tokens": ["实时源：未接入", "天气"],
+    },
+    {
         "id": "market_add_position",
         "message": "我不想看新闻列表，A股今天先等还是冲",
         "expected_intent": "market_brief",
@@ -136,6 +142,12 @@ SINGLE_TURN_CASES = [
     {
         "id": "market_policy_not_news_list",
         "message": "市场今天如果不是实时，就别装直播，给我仓位风险判断",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["不是实时直播", "实时源：未接入"],
+    },
+    {
+        "id": "market_position_risk_not_news_list",
+        "message": "今天A股如果不是实时就直说，我只要仓位风险，不要新闻列表",
         "expected_intent": "market_brief",
         "required_reply_tokens": ["不是实时直播", "实时源：未接入"],
     },
@@ -160,6 +172,13 @@ SINGLE_TURN_CASES = [
         "side_effects_allowed": False,
     },
     {
+        "id": "codex_progress_no_logs",
+        "message": "CODEX/ 当前进展，别贴日志路径和 diff",
+        "expected_intent": "codex_task",
+        "codex_summary": "Codex smoke: current progress summary without logs or paths.",
+        "side_effects_allowed": False,
+    },
+    {
         "id": "project_augsun_continue",
         "message": "继续 AugSun 项目，别讲愿景，给三条风险",
         "expected_intent": "project_assistant",
@@ -167,6 +186,11 @@ SINGLE_TURN_CASES = [
     {
         "id": "project_followup_minimum_action",
         "message": "继续 AugSun，先别开大工程，给最小推进动作",
+        "expected_intent": "project_assistant",
+    },
+    {
+        "id": "project_minimum_loop",
+        "message": "继续 AugSun，但不要开新模块，先查最小闭环",
         "expected_intent": "project_assistant",
     },
     {
@@ -193,6 +217,11 @@ SINGLE_TURN_CASES = [
     {
         "id": "style_feedback_no_customer_voice",
         "message": "别客服话术，像个真伙伴一样说",
+        "expected_intent": "style_feedback",
+    },
+    {
+        "id": "style_feedback_say_human",
+        "message": "你刚刚还是像客服，下一句别解释身份，直接说人话",
         "expected_intent": "style_feedback",
     },
 ]
@@ -661,7 +690,27 @@ def route_case(message: str) -> Any:
     return router.classify_intent(message)
 
 
+def case_latency_budget_ms(intent: str) -> int | None:
+    if intent in {"normal_chat", "daily_info", "weather_query", "freshness_status", "memory_related", "style_feedback"}:
+        return 2000
+    if intent in {"market_brief", "market_refresh", "world_brief"}:
+        return 8000
+    return None
+
+
+def attach_latency(case_result: dict[str, Any], started_at: float) -> dict[str, Any]:
+    latency_ms = int((time.perf_counter() - started_at) * 1000)
+    budget_ms = case_latency_budget_ms(str(case_result.get("intent") or ""))
+    latency_ok = budget_ms is None or latency_ms <= budget_ms
+    case_result["latency_ms"] = max(0, latency_ms)
+    case_result["latency_budget_ms"] = budget_ms
+    case_result["latency_ok"] = latency_ok
+    case_result["ok"] = bool(case_result.get("ok")) and latency_ok
+    return case_result
+
+
 def run_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
+    started_at = time.perf_counter()
     case_log_dir = base_log_dir / case["id"]
     case_log_dir.mkdir(parents=True, exist_ok=True)
     intent = route_case(case["message"])
@@ -682,7 +731,7 @@ def run_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
         tool_boundary_ok = False
     if intent.name != "codex_task" and intent.codex_allowed:
         tool_boundary_ok = False
-    return {
+    return attach_latency({
         "id": case["id"],
         "kind": "single_turn",
         "message": case["message"],
@@ -697,10 +746,11 @@ def run_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
         "latest_quality_log": latest_quality_log(case_log_dir),
         "leaks": leaks,
         "ok": route_ok and required_ok and tool_boundary_ok and not leaks,
-    }
+    }, started_at)
 
 
 def run_entrypoint_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
+    started_at = time.perf_counter()
     case_log_dir = base_log_dir / case["id"]
     case_log_dir.mkdir(parents=True, exist_ok=True)
     intent = route_case(case["message"])
@@ -737,7 +787,7 @@ def run_entrypoint_single_case(case: dict[str, Any], base_log_dir: Path) -> dict
         tool_boundary_ok = False
     if intent.name != "codex_task" and intent.codex_allowed:
         tool_boundary_ok = False
-    return {
+    return attach_latency({
         "id": case["id"],
         "kind": "entrypoint_single_turn",
         "message": case["message"],
@@ -752,10 +802,11 @@ def run_entrypoint_single_case(case: dict[str, Any], base_log_dir: Path) -> dict
         "latest_quality_log": latest_quality_log(case_log_dir),
         "leaks": leaks,
         "ok": route_ok and required_ok and tool_boundary_ok and not leaks,
-    }
+    }, started_at)
 
 
 def run_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
+    started_at = time.perf_counter()
     case_log_dir = base_log_dir / case["id"]
     case_log_dir.mkdir(parents=True, exist_ok=True)
     run_layered_response(
@@ -776,7 +827,7 @@ def run_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any
     route_ok = intent.name == case["expected_intent"]
     required_ok = required_tokens_present(result.text, case.get("required_reply_tokens"))
     adapted = "preference_or_feedback_adapted" in signal.get("response_quality_signals", [])
-    return {
+    return attach_latency({
         "id": case["id"],
         "kind": "two_turn",
         "message": case["followup"],
@@ -792,10 +843,11 @@ def run_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any
         "latest_quality_log": latest_quality_log(case_log_dir),
         "leaks": leaks,
         "ok": route_ok and required_ok and adapted and not leaks,
-    }
+    }, started_at)
 
 
 def run_entrypoint_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
+    started_at = time.perf_counter()
     case_log_dir = base_log_dir / case["id"]
     case_log_dir.mkdir(parents=True, exist_ok=True)
     original_run = router.run_layered_response
@@ -818,7 +870,7 @@ def run_entrypoint_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> di
     route_ok = intent.name == case["expected_intent"]
     required_ok = required_tokens_present(reply, case.get("required_reply_tokens"))
     adapted = "preference_or_feedback_adapted" in signal.get("response_quality_signals", [])
-    return {
+    return attach_latency({
         "id": case["id"],
         "kind": "entrypoint_two_turn",
         "message": case["followup"],
@@ -834,7 +886,7 @@ def run_entrypoint_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> di
         "latest_quality_log": latest_quality_log(case_log_dir),
         "leaks": leaks,
         "ok": route_ok and required_ok and adapted and not leaks,
-    }
+    }, started_at)
 
 
 def run_smoke_suite(

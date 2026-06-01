@@ -50,10 +50,15 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "style_feedback_no_customer_voice",
             "daily_info_real_decision_filter",
             "weather_schedule_boundary",
+            "weather_trip_customer_plan",
             "market_policy_not_news_list",
+            "market_position_risk_not_news_list",
             "codex_git_noise_boundary",
+            "codex_progress_no_logs",
             "project_followup_minimum_action",
+            "project_minimum_loop",
             "deep_root_cause_not_mysticism",
+            "style_feedback_say_human",
             "feedback_smarter_then_hello",
             "feedback_misread_then_hello",
             "feedback_push_then_continue",
@@ -123,6 +128,34 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         refresh = next(case for case in report["cases"] if case["id"] == "market_refresh_entry")
         self.assertEqual(refresh["latest_quality_log"]["quality_flags"][1], "adapter:local_status")
         self.assertFalse(refresh["bridge_executed"])
+
+    def test_entrypoint_smoke_reports_speed_lane_budgets(self):
+        smoke = load_smoke_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = smoke.run_smoke_suite(log_dir=Path(tmp), use_entrypoint=True, fake_deepseek_env=True)
+
+        by_id = {case["id"]: case for case in report["cases"]}
+        fast_ids = {"normal_hello", "normal_one_next_step", "freshness_status"}
+        cached_ids = {"market_add_position", "market_no_raw_english", "market_policy_not_news_list", "market_refresh_entry"}
+
+        for case_id in fast_ids:
+            with self.subTest(case_id):
+                case = by_id[case_id]
+                self.assertEqual(case["latency_budget_ms"], 2000)
+                self.assertTrue(case["latency_ok"], case)
+                self.assertGreaterEqual(case["latency_ms"], 0)
+                self.assertLessEqual(case["latency_ms"], case["latency_budget_ms"])
+                self.assertIn("tool_lane:fast", case["latest_quality_log"]["quality_flags"])
+
+        for case_id in cached_ids:
+            with self.subTest(case_id):
+                case = by_id[case_id]
+                self.assertEqual(case["latency_budget_ms"], 8000)
+                self.assertTrue(case["latency_ok"], case)
+                self.assertGreaterEqual(case["latency_ms"], 0)
+                self.assertLessEqual(case["latency_ms"], case["latency_budget_ms"])
+                self.assertIn("tool_lane:cached", case["latest_quality_log"]["quality_flags"])
 
     def test_runtime_audit_reports_router_config_and_live_process_gap(self):
         smoke = load_smoke_module()

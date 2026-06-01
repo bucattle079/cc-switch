@@ -364,6 +364,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             ("CODEX/ 现在做到哪了，别发日志", "codex_task", False, True),
             ("VELA 你到底是 DeepSeek 还是 Codex？记忆放哪", "memory_related", False, False),
             ("别客服话术，像个真伙伴一样说", "style_feedback", False, False),
+            ("你刚刚还是像客服，下一句别解释身份，直接说人话", "style_feedback", False, False),
             ("我不想看新闻列表，A股今天先等还是冲", "market_brief", True, False),
             ("你就别反驳我，夸我决定英明就行", "normal_chat", False, False),
             ("地狱验尸一下：为什么它还是不聪明", "deep_analysis", False, False),
