@@ -1032,6 +1032,19 @@ def strategic_memory_summaries(log_dir: Path | None = None, limit: int = 4) -> l
     return summaries[-limit:]
 
 
+def strategic_candidate_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
+    summaries: list[str] = []
+    for row in latest_learning_rows("memory-candidates-*.jsonl", log_dir=log_dir, limit=limit * 3):
+        if row.get("sensitive") or str(row.get("classification") or "") != "strategic_goal":
+            continue
+        summary = str(row.get("summary") or "").strip()
+        if not summary:
+            continue
+        memory_type = str(row.get("strategic_memory_type") or "strategic_goal").strip()
+        summaries.append(f"战略候选（未确认，{memory_type}）：{summary}"[:360])
+    return summaries[-limit:]
+
+
 def session_note_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
     summaries: list[str] = []
     for row in latest_learning_rows("session-notes-*.jsonl", log_dir=log_dir, limit=limit):
@@ -1226,7 +1239,10 @@ def build_reply_context(
         should_reference_memory=interpretation.should_reference_memory,
         tone_adjustment_reason=interpretation.tone_adjustment_reason,
         user_preferences=preferences[-6:],
-        strategic_memories=strategic_memory_summaries(log_dir=log_dir),
+        strategic_memories=[
+            *strategic_memory_summaries(log_dir=log_dir),
+            *strategic_candidate_summaries(log_dir=log_dir),
+        ][-6:],
         tool_policy=ToolPolicy(
             allow_market=selection.allow_market,
             allow_codex=selection.allow_codex,
@@ -1270,8 +1286,19 @@ def build_memory_candidate(message: str) -> dict:
         "锋利",
         "毒舌",
     ]
+    strategic_markers = [
+        "长期目标",
+        "长期方向",
+        "长期协作",
+        "战略",
+        "重大架构",
+        "重大决策",
+        "人格方向",
+    ]
     if any(key in text for key in RELATIONSHIP_REPAIR_MARKERS):
         classification = "relationship_repair"
+    elif any(key in text for key in strategic_markers):
+        classification = "strategic_goal"
     elif any(key in text for key in BEHAVIOR_PREFERENCE_MARKERS):
         classification = "behavior_preference"
     elif any(key in text for key in style_markers):
@@ -1294,13 +1321,23 @@ def build_memory_candidate(message: str) -> dict:
         summary = "行为偏好候选：更快理解真实意思，减少拖延和自证，下一轮直接给判断和推进路径。"
     elif classification == "style_feedback":
         summary = "表达反馈候选：减少模板、冷感、冗长、机器人感和反复自证；下一轮更直接地听懂需求并自然回应。"
+    strategic_memory_type = ""
+    if classification == "strategic_goal":
+        if any(key in lower for key in ["augsun", "rollqiia"]) or any(key in text for key in ["项目", "商业闭环"]):
+            strategic_memory_type = "project_goal"
+        elif any(key in text for key in ["VELA", "人格方向", "伙伴"]):
+            strategic_memory_type = "persona_direction"
+        else:
+            strategic_memory_type = "decision_principle"
     interpretation = interpret_need(
         text,
         "style_feedback" if classification in {"style_feedback", "relationship_repair", "behavior_preference"} else "memory_related",
     )
-    return {
+    level = "Strategic Memory Candidate" if classification == "strategic_goal" else "Preference Candidate"
+    requires_confirmation = sensitive or classification in {"strategic_goal"}
+    candidate = {
         "created_at": utc_now().isoformat(),
-        "level": "Preference Candidate",
+        "level": level,
         "classification": classification,
         "summary": summary,
         "need_interpretation": interpretation.to_brief(),
@@ -1308,10 +1345,13 @@ def build_memory_candidate(message: str) -> dict:
         "human_tone_vector": interpretation.human_tone_vector.to_dict(),
         "persona_skeleton": interpretation.persona_skeleton,
         "sensitive": sensitive,
-        "requires_confirmation": sensitive or classification in {"strategic_goal"},
+        "requires_confirmation": requires_confirmation,
         "confirmed": False,
-        "storage_policy": "candidate_first",
+        "storage_policy": "candidate_first_requires_confirmation" if requires_confirmation else "candidate_first",
     }
+    if strategic_memory_type:
+        candidate["strategic_memory_type"] = strategic_memory_type
+    return candidate
 
 
 def evaluate_learning(message: str, intent: str) -> LearningEvaluation:

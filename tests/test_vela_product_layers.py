@@ -867,6 +867,39 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertFalse(candidate["sensitive"])
         self.assertIn("A股", candidate["summary"])
 
+    def test_long_term_project_goal_is_strategic_memory_candidate(self):
+        product = load_product_module()
+
+        candidate = product.build_memory_candidate("记住：AugSun 长期目标是先跑通最小商业闭环")
+
+        self.assertEqual(candidate["level"], "Strategic Memory Candidate")
+        self.assertEqual(candidate["classification"], "strategic_goal")
+        self.assertEqual(candidate["strategic_memory_type"], "project_goal")
+        self.assertTrue(candidate["requires_confirmation"])
+        self.assertFalse(candidate["confirmed"])
+        self.assertIn("AugSun", candidate["summary"])
+
+    def test_context_builder_reads_strategic_candidates_without_confirming_them(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            product.record_memory_candidate(
+                "记住：AugSun 长期目标是先跑通最小商业闭环",
+                log_dir=Path(tmp),
+            )
+            context = product.build_reply_context(
+                "继续 AugSun 项目",
+                intent="project_assistant",
+                log_dir=Path(tmp),
+            )
+
+        strategic = " ".join(context.strategic_memories)
+        preferences = " ".join(context.user_preferences)
+        self.assertIn("战略候选", strategic)
+        self.assertIn("未确认", strategic)
+        self.assertIn("AugSun", strategic)
+        self.assertNotIn("候选偏好", preferences)
+        self.assertNotIn("AugSun 长期目标", preferences)
+
     def test_sensitive_memory_instruction_is_not_persisted_as_candidate(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
