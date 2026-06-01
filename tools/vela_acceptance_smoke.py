@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -76,6 +77,17 @@ SINGLE_TURN_CASES = [
 ]
 
 
+ENTRYPOINT_ONLY_CASES = [
+    {
+        "id": "market_refresh_entry",
+        "message": "刷新最新市场资讯",
+        "expected_intent": "market_refresh",
+        "required_reply_tokens": ["实时源：未接入", "前台先返回状态"],
+        "side_effects_allowed": False,
+    },
+]
+
+
 TWO_TURN_CASES = [
     {
         "id": "feedback_smarter_then_hello",
@@ -113,6 +125,19 @@ def supporting_context_for(intent: str, message: str) -> str:
 
 def latest_iteration_signal(log_dir: Path) -> dict[str, Any]:
     paths = sorted(log_dir.glob("human-iteration-*.jsonl"))
+    if not paths:
+        return {}
+    rows = [line for line in paths[-1].read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not rows:
+        return {}
+    try:
+        return json.loads(rows[-1])
+    except json.JSONDecodeError:
+        return {}
+
+
+def latest_quality_log(log_dir: Path) -> dict[str, Any]:
+    paths = sorted(log_dir.glob("reply-quality-*.jsonl"))
     if not paths:
         return {}
     rows = [line for line in paths[-1].read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -166,7 +191,7 @@ def run_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
     route_ok = intent.name == case["expected_intent"]
     required_ok = required_tokens_present(result.text, case.get("required_reply_tokens"))
     tool_boundary_ok = True
-    if intent.name != "market_brief" and intent.market_allowed:
+    if intent.name not in {"market_brief", "market_refresh"} and intent.market_allowed:
         tool_boundary_ok = False
     if intent.name != "codex_task" and intent.codex_allowed:
         tool_boundary_ok = False
@@ -182,6 +207,62 @@ def run_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
         "bridge_executed": False,
         "reply_preview": preview(result.text),
         "latest_iteration_signal": latest_iteration_signal(case_log_dir),
+        "latest_quality_log": latest_quality_log(case_log_dir),
+        "leaks": leaks,
+        "ok": route_ok and required_ok and tool_boundary_ok and not leaks,
+    }
+
+
+def run_entrypoint_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
+    case_log_dir = base_log_dir / case["id"]
+    case_log_dir.mkdir(parents=True, exist_ok=True)
+    intent = route_case(case["message"])
+    original_run = router.run_layered_response
+    original_refresh = router.schedule_market_refresh
+    original_codex = router.render_codex_bridge
+
+    def run_with_case_log(message: str, *args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("log_dir", case_log_dir)
+        kwargs.setdefault("reply_adapter", FallbackReplyAdapter())
+        return original_run(message, *args, **kwargs)
+
+    def fake_refresh(_text: str) -> Any:
+        return router.MarketRefreshJob(started=True, in_progress=False, pid=12345, reason="smoke_stub")
+
+    def fake_codex() -> str:
+        return "K，VELA · CODEX 产品判断摘要\n事实：- Codex smoke 只验证路由。\n判断：路由正确，不执行真实桥接。"
+
+    router.run_layered_response = run_with_case_log
+    router.schedule_market_refresh = fake_refresh
+    router.render_codex_bridge = fake_codex
+    try:
+        reply = router.reply_for(case["message"])
+    finally:
+        router.run_layered_response = original_run
+        router.schedule_market_refresh = original_refresh
+        router.render_codex_bridge = original_codex
+
+    leaks = find_leaks(reply)
+    route_ok = intent.name == case["expected_intent"]
+    required_ok = required_tokens_present(reply, case.get("required_reply_tokens"))
+    tool_boundary_ok = True
+    if intent.name not in {"market_brief", "market_refresh"} and intent.market_allowed:
+        tool_boundary_ok = False
+    if intent.name != "codex_task" and intent.codex_allowed:
+        tool_boundary_ok = False
+    return {
+        "id": case["id"],
+        "kind": "entrypoint_single_turn",
+        "message": case["message"],
+        "intent": intent.name,
+        "expected_intent": case["expected_intent"],
+        "market_allowed": intent.market_allowed,
+        "codex_allowed": intent.codex_allowed,
+        "side_effects_allowed": bool(case.get("side_effects_allowed", True)),
+        "bridge_executed": False,
+        "reply_preview": preview(reply),
+        "latest_iteration_signal": latest_iteration_signal(case_log_dir),
+        "latest_quality_log": latest_quality_log(case_log_dir),
         "leaks": leaks,
         "ok": route_ok and required_ok and tool_boundary_ok and not leaks,
     }
@@ -221,12 +302,60 @@ def run_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any
         "bridge_executed": False,
         "reply_preview": preview(result.text),
         "latest_iteration_signal": signal,
+        "latest_quality_log": latest_quality_log(case_log_dir),
         "leaks": leaks,
         "ok": route_ok and required_ok and adapted and not leaks,
     }
 
 
-def run_smoke_suite(log_dir: Path | None = None) -> dict[str, Any]:
+def run_entrypoint_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
+    case_log_dir = base_log_dir / case["id"]
+    case_log_dir.mkdir(parents=True, exist_ok=True)
+    original_run = router.run_layered_response
+
+    def run_with_case_log(message: str, *args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("log_dir", case_log_dir)
+        kwargs.setdefault("reply_adapter", FallbackReplyAdapter())
+        return original_run(message, *args, **kwargs)
+
+    router.run_layered_response = run_with_case_log
+    try:
+        router.reply_for(case["feedback"])
+        intent = route_case(case["followup"])
+        reply = router.reply_for(case["followup"])
+    finally:
+        router.run_layered_response = original_run
+
+    signal = latest_iteration_signal(case_log_dir)
+    leaks = find_leaks(reply)
+    route_ok = intent.name == case["expected_intent"]
+    required_ok = required_tokens_present(reply, case.get("required_reply_tokens"))
+    adapted = "preference_or_feedback_adapted" in signal.get("response_quality_signals", [])
+    return {
+        "id": case["id"],
+        "kind": "entrypoint_two_turn",
+        "message": case["followup"],
+        "feedback": case["feedback"],
+        "intent": intent.name,
+        "expected_intent": case["expected_intent"],
+        "market_allowed": intent.market_allowed,
+        "codex_allowed": intent.codex_allowed,
+        "side_effects_allowed": True,
+        "bridge_executed": False,
+        "reply_preview": preview(reply),
+        "latest_iteration_signal": signal,
+        "latest_quality_log": latest_quality_log(case_log_dir),
+        "leaks": leaks,
+        "ok": route_ok and required_ok and adapted and not leaks,
+    }
+
+
+def run_smoke_suite(
+    log_dir: Path | None = None,
+    *,
+    use_entrypoint: bool = False,
+    fake_deepseek_env: bool = False,
+) -> dict[str, Any]:
     created_tmp: tempfile.TemporaryDirectory[str] | None = None
     if log_dir is None:
         created_tmp = tempfile.TemporaryDirectory()
@@ -234,18 +363,34 @@ def run_smoke_suite(log_dir: Path | None = None) -> dict[str, Any]:
     else:
         base_log_dir = Path(log_dir)
         base_log_dir.mkdir(parents=True, exist_ok=True)
+    old_deepseek = os.environ.get("DEEPSEEK_API_KEY")
+    if fake_deepseek_env:
+        os.environ["DEEPSEEK_API_KEY"] = "smoke-deepseek-key"
     try:
-        cases = [run_single_case(case, base_log_dir) for case in SINGLE_TURN_CASES]
-        cases.extend(run_two_turn_case(case, base_log_dir) for case in TWO_TURN_CASES)
+        single_cases = [*SINGLE_TURN_CASES]
+        if use_entrypoint:
+            single_cases.extend(ENTRYPOINT_ONLY_CASES)
+            cases = [run_entrypoint_single_case(case, base_log_dir) for case in single_cases]
+            cases.extend(run_entrypoint_two_turn_case(case, base_log_dir) for case in TWO_TURN_CASES)
+        else:
+            cases = [run_single_case(case, base_log_dir) for case in single_cases]
+            cases.extend(run_two_turn_case(case, base_log_dir) for case in TWO_TURN_CASES)
         failed = [case["id"] for case in cases if not case["ok"]]
         return {
             "ok": not failed,
+            "entrypoint": use_entrypoint,
+            "fake_deepseek_env": fake_deepseek_env,
             "case_count": len(cases),
             "failed": failed,
             "log_dir": str(base_log_dir),
             "cases": cases,
         }
     finally:
+        if fake_deepseek_env:
+            if old_deepseek is None:
+                os.environ.pop("DEEPSEEK_API_KEY", None)
+            else:
+                os.environ["DEEPSEEK_API_KEY"] = old_deepseek
         if created_tmp is not None:
             created_tmp.cleanup()
 
@@ -266,13 +411,19 @@ def render_text_report(report: dict[str, Any]) -> str:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run VELA local foreground acceptance smoke scenarios.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    parser.add_argument("--entrypoint", action="store_true", help="Run through router.reply_for with safe stubs.")
+    parser.add_argument("--fake-deepseek-env", action="store_true", help="Set a temporary DeepSeek key sentinel during smoke.")
     parser.add_argument("--log-dir", type=Path, default=None, help="Use this learning-loop directory instead of a temp dir.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    report = run_smoke_suite(log_dir=args.log_dir)
+    report = run_smoke_suite(
+        log_dir=args.log_dir,
+        use_entrypoint=args.entrypoint,
+        fake_deepseek_env=args.fake_deepseek_env,
+    )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

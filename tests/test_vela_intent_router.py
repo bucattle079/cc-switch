@@ -88,7 +88,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertFalse(decision.needs_retrieval)
         self.assertFalse(decision.needs_codex)
 
-    def test_weather_reply_uses_deepseek_layer_without_weather_api(self):
+    def test_weather_reply_uses_local_boundary_adapter_without_weather_api(self):
         router = load_module(ROUTER, "vela_router")
 
         with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model weather")) as run:
@@ -97,9 +97,9 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertEqual(reply, "K model weather")
         self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
         self.assertIn("不调用外部天气 API", run.call_args.kwargs["supporting_context"])
-        self.assertNotIn("reply_adapter", run.call_args.kwargs)
+        self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
 
-    def test_market_reply_uses_deepseek_layer_with_cache_context(self):
+    def test_market_reply_uses_local_boundary_adapter_with_cache_context(self):
         router = load_module(ROUTER, "vela_router")
 
         with patch.object(router, "render_cached_market_reply", return_value="缓存市场判断"):
@@ -109,6 +109,30 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertEqual(reply, "K model market")
         self.assertEqual(run.call_args.kwargs["intent"], "market_brief")
         self.assertIn("缓存市场判断", run.call_args.kwargs["supporting_context"])
+        self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
+
+    def test_deepseek_env_does_not_take_over_hard_status_entry_lanes(self):
+        router = load_module(ROUTER, "vela_router")
+
+        cases = [
+            ("明天晋江天气", "weather_query"),
+            ("今天的资讯", "market_brief"),
+            ("这是实时的吗", "freshness_status"),
+            ("刷新最新市场资讯", "market_refresh"),
+        ]
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+            with tempfile.TemporaryDirectory() as tmp:
+                with patch.object(router, "MARKET_REFRESH_DIR", Path(tmp)):
+                    with patch.object(router.subprocess, "Popen") as popen:
+                        popen.return_value.pid = 12345
+                        with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K local boundary")) as run:
+                            for message, expected_intent in cases:
+                                with self.subTest(message):
+                                    reply = router.reply_for(message)
+                                    self.assertEqual(reply, "K local boundary")
+                                    self.assertEqual(run.call_args.kwargs["intent"], expected_intent)
+                                    self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
 
     def test_weather_reply_is_weather_surface_not_menu(self):
         router = load_module(ROUTER, "vela_router")

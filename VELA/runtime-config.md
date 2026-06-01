@@ -69,7 +69,7 @@ The raw field names stay inside local state and tests. WeChat output uses plain 
 
 ## Local Acceptance Smoke
 
-Run `python -X utf8 tools/vela_acceptance_smoke.py` for a local, side-effect-safe smoke check of foreground behavior. It uses temporary learning-loop storage by default, verifies route boundaries, two-turn feedback adaptation, weather/market freshness wording, Codex route gating without executing the bridge, and foreground leakage checks. Use `--json --log-dir <dir>` when a machine-readable report or retained smoke logs are needed.
+Run `python -X utf8 tools/vela_acceptance_smoke.py` for a local, side-effect-safe smoke check of foreground behavior. It uses temporary learning-loop storage by default, verifies route boundaries, two-turn feedback adaptation, weather/market freshness wording, Codex route gating without executing the bridge, and foreground leakage checks. Use `--json --log-dir <dir>` when a machine-readable report or retained smoke logs are needed. Use `--entrypoint --fake-deepseek-env` to exercise `router.reply_for()` with safe stubs and verify hard status lanes stay local even when the DeepSeek environment is present.
 
 ## Persona Skeleton
 

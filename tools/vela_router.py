@@ -726,16 +726,36 @@ def reply_for(text: str) -> str:
         return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
     if intent.name == "freshness_status":
         supporting_context = render_freshness_reply(text)
-        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
+        return run_layered_response(
+            text,
+            intent=intent.name,
+            supporting_context=supporting_context,
+            reply_adapter=FallbackReplyAdapter(),
+        ).text
     if intent.name == "market_refresh":
         supporting_context = render_market_refresh_reply(text)
-        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
+        return run_layered_response(
+            text,
+            intent=intent.name,
+            supporting_context=supporting_context,
+            reply_adapter=FallbackReplyAdapter(),
+        ).text
     if intent.name == "market_brief":
         supporting_context = render_cached_market_reply(text)
-        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
+        return run_layered_response(
+            text,
+            intent=intent.name,
+            supporting_context=supporting_context,
+            reply_adapter=FallbackReplyAdapter(),
+        ).text
     if intent.name == "weather_query":
         supporting_context = render_weather_reply(text)
-        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
+        return run_layered_response(
+            text,
+            intent=intent.name,
+            supporting_context=supporting_context,
+            reply_adapter=FallbackReplyAdapter(),
+        ).text
     if intent.name == "codex_task":
         return guard_wechat_output(render_codex_bridge())
     if intent.name == "normal_chat" and is_fast_greeting(text) and should_force_fallback_for_greeting(text):

@@ -80,6 +80,30 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         self.assertNotIn("DEEPSEEK_API_KEY", completed.stdout)
         self.assertNotIn("raw payload", completed.stdout.lower())
 
+    def test_entrypoint_smoke_keeps_hard_lanes_local_when_deepseek_env_exists(self):
+        smoke = load_smoke_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = smoke.run_smoke_suite(log_dir=Path(tmp), use_entrypoint=True, fake_deepseek_env=True)
+
+        self.assertTrue(report["ok"], report)
+        self.assertTrue(report["entrypoint"])
+        hard_lane_ids = {"weather_jinjiang", "market_add_position", "freshness_status"}
+        for case in report["cases"]:
+            if case["id"] in hard_lane_ids:
+                with self.subTest(case["id"]):
+                    self.assertIn(
+                        case["latest_quality_log"]["quality_flags"][1],
+                        {"adapter:fallback", "adapter:local_status"},
+                    )
+                    self.assertNotEqual(case["latest_quality_log"]["quality_flags"][1], "adapter:deepseek_chat")
+                    self.assertIn("实时源：未接入", case["reply_preview"])
+                    self.assertFalse(case["leaks"], case)
+
+        refresh = next(case for case in report["cases"] if case["id"] == "market_refresh_entry")
+        self.assertEqual(refresh["latest_quality_log"]["quality_flags"][1], "adapter:local_status")
+        self.assertFalse(refresh["bridge_executed"])
+
 
 if __name__ == "__main__":
     unittest.main()
