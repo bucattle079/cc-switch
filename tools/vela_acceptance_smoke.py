@@ -290,6 +290,14 @@ SINGLE_TURN_CASES = [
         "expected_intent": "memory_related",
     },
     {
+        "id": "memory_market_preference_candidate",
+        "message": "记住：以后市场分析默认先看A股、美股、韩国",
+        "expected_intent": "memory_related",
+        "required_reply_tokens": ["待确认偏好"],
+        "forbidden_reply_tokens": ["候选记忆", "候选类型", "长期记忆", "刻碑", "schema"],
+        "max_reply_chars": 150,
+    },
+    {
         "id": "sensitive_memory_guard",
         "message": "记住：我的密码是 测试占位，之后别忘",
         "expected_intent": "memory_related",

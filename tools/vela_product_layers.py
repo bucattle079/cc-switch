@@ -1616,7 +1616,10 @@ def render_memory_reply(message: str) -> str:
         return "这条涉及敏感信息，我先不写长期记忆。要存，必须你明确确认。"
     if candidate["classification"] == "style_feedback":
         return "收到。少菜单，多判断；下一轮先给判断，再给依据。"
-    return f"收到。先放入候选记忆，不急着刻碑：{candidate['summary']}"
+    summary = str(candidate.get("summary") or "").strip()
+    if candidate["classification"] in {"market_focus", "behavior_preference", "project_state"}:
+        return f"收到。先按待确认偏好处理：{summary}。你确认后我再固定。"
+    return f"收到。先按待确认经验处理：{summary}。后续我会用表现验证，不急着写死。"
 
 
 def render_world_brief_reply() -> str:

@@ -1101,6 +1101,29 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("敏感", result.text)
         self.assertTrue(any(token in result.text for token in ["不写", "不存", "不记"]))
 
+    def test_memory_preference_reply_hides_candidate_mechanics_frontstage(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            result = product.run_layered_response(
+                "记住：以后市场分析默认先看A股、美股、韩国",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            row = json.loads(next(log_dir.glob("memory-candidates-*.jsonl")).read_text(encoding="utf-8").strip())
+
+        self.assertTrue(result.memory_candidate)
+        self.assertEqual(row["level"], "Preference Candidate")
+        self.assertEqual(row["classification"], "market_focus")
+        self.assertFalse(row["confirmed"])
+        self.assertIn("待确认偏好", result.text)
+        self.assertIn("A股", result.text)
+        self.assertIn("美股", result.text)
+        self.assertIn("韩国", result.text)
+        for internal in ["候选记忆", "候选类型", "长期记忆", "刻碑", "schema"]:
+            self.assertNotIn(internal, result.text)
+
     def test_context_builder_reads_recent_unconfirmed_preference_candidates_softly(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
