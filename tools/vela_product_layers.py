@@ -54,6 +54,10 @@ ENGINEERING_NOISE_TOKENS = (
     "traceback",
     "not implemented",
     "schema_version",
+    "diff --git",
+    "raw git log",
+    "author:",
+    "date:",
     "tokens_used",
     "token_budget",
     "data_status",
@@ -121,6 +125,10 @@ CODEX_COMMAND_LINE_RE = re.compile(
 CODEX_LOG_LINE_RE = re.compile(r"^\s*(?:exit code|wall time|stdout|stderr|warning:)\b", re.IGNORECASE)
 CODEX_PATH_ONLY_RE = re.compile(r"^\s*(?:[A-Za-z]:\\|\\\\|\$[A-Z_]+[\\/])")
 CODEX_AUTOMATION_META_LINE_RE = re.compile(r"^\s*Automation (?:ID|memory)\s*:", re.IGNORECASE)
+CODEX_GIT_OUTPUT_LINE_RE = re.compile(
+    r"^\s*(?:commit\s+[0-9a-f]{7,}|author:|date:|diff --git|index\s+[0-9a-f.]+|---\s+a/|\+\+\+\s+b/|@@|\+\s|\-\s)",
+    re.IGNORECASE,
+)
 STAGE_DIRECTION_RE = re.compile(r"[（(][^）)\n]{1,40}[）)]")
 EXTRA_FORBIDDEN_DIALOGUE_PHRASES = (
     "作为 VELA",
@@ -1600,6 +1608,7 @@ def sanitize_codex_summary(codex_output: str) -> str:
             or CODEX_LOG_LINE_RE.search(line)
             or CODEX_PATH_ONLY_RE.search(line)
             or CODEX_AUTOMATION_META_LINE_RE.search(line)
+            or CODEX_GIT_OUTPUT_LINE_RE.search(line)
         ):
             continue
         line = re.sub(r"::[A-Za-z0-9_-]+\{[^}]*\}", "后台通知已收起。", line)

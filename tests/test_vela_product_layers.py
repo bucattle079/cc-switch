@@ -873,6 +873,42 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("Desktop/CC-WECHAT", text)
         self.assertNotIn("](", text)
 
+    def test_codex_summary_hides_raw_git_log_and_diff_noise(self):
+        product = load_product_module()
+
+        result = product.run_layered_response(
+            "Git 状态，别贴日志",
+            intent="codex_task",
+            codex_summary=(
+                "commit abcdef1234567890\n"
+                "Author: Codex Bot <bot@example.test>\n"
+                "Date: Mon Jun 1 12:00:00 2026 +0800\n"
+                "diff --git a/tools/vela_router.py b/tools/vela_router.py\n"
+                "index 1111111..2222222 100644\n"
+                "--- a/tools/vela_router.py\n"
+                "+++ b/tools/vela_router.py\n"
+                "@@ -1,2 +1,2 @@\n"
+                "+ schema_version: debug\n"
+                "结论：天气前台已改成人话，Codex 只需要给产品判断。"
+            ),
+        )
+        text = result.text
+
+        self.assertIn("CODEX 产品判断摘要", text)
+        self.assertIn("天气前台已改成人话", text)
+        for leaked in [
+            "commit abcdef",
+            "Author:",
+            "Date:",
+            "diff --git",
+            "index 1111111",
+            "--- a/",
+            "+++ b/",
+            "@@",
+            "schema_version",
+        ]:
+            self.assertNotIn(leaked, text)
+
     def test_reply_quality_record_is_structured_jsonl(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
