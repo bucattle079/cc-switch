@@ -60,7 +60,7 @@ Mechanism distillation is abstract behavior only: VELA keeps her own identity, s
 
 Learning-loop candidates are soft context, not permanent truth. Sensitive memory instructions are not persisted as candidates; VELA should state the boundary in plain Chinese and wait for explicit confirmation before any sensitive storage path is considered. Non-sensitive preference candidates can shape the next reply, but they must remain marked as unconfirmed until the user confirms them.
 
-Session notes are short-term local context, not permanent memory. Each foreground reply writes a session note, and the context builder reads recent session notes alongside interaction logs, candidate preferences, and strategic memory before the next reply. This lets VELA continue a thread without promoting temporary context into long-term truth.
+Session notes are short-term local context, not permanent memory. Each foreground reply writes a session note, and the context builder reads recent session notes alongside interaction logs, candidate preferences, human-iteration next-turn signals, and strategic memory before the next reply. This lets VELA continue a thread without promoting temporary context into long-term truth.
 
 ## Factual Status Boundary
 

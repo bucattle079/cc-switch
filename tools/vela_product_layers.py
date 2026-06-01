@@ -1026,6 +1026,18 @@ def session_note_summaries(log_dir: Path | None = None, limit: int = 3) -> list[
     return summaries[-limit:]
 
 
+def iteration_preference_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
+    summaries: list[str] = []
+    for row in latest_learning_rows("human-iteration-*.jsonl", log_dir=log_dir, limit=limit * 3):
+        feedback_type = str(row.get("user_feedback_type") or "").strip()
+        improvement = str(row.get("next_turn_improvement") or "").strip()
+        correction_needed = bool(row.get("correction_needed") or row.get("tone_adjustment_candidate"))
+        if not correction_needed or not improvement or feedback_type == "none":
+            continue
+        summaries.append(f"迭代提示（未确认，{feedback_type}）：{improvement}"[:360])
+    return summaries[-limit:]
+
+
 def infer_pressure_scenario(message: str, intent: str) -> str:
     text = str(message or "").lower()
     if intent == "style_feedback":
@@ -1138,6 +1150,7 @@ def build_reply_context(
             "preference",
         } and summary:
             preferences.append(f"候选偏好（未确认，{classification}）：{summary}")
+    preferences.extend(iteration_preference_summaries(log_dir=log_dir, limit=3))
     selection = select_model_and_tools(intent)
     interpretation = interpret_need(normalized_message, intent)
     return ReplyContext(

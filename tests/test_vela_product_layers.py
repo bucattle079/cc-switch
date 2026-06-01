@@ -1090,6 +1090,45 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("AugSun", context.recent_summary)
         self.assertIn("最小下一步", context.recent_summary)
 
+    def test_context_builder_reads_iteration_signal_for_next_turn_style(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.record_iteration_signal(
+                product.HumanIterationSignal(
+                    user_message_type="style_feedback",
+                    detected_user_state="表达纠偏",
+                    inferred_hidden_need="用户需要下一轮更自然、更直接。",
+                    active_persona_capabilities=["Meaning Decoder", "Witty Correction"],
+                    response_behavior_mode="style_feedback",
+                    response_quality_signals=["preference_or_feedback_adapted"],
+                    user_feedback_type="style_expression",
+                    correction_needed=True,
+                    memory_update_candidate=False,
+                    tone_adjustment_candidate=True,
+                    next_turn_improvement="下一轮减少模板、冷感、冗长和机械自证，直接给判断。",
+                ),
+                log_dir=log_dir,
+            )
+
+            context = product.build_reply_context(
+                "你好",
+                intent="normal_chat",
+                log_dir=log_dir,
+            )
+            reply = product.run_layered_response(
+                "你好",
+                intent="normal_chat",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+        joined_preferences = " ".join(context.user_preferences)
+        self.assertIn("迭代提示", joined_preferences)
+        self.assertIn("直接给判断", joined_preferences)
+        self.assertTrue(any(token in reply.text for token in ["少菜单", "直接给判断", "机械味", "不像提示牌"]))
+        self.assertNotIn("我已校准", reply.text)
+
     def test_confirmed_preferences_require_user_confirmation(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
