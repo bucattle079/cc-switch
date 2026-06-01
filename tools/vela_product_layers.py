@@ -1926,7 +1926,7 @@ def engine_text_for_intent(
         )
         if model_frontstage_ready:
             return normalize_model_frontstage_reply(result.text), result.adapter, result.used_api
-        if context.intent == "deep_analysis" and result.used_api:
+        if context.intent == "deep_analysis":
             judgment = base.judgment
         else:
             judgment = base.judgment if has_hazards else result.text or base.judgment

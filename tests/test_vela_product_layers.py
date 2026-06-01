@@ -1617,6 +1617,35 @@ class VelaProductLayerTests(unittest.TestCase):
         ]:
             self.assertNotIn(internal, result.text)
 
+    def test_deep_analysis_fallback_does_not_duplicate_next_step_sections(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_deep_fallback_duplicate")
+
+        class DeepFallbackWithNextStep(reply_engine.ReplyAdapter):
+            name = "fallback"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K，根因不是智商，是链路断裂。下一步：先修误判，再复测真实场景。",
+                    source="fallback_variant",
+                    used_api=False,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "地狱验尸一下 VELA 为什么不智能",
+                intent="deep_analysis",
+                log_dir=Path(tmp),
+                reply_adapter=DeepFallbackWithNextStep(),
+            )
+
+        self.assertIn("根因", result.text)
+        self.assertIn("误判点", result.text)
+        self.assertIn("上下文断点", result.text)
+        self.assertLessEqual(result.text.count("下一步："), 1)
+        self.assertLessEqual(result.text.count("风险："), 1)
+
     def test_deep_analysis_rejects_unbounded_model_memory_claims(self):
         product = load_product_module()
         reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_deep_bad_model")
