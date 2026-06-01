@@ -49,12 +49,16 @@ Every WeChat-facing reply should carry internal context that is not exposed to t
 - `response_behavior_mode`: the behavior mode used by the reply engine, aligned with but more explicit than `response_mode`.
 - `should_clarify`, `should_push_back`, `should_use_evidence_gate`, `should_reference_memory`: boolean behavior controls for the next reply.
 - `tone_adjustment_reason`: short internal reason for the tone shift.
-- `user_preferences`: confirmed preferences and recent style feedback candidates.
+- `user_preferences`: confirmed preferences plus recent non-sensitive preference candidates, clearly marked as unconfirmed when they are not permanent memory.
 - `strategic_memories`: confirmed long-term project/persona/decision memory, used only when relevant.
 - `human_iteration_signal`: local post-reply learning row with `user_message_type`, `detected_user_state`, `inferred_hidden_need`, `active_persona_capabilities`, `response_behavior_mode`, `response_quality_signals`, `user_feedback_type`, `correction_needed`, `memory_update_candidate`, `tone_adjustment_candidate`, and `next_turn_improvement`.
 
 These fields are prompt and learning inputs only. They must not appear in WeChat output as raw keys, schema names, paths, logs, or debug text.
 Mechanism distillation is abstract behavior only: VELA keeps her own identity, stores no source lines, and never roleplays a source character.
+
+## Memory Safety
+
+Learning-loop candidates are soft context, not permanent truth. Sensitive memory instructions are not persisted as candidates; VELA should state the boundary in plain Chinese and wait for explicit confirmation before any sensitive storage path is considered. Non-sensitive preference candidates can shape the next reply, but they must remain marked as unconfirmed until the user confirms them.
 
 ## Factual Status Boundary
 

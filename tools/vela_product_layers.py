@@ -1106,11 +1106,20 @@ def build_reply_context(
         for row in latest_learning_rows("confirmed-preferences-*.jsonl", log_dir=log_dir, limit=8)
         if row.get("summary")
     ]
-    preferences.extend(
-        str(row.get("summary"))
-        for row in latest_learning_rows("memory-candidates-*.jsonl", log_dir=log_dir, limit=8)
-        if row.get("classification") in {"style_feedback", "relationship_repair", "behavior_preference"} and row.get("summary")
-    )
+    for row in latest_learning_rows("memory-candidates-*.jsonl", log_dir=log_dir, limit=8):
+        if row.get("sensitive") or row.get("requires_confirmation"):
+            continue
+        classification = str(row.get("classification") or "").strip()
+        summary = str(row.get("summary") or "").strip()
+        if classification in {
+            "style_feedback",
+            "relationship_repair",
+            "behavior_preference",
+            "market_focus",
+            "project_state",
+            "preference",
+        } and summary:
+            preferences.append(f"候选偏好（未确认，{classification}）：{summary}")
     selection = select_model_and_tools(intent)
     interpretation = interpret_need(normalized_message, intent)
     return ReplyContext(
@@ -1235,6 +1244,15 @@ def evaluate_learning(message: str, intent: str) -> LearningEvaluation:
             reason="Identity/core-tool question is context, not a memory instruction.",
         )
     candidate = build_memory_candidate(message)
+    if candidate.get("sensitive"):
+        return LearningEvaluation(
+            should_record_candidate=False,
+            classification=str(candidate.get("classification") or ""),
+            candidate_level=str(candidate.get("level") or "Preference Candidate"),
+            should_affect_next_reply=False,
+            promote_to_strategic_memory=False,
+            reason="Sensitive candidate requires explicit confirmation and is not persisted.",
+        )
     classification = str(candidate.get("classification") or "")
     return LearningEvaluation(
         should_record_candidate=True,
@@ -1475,6 +1493,8 @@ def engine_text_for_intent(
         return render_codex_product_judgment(codex_summary), "codex_bridge", False
     if context.intent in {"freshness_status", "market_refresh"} and context.supporting_context.strip():
         return context.supporting_context.strip(), "local_status", False
+    if context.intent == "memory_related" and _is_explicit_memory_instruction(context.message):
+        return render_memory_reply(context.message), "local_memory_guard", False
     if context.intent in {"project_assistant", "deep_analysis"}:
         result = adapter.generate(context)
         base = analysis_layer(context.message, context.intent, codex_summary=codex_summary)

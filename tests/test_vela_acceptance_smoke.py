@@ -44,6 +44,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "project_augsun_continue",
             "deep_autopsy_vela",
             "identity_memory_boundary",
+            "sensitive_memory_guard",
             "style_feedback_no_customer_voice",
             "feedback_smarter_then_hello",
             "feedback_misread_then_hello",

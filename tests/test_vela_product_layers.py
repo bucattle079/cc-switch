@@ -799,6 +799,42 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertFalse(candidate["sensitive"])
         self.assertIn("A股", candidate["summary"])
 
+    def test_sensitive_memory_instruction_is_not_persisted_as_candidate(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "记住：我的密码是 测试占位，之后别忘",
+                intent="memory_related",
+                log_dir=Path(tmp),
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            memory_files = list(Path(tmp).glob("memory-candidates-*.jsonl"))
+
+        self.assertFalse(result.memory_candidate)
+        self.assertEqual(memory_files, [])
+        self.assertIn("敏感", result.text)
+        self.assertTrue(any(token in result.text for token in ["不写", "不存", "不记"]))
+
+    def test_context_builder_reads_recent_unconfirmed_preference_candidates_softly(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            product.record_memory_candidate(
+                "记住：以后市场分析默认先看A股、美股、韩国",
+                log_dir=Path(tmp),
+            )
+            context = product.build_reply_context(
+                "今天市场怎么看",
+                intent="market_brief",
+                log_dir=Path(tmp),
+            )
+
+        joined = " ".join(context.user_preferences)
+        self.assertIn("候选", joined)
+        self.assertIn("未确认", joined)
+        self.assertIn("A股", joined)
+        self.assertIn("美股", joined)
+        self.assertIn("韩国", joined)
+
     def test_product_constants_preserve_market_weights_and_confirmed_schedule(self):
         product = load_product_module()
 
