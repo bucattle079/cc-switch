@@ -346,12 +346,38 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_current_foreign_market_does_not_use_a_share_snapshot(self):
         router = load_module(ROUTER, "vela_router")
 
-        reply = router.render_cached_market_reply("现在美股市场如何")
+        for prompt in ["现在美股市场如何", "现在美股资讯"]:
+            with self.subTest(prompt):
+                reply = router.render_cached_market_reply(prompt)
 
-        self.assertIn("实时源：暂不可用", reply)
-        self.assertIn("缓存降级", reply)
-        self.assertNotIn("A股快照", reply)
-        self.assertNotIn("上证指数", reply)
+                self.assertIn("实时源：暂不可用", reply)
+                self.assertIn("缓存降级", reply)
+                self.assertIn("外盘实时源未接通", reply)
+                self.assertNotIn("A股快照", reply)
+                self.assertNotIn("上证指数", reply)
+
+    def test_current_market_news_uses_current_lane_not_cache_summary(self):
+        router = load_module(ROUTER, "vela_router")
+        live = SimpleNamespace(
+            ok=True,
+            as_of="2026-06-01 19:15 北京时间",
+            source="新浪财经行情快照",
+            lines=[
+                "上证指数 4057.74（-10.83，-0.27%）",
+                "深证成指 15340.36（-234.78，-1.51%）",
+            ],
+            source_status="实时源：已接入",
+            note="",
+            error="",
+        )
+
+        with patch.object(router, "fetch_live_market_snapshot", return_value=live):
+            reply = router.render_cached_market_reply("当前市场新闻")
+
+        self.assertIn("实时源：已接入", reply)
+        self.assertIn("A股快照", reply)
+        self.assertNotIn("不是实时直播；实时源：未接入", reply)
+        self.assertNotIn("60秒判断", reply)
 
     def test_current_global_market_does_not_use_a_share_snapshot(self):
         router = load_module(ROUTER, "vela_router")

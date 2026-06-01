@@ -199,6 +199,22 @@ SINGLE_TURN_CASES = [
         "max_reply_chars": 620,
     },
     {
+        "id": "market_current_news_realtime_compact",
+        "message": "当前市场新闻",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["实时源：已接入", "A股快照", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["不是实时直播；实时源：未接入", "60秒判断", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
+        "max_reply_chars": 620,
+    },
+    {
+        "id": "market_current_us_info_not_a_share",
+        "message": "现在美股资讯",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["实时源：暂不可用", "外盘实时源未接通", "全球", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["A股快照", "上证指数", "以下基于最近缓存", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
+        "max_reply_chars": 620,
+    },
+    {
         "id": "market_current_global_not_a_share",
         "message": "现在全球市场资讯",
         "expected_intent": "market_brief",

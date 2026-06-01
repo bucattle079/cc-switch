@@ -178,8 +178,28 @@ REFRESH_KEYWORDS = [
     "需要实时",
     "要实时",
 ]
-CURRENT_MARKET_TIME_KEYWORDS = ["今天", "现在", "目前", "当下", "此刻", "最新", "实时", "盘中", "早盘", "午盘", "收盘"]
-CURRENT_MARKET_SURFACE_KEYWORDS = ["a股", "a 股", "上证", "沪深300", "深成指", "创业板", "市场", "盘面"]
+CURRENT_MARKET_TIME_KEYWORDS = ["今天", "现在", "目前", "当前", "当下", "此刻", "最新", "实时", "盘中", "早盘", "午盘", "收盘"]
+CURRENT_MARKET_SURFACE_KEYWORDS = [
+    "a股",
+    "a 股",
+    "上证",
+    "沪深300",
+    "深成指",
+    "创业板",
+    "美股",
+    "nasdaq",
+    "s&p",
+    "sp500",
+    "韩国",
+    "kospi",
+    "日本",
+    "nikkei",
+    "全球",
+    "世界",
+    "外盘",
+    "市场",
+    "盘面",
+]
 WORLD_KEYWORDS = ["世界", "全球", "军政", "地缘", "外交", "战争", "制裁", "航运", "能源安全", "世界简报"]
 CODEX_KEYWORDS = [
     "codex",
