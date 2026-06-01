@@ -149,6 +149,10 @@ SINA_A_SHARE_SYMBOLS = {
 
 LIVE_CHINA_MARKERS = ("a股", "a 股", "上证", "沪深", "深成", "创业板", "人民币", "盘面")
 LIVE_FOREIGN_MARKERS = (
+    "全球",
+    "世界",
+    "国际市场",
+    "外盘",
     "美股",
     "nasdaq",
     "s&p",
@@ -401,7 +405,7 @@ def fetch_live_market_snapshot(query: str = "", timeout: int = DEFAULT_TIMEOUT) 
             source="外盘行情快照",
             lines=[],
             source_status="实时源：暂不可用",
-            note="当前前台只接入 A股行情快照；外盘实时源未接通，不能拿 A股数据冒充。",
+            note="当前前台只接入内地指数行情源；外盘实时源未接通，不能拿本地指数冒充全球市场。",
             error="foreign_live_source_not_configured",
         )
     try:
@@ -1050,15 +1054,25 @@ def format_live_market_frontstage(
         return "\n".join(lines)
 
     lines = [f"{snapshot.source_status or '实时源：暂不可用'}；缓存降级。"]
+    if snapshot.note:
+        lines.append(f"边界：{snapshot.note}")
     if fallback_status is not None:
         lines.append(f"最近缓存：{fallback_status.last_updated}，只做方向判断。")
     if fallback_brief is not None:
-        lines.extend(
-            [
-                "判断：实时源没回来前，不下新的盘中结论；按缓存看，A股仍按震荡修复处理，仓位只留试探。",
-                "下一步：先等实时源恢复，或明确说“展开缓存报告”；别把旧数据当今天的刀。人类已经很会自欺，交易别再添一把火。",
-            ]
-        )
+        if snapshot.error == "foreign_live_source_not_configured" or "外盘" in snapshot.source:
+            lines.extend(
+                [
+                    "判断：全球/外盘实时源没回来前，不下新的盘中结论；只按缓存看风险方向，不把本地指数外推成全球市场。",
+                    "下一步：先等外盘实时源接通，或明确说“展开缓存报告”；旧数据只配做路标，不配当方向盘。",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "判断：实时源没回来前，不下新的盘中结论；按缓存看，A股仍按震荡修复处理，仓位只留试探。",
+                    "下一步：先等实时源恢复，或明确说“展开缓存报告”；别把旧数据当今天的刀。人类已经很会自欺，交易别再添一把火。",
+                ]
+            )
     else:
         lines.extend(
             [

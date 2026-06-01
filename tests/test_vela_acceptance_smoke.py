@@ -129,6 +129,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "market_add_position",
             "market_current_a_share_realtime_compact",
             "market_current_now_info_realtime_compact",
+            "market_current_global_not_a_share",
             "freshness_status",
         }
         for case in report["cases"]:
@@ -161,6 +162,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "market_add_position",
             "market_current_a_share_realtime_compact",
             "market_current_now_info_realtime_compact",
+            "market_current_global_not_a_share",
             "market_no_raw_english",
             "market_policy_not_news_list",
             "market_impulse_brake",

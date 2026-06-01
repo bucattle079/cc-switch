@@ -199,6 +199,14 @@ SINGLE_TURN_CASES = [
         "max_reply_chars": 620,
     },
     {
+        "id": "market_current_global_not_a_share",
+        "message": "现在全球市场资讯",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["实时源：暂不可用", "外盘实时源未接通", "全球", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["A股快照", "上证指数", "以下基于最近缓存", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
+        "max_reply_chars": 620,
+    },
+    {
         "id": "market_no_raw_english",
         "message": "今天的资讯给我，但不要英文生肉新闻",
         "expected_intent": "market_brief",

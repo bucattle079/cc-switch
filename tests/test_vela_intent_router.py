@@ -353,6 +353,21 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertNotIn("A股快照", reply)
         self.assertNotIn("上证指数", reply)
 
+    def test_current_global_market_does_not_use_a_share_snapshot(self):
+        router = load_module(ROUTER, "vela_router")
+
+        for prompt in ["现在全球市场资讯", "现在世界市场有什么重要新闻"]:
+            with self.subTest(prompt):
+                reply = router.render_cached_market_reply(prompt)
+
+                self.assertIn("实时源：暂不可用", reply)
+                self.assertIn("缓存降级", reply)
+                self.assertIn("外盘实时源未接通", reply)
+                self.assertIn("全球", reply)
+                self.assertNotIn("A股仍", reply)
+                self.assertNotIn("A股快照", reply)
+                self.assertNotIn("上证指数", reply)
+
     def test_expanded_market_news_can_return_full_report(self):
         router = load_module(ROUTER, "vela_router")
 
