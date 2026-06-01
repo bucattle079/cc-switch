@@ -1588,6 +1588,22 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("raw payload", result.text.lower())
         self.assertNotIn("diff --git", result.text)
 
+    def test_project_minimum_loop_fallback_keeps_specific_judgment(self):
+        product = load_product_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "继续 AugSun 项目，但不要开新模块，先查最小闭环",
+                intent="project_assistant",
+                log_dir=Path(tmp),
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+        self.assertIn("判断：先锁最小闭环", result.text)
+        self.assertIn("一个触发、一个回应、一个反馈记录", result.text)
+        self.assertNotIn("项目线先收束", result.text)
+        self.assertNotIn("别把愿景堆成雾", result.text)
+
     def test_deep_analysis_hides_memory_mechanics_from_frontstage(self):
         product = load_product_module()
 

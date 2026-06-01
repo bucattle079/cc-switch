@@ -1643,9 +1643,12 @@ def render_normal_chat_persona(message: str) -> str:
     return FallbackReplyAdapter().generate(context).text
 
 
+PROJECT_MINIMUM_LOOP_MARKERS = ("最小闭环", "最小推进", "最小动作", "不要开新模块", "别开大工程", "不堆叠代码", "别讲愿景")
+
+
 def project_analysis_packet(message: str, intent: str) -> AnalysisPacket:
     text = " ".join(str(message or "").split())
-    if _has_any(text, ("最小闭环", "最小推进", "最小动作", "不要开新模块", "别开大工程", "不堆叠代码", "别讲愿景")):
+    if _has_any(text, PROJECT_MINIMUM_LOOP_MARKERS):
         return AnalysisPacket(
             intent=intent,
             facts=["用户要推进 AugSun / ROLLQIIA 或 VELA 产品化事项。", "当前约束：不新开模块，先验证最小闭环。"],
@@ -1927,6 +1930,8 @@ def engine_text_for_intent(
         if model_frontstage_ready:
             return normalize_model_frontstage_reply(result.text), result.adapter, result.used_api
         if context.intent == "deep_analysis":
+            judgment = base.judgment
+        elif context.intent == "project_assistant" and not result.used_api and _has_any(context.message, PROJECT_MINIMUM_LOOP_MARKERS):
             judgment = base.judgment
         else:
             judgment = base.judgment if has_hazards else result.text or base.judgment
