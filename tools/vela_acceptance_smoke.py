@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -264,6 +265,47 @@ def parse_timestamp(value: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def split_config_command(command: str) -> list[str]:
+    try:
+        parts = shlex.split(str(command or ""), posix=os.name != "nt")
+    except ValueError:
+        return []
+    return [part.strip("\"'") for part in parts if part.strip("\"'")]
+
+
+def router_command_dry_run(intent_router: dict[str, Any]) -> dict[str, Any]:
+    command = str(intent_router.get("command") or "").strip()
+    args = split_config_command(command)
+    if not args:
+        return runtime_check(False, "router command missing or unparsable")
+    if "--intent" not in args:
+        args.append("--intent")
+    work_dir = Path(str(intent_router.get("work_dir") or ROOT))
+    timeout_raw = intent_router.get("timeout_seconds")
+    try:
+        timeout = int(timeout_raw)
+    except (TypeError, ValueError):
+        timeout = 10
+    timeout = max(3, min(timeout, 10))
+    try:
+        completed = subprocess.run(
+            args,
+            input="你好 VELA",
+            cwd=str(work_dir) if work_dir.exists() else str(ROOT),
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception as exc:
+        return runtime_check(False, f"router command failed to start: {type(exc).__name__}")
+    output = " ".join((completed.stdout or completed.stderr or "").split())[:240]
+    ok = completed.returncode == 0 and "normal_chat" in output and not find_leaks(output)
+    return runtime_check(ok, output or f"exit={completed.returncode}")
+
+
 def latest_session_reply(sessions_dir: Path) -> dict[str, Any]:
     candidates: list[tuple[datetime, float, Path, str]] = []
     if not sessions_dir.exists():
@@ -342,6 +384,11 @@ def run_runtime_audit(
     checks["router_config"] = runtime_check(
         bool(intent_router.get("enabled")) and "vela_router.py" in router_command and "--stdin" in router_command,
         router_command,
+    )
+    checks["router_command_dry_run"] = (
+        router_command_dry_run(intent_router)
+        if checks["router_config"]["ok"]
+        else runtime_check(False, "router config is not valid enough to dry-run")
     )
 
     commands = {item.get("name"): item for item in config.get("commands", []) if isinstance(item, dict)}
