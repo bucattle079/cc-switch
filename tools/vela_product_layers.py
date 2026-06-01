@@ -681,7 +681,7 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             literal_need="用户在反馈 VELA 的表达方式。",
             implied_need="用户需要确认 VELA 能被反馈触动，而不是继续模板化。",
             emotional_state="风格失望后的校准请求",
-            response_mode="relationship_repair",
+            response_mode="style_feedback",
             should_clarify=False,
             preferred_reply_shape="少自证，少菜单，下一轮直接用改变后的表达回应。",
             human_tone_vector=_tone(warmth=4, directness=5, depth=2, presence=4, clarify=3, memory=4),
@@ -1114,7 +1114,8 @@ def render_vela_persona(packet: AnalysisPacket) -> str:
         lines.append("事实：")
         lines.extend(f"- {fact}" for fact in packet.facts)
     if packet.judgment:
-        lines.append(f"判断：{packet.judgment}")
+        judgment = re.sub(r"^\s*K\s*[,，:：]\s*", "", packet.judgment).strip()
+        lines.append(f"判断：{judgment}")
     if packet.risks:
         lines.append("风险：")
         lines.extend(f"- {risk}" for risk in packet.risks)

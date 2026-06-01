@@ -655,6 +655,22 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("别把好运气请来当部门主管", reply)
         self.assertNotIn("debug", reply.lower())
 
+    def test_persona_renderer_strips_nested_k_prefix_from_model_judgment(self):
+        product = load_product_module()
+
+        packet = product.AnalysisPacket(
+            intent="deep_analysis",
+            facts=["用户要求看清方案为什么不智能。"],
+            judgment="K，这不是智商问题，是链路问题。",
+            risks=["不要把锋利变成表演。"],
+            next_actions=["先列事实，再给修正路径。"],
+        )
+
+        reply = product.render_vela_persona(packet)
+
+        self.assertIn("判断：这不是智商问题，是链路问题。", reply)
+        self.assertNotIn("判断：K，", reply)
+
     def test_guardrail_removes_engineering_noise_before_wechat(self):
         product = load_product_module()
 

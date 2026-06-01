@@ -117,6 +117,7 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         self.assertIn("晋江", reply)
         self.assertIn("天气", reply)
+        self.assertNotIn("DeepSeek", reply)
         self.assertNotIn("Market & World Briefing", reply)
         self.assertNotIn("CODEX", reply)
         self.assertNotIn("weather_query", reply)

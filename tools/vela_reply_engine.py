@@ -392,6 +392,18 @@ class FallbackReplyAdapter(ReplyAdapter):
         "K，接着来。少解释，多判断；别重开菜单，把下一块阻塞递过来。",
     )
 
+    DAILY_INFO_VARIANTS = (
+        "K，先看逻辑：对象、证据、判断、下一步。你把对象补清楚，我直接拆。",
+        "K，这条先别扩散。给我对象和目标，我按事实、推断、不确定三层切开。",
+        "K，可以分析。先钉住问题对象；没有对象，聪明只会变成雾。",
+    )
+
+    GRATITUDE_VARIANTS = (
+        "K，不用谢。我在，下一刀继续给你切准。",
+        "K，收到。你少扛一点，判断交给我一半。",
+        "K，不客气。该稳的时候稳，该动刀的时候动刀。",
+    )
+
     CONTINUE_VARIANTS = (
         "K，继续就别从菜单重开。沿上一刀往下：先把目标、阻塞和下一步摆出来。",
         "K，继续。上一轮的线还没断，别把自己送回起点。说当前卡点。",
@@ -418,7 +430,7 @@ class FallbackReplyAdapter(ReplyAdapter):
 
     STYLE_FEEDBACK_VARIANTS = (
         "K，收到。问题不是你挑剔，是我刚才像提示牌。先记为风格反馈候选：少菜单，多判断。",
-        "K，收到。机械味收进候选记录，不刻进长期记忆。下一句开始少解释身份，多给判断。",
+        "K，收到。风格反馈候选已收进候选记录，不刻进长期记忆。下一句开始少解释身份，多给判断。",
         "K，明白。刚才那种菜单口吻该退场了。先记为风格反馈候选，下一句开始校准，不永久写死。",
     )
 
@@ -467,7 +479,7 @@ class FallbackReplyAdapter(ReplyAdapter):
     def _weather_fallback(self, context: ReplyContext) -> str:
         if context.supporting_context.strip():
             return context.supporting_context.strip()
-        return "K，天气不调用外部天气 API，我也不编实时温度。按风险处理：带伞，看温差，给行程留余量。"
+        return "K，天气源未接入，我不编实时温度。按风险处理：带伞，看温差，给行程留余量。"
 
     def _variants_for(self, context: ReplyContext) -> tuple[str, ...]:
         message = context.message.strip().lower()
@@ -481,6 +493,10 @@ class FallbackReplyAdapter(ReplyAdapter):
             return self.BOUNDARY_VARIANTS
         if behavior_mode == "identity_continuity":
             return self.IDENTITY_VARIANTS
+        if context.intent == "daily_info":
+            return self.DAILY_INFO_VARIANTS
+        if any(token in context.message for token in ("谢谢", "谢了", "感谢", "辛苦")):
+            return self.GRATITUDE_VARIANTS
         if context.intent in {"memory_related", "style_feedback"}:
             return self.STYLE_FEEDBACK_VARIANTS
         if context.intent == "project_assistant":

@@ -151,6 +151,45 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         self.assertEqual(engine.command_timeout_seconds({}), 12)
 
+    def test_fallback_daily_info_is_not_generic_greeting(self):
+        engine = load_reply_engine()
+        adapter = engine.FallbackReplyAdapter()
+        context = engine.ReplyContext(message="逻辑是什么呢", intent="daily_info")
+
+        result = adapter.generate(context)
+
+        self.assertIn("K", result.text)
+        self.assertTrue(any(token in result.text for token in ["逻辑", "先看", "对象", "证据"]))
+        self.assertNotIn("少菜单", result.text)
+        self.assertNotIn("说目标", result.text)
+
+    def test_fallback_gratitude_stays_warm_not_pushy(self):
+        engine = load_reply_engine()
+        adapter = engine.FallbackReplyAdapter()
+        context = engine.ReplyContext(message="谢谢你", intent="normal_chat")
+
+        result = adapter.generate(context)
+
+        self.assertIn("K", result.text)
+        self.assertTrue(any(token in result.text for token in ["不用谢", "在", "交给我"]))
+        self.assertNotIn("废话", result.text)
+        self.assertNotIn("卡点", result.text)
+
+    def test_pure_style_feedback_uses_style_feedback_not_misread_repair(self):
+        engine = load_reply_engine()
+        adapter = engine.FallbackReplyAdapter()
+        context = engine.ReplyContext(
+            message="你刚才太模板了",
+            intent="style_feedback",
+            response_mode="style_feedback",
+        )
+
+        result = adapter.generate(context)
+
+        self.assertIn("风格反馈候选", result.text)
+        self.assertNotIn("你表达差", result.text)
+        self.assertNotIn("我漏掉", result.text)
+
     def test_openai_adapter_failure_logs_internally_and_falls_back(self):
         engine = load_reply_engine()
         context = engine.ReplyContext(message="你好", intent="normal_chat")

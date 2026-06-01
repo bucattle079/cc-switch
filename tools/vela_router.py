@@ -493,7 +493,7 @@ def render_weather_reply(text: str) -> str:
     reply = (
         f"K，{location}天气这条走天气线，不走闲聊。\n"
         "天气不调用外部天气 API，VELA 不编实时温度、降雨概率或精确预报。\n"
-        "DeepSeek 只负责按常识和风险给行动判断：带伞，看温差，给行程留余量；要秒级预报请看本机天气源。"
+        "我只按常识和风险给行动判断：带伞，看温差，给行程留余量；要秒级预报请看本机天气源。"
     )
     return guard_wechat_output(reply)
 
