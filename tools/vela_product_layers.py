@@ -456,7 +456,7 @@ def record_session_note(
         "message_summary": " ".join(str(message or "").split())[:240],
         "intent": intent,
         "response_summary": " ".join(str(response_summary or "").split())[:240],
-        "persistent": True,
+        "persistent": False,
         "storage_policy": "short_term_local_context",
     }
     with path.open("a", encoding="utf-8", newline="\n") as handle:

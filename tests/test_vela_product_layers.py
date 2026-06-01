@@ -1067,7 +1067,7 @@ class VelaProductLayerTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["level"], "Session Notes")
         self.assertEqual(rows[0]["intent"], "normal_chat")
-        self.assertTrue(rows[0]["persistent"])
+        self.assertFalse(rows[0]["persistent"])
         self.assertTrue(session_files)
 
     def test_context_builder_reads_session_notes_as_short_term_context(self):
