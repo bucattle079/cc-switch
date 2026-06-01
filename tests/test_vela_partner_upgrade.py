@@ -214,8 +214,17 @@ class VelaPartnerUpgradeTests(unittest.TestCase):
         )
 
         self.assertIn("CODEX 产品判断摘要", result.text)
-        self.assertIn("截图已生成", result.text)
-        for leaked in ["Automation ID", "Automation memory", "$CODEX_HOME", "::inbox-item", "Cache written"]:
+        for leaked in [
+            "Automation ID",
+            "Automation memory",
+            "$CODEX_HOME",
+            "::inbox-item",
+            "Cache written",
+            "截图已生成",
+            "文本备份",
+            "最后结论",
+            "最近完成",
+        ]:
             self.assertNotIn(leaked, result.text)
 
     def test_codex_product_judgment_keeps_conclusion_while_dropping_command_logs(self):

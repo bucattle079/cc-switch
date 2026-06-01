@@ -997,7 +997,7 @@ class VelaProductLayerTests(unittest.TestCase):
             codex_summary=(
                 "VELA · CODEX 最近完成 项目: VELA GPT 接入 "
                 "工作区: C:\\Users\\Admin\\Desktop\\CC-WECHAT "
-                "完成: 05-25 20:52 最后结论 目标已标记完成。"
+                "完成: 05-25 20:52 最后结论 ```powershell``` 目标已标记完成。"
                 "用量 `106,285 tokens`，耗时约 `8 分 38 秒`。"
                 "sandbox danger-full-access | approval never | model gpt-5 "
                 "截图已生成。 文本备份已保存。"
@@ -1006,12 +1006,45 @@ class VelaProductLayerTests(unittest.TestCase):
         text = result.text
 
         self.assertIn("目标已标记完成", text)
-        self.assertIn("截图已生成", text)
         self.assertNotIn("token", text.lower())
         self.assertNotIn("sandbox", text.lower())
         self.assertNotIn("approval", text.lower())
         self.assertNotIn("gpt-5", text.lower())
         self.assertNotIn("C:\\", text)
+        self.assertNotIn("截图已生成", text)
+        self.assertNotIn("文本备份", text)
+        self.assertNotIn("最后结论", text)
+        self.assertNotIn("最近完成", text)
+        self.assertNotIn("完成:", text)
+        self.assertNotIn("```", text)
+
+    def test_codex_command_only_latest_degrades_to_honest_product_status(self):
+        product = load_product_module()
+
+        result = product.run_layered_response(
+            "CODEX/",
+            intent="codex_task",
+            codex_summary=(
+                "VELA · CODEX 最近完成\n\n"
+                "项目: 检查目前项目推进状态吗\n"
+                "工作区: CC-WECHAT\n"
+                "完成: 06-01 19:29\n\n"
+                "最后结论\n"
+                "```powershell\n"
+                "python -X utf8 tools\\vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90\n"
+                "```\n\n"
+                "截图已生成。\n"
+                "文本备份已保存。"
+            ),
+        )
+        text = result.text
+
+        self.assertIn("没有可前台复用的结论", text)
+        self.assertNotIn("检查目前项目推进状态吗", text)
+        self.assertNotIn("powershell", text.lower())
+        self.assertNotIn("截图已生成", text)
+        self.assertNotIn("文本备份", text)
+        self.assertNotIn("```", text)
 
     def test_codex_summary_hides_markdown_links_to_local_paths(self):
         product = load_product_module()

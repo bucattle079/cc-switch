@@ -124,7 +124,13 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
 
         self.assertTrue(report["ok"], report)
         self.assertTrue(report["entrypoint"])
-        hard_lane_ids = {"weather_jinjiang", "market_add_position", "market_current_a_share_realtime_compact", "freshness_status"}
+        hard_lane_ids = {
+            "weather_jinjiang",
+            "market_add_position",
+            "market_current_a_share_realtime_compact",
+            "market_current_now_info_realtime_compact",
+            "freshness_status",
+        }
         for case in report["cases"]:
             if case["id"] in hard_lane_ids:
                 with self.subTest(case["id"]):
@@ -154,6 +160,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         cached_ids = {
             "market_add_position",
             "market_current_a_share_realtime_compact",
+            "market_current_now_info_realtime_compact",
             "market_no_raw_english",
             "market_policy_not_news_list",
             "market_impulse_brake",

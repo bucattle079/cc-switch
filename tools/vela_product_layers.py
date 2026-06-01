@@ -118,6 +118,16 @@ CODEX_RUNTIME_PATTERNS = (
     re.compile(r"\bgpt-[A-Za-z0-9_.:-]+", re.IGNORECASE),
     re.compile(r"工作区\s*[:：]\s*[^\s，。；,;]+", re.IGNORECASE),
 )
+CODEX_FOREGROUND_NOISE_PATTERNS = (
+    re.compile(r"VELA\s*·\s*CODEX\s*最近完成\s*", re.IGNORECASE),
+    re.compile(r"\b项目\s*[:：]\s*", re.IGNORECASE),
+    re.compile(r"完成\s*[:：]\s*(?:\d{4}[-/])?\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}\s*", re.IGNORECASE),
+    re.compile(r"最后结论\s*[:：]?\s*", re.IGNORECASE),
+    re.compile(r"截图已(?:生成|回传微信)[^。；;\n]*[。；;\s]*", re.IGNORECASE),
+    re.compile(r"截图未生成[^。；;\n]*[。；;\s]*", re.IGNORECASE),
+    re.compile(r"文本备份已保存[。；;\s]*", re.IGNORECASE),
+    re.compile(r"后台通知已收起[。；;\s]*", re.IGNORECASE),
+)
 CODEX_COMMAND_LINE_RE = re.compile(
     r"^\s*(?:pytest|rg|git|python(?:\.exe)?|py|pwsh|powershell|cmd|npm|pnpm|cargo|uv|Get-ChildItem|Select-String)\b",
     re.IGNORECASE,
@@ -1745,6 +1755,9 @@ def sanitize_codex_summary(codex_output: str) -> str:
     raw = str(codex_output or "")
     if not raw.strip():
         return ""
+    raw = re.sub(r"```(?:[A-Za-z0-9_-]+)?\s*```", " ", raw)
+    raw = re.sub(r"```[\s\S]*?```", " ", raw)
+    raw = raw.replace("```", " ")
 
     kept_lines: list[str] = []
     for raw_line in raw.replace("\r", "\n").splitlines():
@@ -1770,8 +1783,10 @@ def sanitize_codex_summary(codex_output: str) -> str:
         line = WINDOWS_PATH_RE.sub("本地路径已收起", line)
         for pattern in CODEX_RUNTIME_PATTERNS:
             line = pattern.sub("", line)
+        for pattern in CODEX_FOREGROUND_NOISE_PATTERNS:
+            line = pattern.sub("", line)
         line = line.strip(" |，,；;")
-        if line and line != "后台通知已收起。":
+        if line:
             kept_lines.append(line)
 
     summary = " ".join(kept_lines)
@@ -1781,8 +1796,19 @@ def sanitize_codex_summary(codex_output: str) -> str:
     return summary.strip(" |，,；;")
 
 
+def codex_summary_is_only_request_label(summary: str) -> bool:
+    text = re.sub(r"\s+", "", str(summary or ""))
+    if not text:
+        return False
+    if len(text) > 42:
+        return False
+    return bool(re.fullmatch(r"(?:检查|查看|查询|确认|看).{0,24}(?:状态|进展|推进|项目).{0,8}(?:吗|么|？|\?)?", text))
+
+
 def render_codex_product_judgment(codex_output: str) -> str:
     summary = sanitize_codex_summary(codex_output)
+    if codex_summary_is_only_request_label(summary):
+        summary = "Codex 有任务记录，但收尾段只有命令或状态碎片，没有可前台复用的结论。"
     if not summary:
         summary = "暂时没有拿到 Codex 可用摘要。"
     if len(summary) > 520:
