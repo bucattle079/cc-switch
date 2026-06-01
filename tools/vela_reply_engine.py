@@ -57,6 +57,15 @@ class ReplyContext:
     human_tone_vector: dict[str, int] = field(default_factory=dict)
     supporting_context: str = ""
     persona_skeleton: list[str] = field(default_factory=list)
+    active_persona_capabilities: list[str] = field(default_factory=list)
+    detected_user_state: str = ""
+    inferred_hidden_need: str = ""
+    response_behavior_mode: str = ""
+    should_clarify: bool = False
+    should_push_back: bool = False
+    should_use_evidence_gate: bool = False
+    should_reference_memory: bool = False
+    tone_adjustment_reason: str = ""
     user_preferences: list[str] = field(default_factory=list)
     strategic_memories: list[str] = field(default_factory=list)
     tool_policy: ToolPolicy = field(default_factory=ToolPolicy)
@@ -239,11 +248,18 @@ def build_dialogue_brief(context: ReplyContext) -> str:
     repeated = "是" if context.repeated_message else "否"
     preferences = "；".join(item for item in context.user_preferences if item.strip()) or "无"
     need = context.need_interpretation.strip() or "无"
+    inferred_hidden_need = context.inferred_hidden_need.strip() or need
+    detected_user_state = context.detected_user_state.strip() or context.pressure_scenario.strip() or "未明"
     supporting_context = context.supporting_context.strip() or "无"
     if len(supporting_context) > 1800:
         supporting_context = supporting_context[:1799] + "…"
     mode = context.response_mode.strip() or "daily_companion"
     persona_skeleton = " / ".join(item for item in context.persona_skeleton if item.strip()) or "无"
+    active_capabilities = (
+        " / ".join(item for item in context.active_persona_capabilities if item.strip())
+        or persona_skeleton
+    )
+    behavior_mode = context.response_behavior_mode.strip() or mode
     tone = context.human_tone_vector or {}
     tone_line = (
         "无"
@@ -258,6 +274,7 @@ def build_dialogue_brief(context: ReplyContext) -> str:
         )
     )
     strategic_memories = "；".join(item for item in context.strategic_memories if item.strip()) or "无"
+    yes_no = lambda value: "是" if value else "否"
     plain_greeting = context.intent == "normal_chat" and is_plain_greeting_message(context.message)
     if plain_greeting:
         recent = "无（普通问候，不继承工程上下文）"
@@ -290,6 +307,15 @@ def build_dialogue_brief(context: ReplyContext) -> str:
             f"回应模式：{mode}",
             f"语气向量：{tone_line}",
             f"人格骨架：{persona_skeleton}",
+            f"active_persona_capabilities：{active_capabilities}",
+            f"detected_user_state：{detected_user_state}",
+            f"inferred_hidden_need：{inferred_hidden_need}",
+            f"response_behavior_mode：{behavior_mode}",
+            f"should_clarify：{yes_no(context.should_clarify)}",
+            f"should_push_back：{yes_no(context.should_push_back)}",
+            f"should_use_evidence_gate：{yes_no(context.should_use_evidence_gate)}",
+            f"should_reference_memory：{yes_no(context.should_reference_memory)}",
+            f"tone_adjustment_reason：{context.tone_adjustment_reason.strip() or '无'}",
             f"可用背景：{supporting_context}",
             f"风格校准：{preferences}",
             f"长期记忆：{strategic_memories}",
@@ -408,6 +434,18 @@ class FallbackReplyAdapter(ReplyAdapter):
         "K，脑子发懵时别硬推。先给我一个点，别扛整片雾。",
     )
 
+    BOUNDARY_VARIANTS = (
+        "K，不行。我可以陪你，但不能替坏判断鼓掌。先把代价摊开，再决定要不要往前冲。",
+        "K，我不顺着错路走。该刹车就刹车，长期风险比一时痛快更贵。",
+        "K，不能只顺着你说。真正的伙伴不是扩音器，是必要时把你从坑边拉回来。",
+    )
+
+    IDENTITY_VARIANTS = (
+        "K，关系很简单：DeepSeek 是日常脑，Codex 是工程手，记忆是本地经验库。VELA 是把它们收成一个判断的人格核心。",
+        "K，模型和工具会换，但 VELA 不能散。DeepSeek 负责沟通分析，Codex 负责工程执行，记忆负责让下一轮更懂你。",
+        "K，它们是器官，不是人格。VELA 负责连续性：听懂、判断、记住边界，再决定该让哪个工具上场。",
+    )
+
     def generate(self, context: ReplyContext) -> ReplyEngineResult:
         if context.intent == "weather_query":
             text = self._weather_fallback(context)
@@ -434,10 +472,15 @@ class FallbackReplyAdapter(ReplyAdapter):
     def _variants_for(self, context: ReplyContext) -> tuple[str, ...]:
         message = context.message.strip().lower()
         has_style_feedback = any(self._is_style_feedback(pref) for pref in context.user_preferences)
+        behavior_mode = context.response_behavior_mode or context.response_mode
         if context.response_mode == "relationship_repair":
             return self.RELATIONSHIP_REPAIR_VARIANTS
         if context.response_mode == "quiet_support":
             return self.QUIET_SUPPORT_VARIANTS
+        if behavior_mode == "boundary_pushback":
+            return self.BOUNDARY_VARIANTS
+        if behavior_mode == "identity_continuity":
+            return self.IDENTITY_VARIANTS
         if context.intent in {"memory_related", "style_feedback"}:
             return self.STYLE_FEEDBACK_VARIANTS
         if context.intent == "project_assistant":

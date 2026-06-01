@@ -40,9 +40,15 @@ Every WeChat-facing reply should carry internal context that is not exposed to t
 - `character_roleplay=false`
 - `local_learning_update=true`
 - `deepseek_adapter_enabled=true`
-- `response_mode`: one of `daily_companion`, `strategic_depth`, `relationship_repair`, `quiet_support`, `project_operator`, or `market_brief`.
+- `response_mode`: one of `daily_companion`, `strategic_depth`, `relationship_repair`, `quiet_support`, `boundary_pushback`, `identity_continuity`, `project_operator`, or `market_brief`.
 - `human_tone_vector`: local control values for warmth, directness, strategic depth, emotional presence, clarification need, and memory reference need.
 - `pressure_scenario`: the current conversational pressure, such as fatigue, chaos, mechanical-tone correction, or strategic judgement.
+- `active_persona_capabilities`: the active subset of Evidence Gate, Meaning Decoder, Identity Core, Boundary Engine, and Witty Correction.
+- `detected_user_state`: the current user state inferred from the message, such as fatigue, misread frustration, risk pressure, or identity calibration.
+- `inferred_hidden_need`: the hidden need that should shape the reply before wording.
+- `response_behavior_mode`: the behavior mode used by the reply engine, aligned with but more explicit than `response_mode`.
+- `should_clarify`, `should_push_back`, `should_use_evidence_gate`, `should_reference_memory`: boolean behavior controls for the next reply.
+- `tone_adjustment_reason`: short internal reason for the tone shift.
 - `user_preferences`: confirmed preferences and recent style feedback candidates.
 - `strategic_memories`: confirmed long-term project/persona/decision memory, used only when relevant.
 

@@ -312,6 +312,38 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertNotIn("{", brief)
         self.assertNotIn("need_interpretation", brief)
 
+    def test_dialogue_brief_includes_behavior_pack_fields(self):
+        engine = load_reply_engine()
+        context = engine.ReplyContext(
+            message="今天市场是不是能加仓",
+            intent="market_brief",
+            need_interpretation="用户想判断今天金融市场是否存在风险或机会，而不是看新闻列表。",
+            response_mode="market_brief",
+            persona_skeleton=["Evidence Gate", "Boundary Engine"],
+            active_persona_capabilities=["Evidence Gate", "Boundary Engine"],
+            detected_user_state="加仓前的风险焦虑",
+            inferred_hidden_need="需要区分事实、推断和不确定后再判断仓位。",
+            response_behavior_mode="market_brief",
+            should_clarify=False,
+            should_push_back=True,
+            should_use_evidence_gate=True,
+            should_reference_memory=False,
+            tone_adjustment_reason="投资相关，先证据后判断，禁止空泛鼓励。",
+        )
+
+        brief = engine.build_dialogue_brief(context)
+
+        self.assertIn("active_persona_capabilities：Evidence Gate / Boundary Engine", brief)
+        self.assertIn("detected_user_state：加仓前的风险焦虑", brief)
+        self.assertIn("inferred_hidden_need：需要区分事实、推断和不确定", brief)
+        self.assertIn("response_behavior_mode：market_brief", brief)
+        self.assertIn("should_clarify：否", brief)
+        self.assertIn("should_push_back：是", brief)
+        self.assertIn("should_use_evidence_gate：是", brief)
+        self.assertIn("should_reference_memory：否", brief)
+        self.assertIn("tone_adjustment_reason：投资相关", brief)
+        self.assertNotIn("{", brief)
+
     def test_runtime_prompt_projects_five_capabilities_without_source_personas(self):
         engine = load_reply_engine()
 

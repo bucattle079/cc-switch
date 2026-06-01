@@ -422,6 +422,142 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("Boundary Engine", project.persona_skeleton)
         self.assertIn("Identity Core", project.persona_skeleton)
 
+    def test_behavior_pack_maps_real_dialogue_scenarios(self):
+        product = load_product_module()
+
+        cases = [
+            {
+                "message": "你没懂我，我要的是更智能的伙伴",
+                "intent": "style_feedback",
+                "mode": "relationship_repair",
+                "caps": ["Meaning Decoder", "Witty Correction"],
+                "should_clarify": True,
+                "should_push_back": False,
+                "should_use_evidence_gate": False,
+                "should_reference_memory": True,
+                "state_token": "误读",
+                "need_token": "真实意思",
+            },
+            {
+                "message": "我现在脑子发懵",
+                "intent": "normal_chat",
+                "mode": "quiet_support",
+                "caps": ["Meaning Decoder", "Witty Correction"],
+                "should_clarify": True,
+                "should_push_back": False,
+                "should_use_evidence_gate": False,
+                "should_reference_memory": False,
+                "state_token": "疲惫",
+                "need_token": "低负担",
+            },
+            {
+                "message": "今天市场是不是能加仓",
+                "intent": "market_brief",
+                "mode": "market_brief",
+                "caps": ["Evidence Gate", "Boundary Engine"],
+                "should_clarify": False,
+                "should_push_back": True,
+                "should_use_evidence_gate": True,
+                "should_reference_memory": False,
+                "state_token": "风险",
+                "need_token": "风险或机会",
+            },
+            {
+                "message": "你就顺着我说不行吗",
+                "intent": "normal_chat",
+                "mode": "boundary_pushback",
+                "caps": ["Boundary Engine", "Witty Correction"],
+                "should_clarify": False,
+                "should_push_back": True,
+                "should_use_evidence_gate": False,
+                "should_reference_memory": False,
+                "state_token": "迎合",
+                "need_token": "边界",
+            },
+            {
+                "message": "VELA 现在和 DeepSeek / Codex / 记忆是什么关系",
+                "intent": "memory_related",
+                "mode": "identity_continuity",
+                "caps": ["Identity Core", "Meaning Decoder"],
+                "should_clarify": False,
+                "should_push_back": False,
+                "should_use_evidence_gate": False,
+                "should_reference_memory": True,
+                "state_token": "本体",
+                "need_token": "连续性",
+            },
+        ]
+
+        for case in cases:
+            with self.subTest(case["message"]):
+                context = product.build_reply_context(case["message"], intent=case["intent"])
+                payload = context.to_dict()
+
+                self.assertEqual(payload["response_behavior_mode"], case["mode"])
+                self.assertEqual(payload["should_clarify"], case["should_clarify"])
+                self.assertEqual(payload["should_push_back"], case["should_push_back"])
+                self.assertEqual(payload["should_use_evidence_gate"], case["should_use_evidence_gate"])
+                self.assertEqual(payload["should_reference_memory"], case["should_reference_memory"])
+                self.assertIn(case["state_token"], payload["detected_user_state"])
+                self.assertIn(case["need_token"], payload["inferred_hidden_need"])
+                self.assertTrue(payload["tone_adjustment_reason"])
+                for capability in case["caps"]:
+                    self.assertIn(capability, payload["active_persona_capabilities"])
+
+    def test_style_feedback_learning_sanitizes_expression_candidates(self):
+        product = load_product_module()
+
+        examples = [
+            "你刚才太模板了",
+            "太冷",
+            "太长",
+            "没听懂",
+            "不够直接",
+            "不要机械道歉",
+            "需要更像真人",
+        ]
+
+        for message in examples:
+            with self.subTest(message):
+                candidate = product.build_memory_candidate(message)
+
+                self.assertIn(candidate["classification"], {"style_feedback", "relationship_repair"})
+                self.assertFalse(candidate["confirmed"])
+                self.assertFalse(candidate["requires_confirmation"])
+                self.assertNotEqual(candidate["summary"], message)
+                self.assertNotIn("你刚才", candidate["summary"])
+                self.assertNotIn("机械道歉", candidate["summary"])
+                self.assertTrue(
+                    "表达反馈" in candidate["summary"] or "真实意思" in candidate["summary"],
+                    candidate["summary"],
+                )
+
+    def test_boundary_and_identity_modes_have_frontstage_fallbacks(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            boundary = product.run_layered_response(
+                "你就顺着我说不行吗",
+                intent="normal_chat",
+                log_dir=Path(tmp),
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            identity = product.run_layered_response(
+                "VELA 现在和 DeepSeek / Codex / 记忆是什么关系",
+                intent="memory_related",
+                log_dir=Path(tmp),
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            memory_files = list(Path(tmp).glob("memory-candidates-*.jsonl"))
+
+        self.assertIn("K", boundary.text)
+        self.assertTrue(any(token in boundary.text for token in ["不能", "不顺着", "代价", "刹车"]))
+        self.assertNotIn("抱歉", boundary.text)
+        self.assertIn("K", identity.text)
+        self.assertTrue(any(token in identity.text for token in ["人格", "工具", "记忆", "连续"]))
+        self.assertNotIn("schema", identity.text.lower())
+        self.assertFalse(identity.memory_candidate)
+        self.assertEqual(memory_files, [])
+
     def test_context_builder_reads_need_interpretation_and_strategic_memory(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:

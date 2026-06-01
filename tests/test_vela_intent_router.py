@@ -25,6 +25,13 @@ def load_module(path: Path, name: str):
 
 
 class VelaIntentRouterTests(unittest.TestCase):
+    def setUp(self):
+        self.env_patcher = patch.dict("os.environ", {}, clear=True)
+        self.env_patcher.start()
+
+    def tearDown(self):
+        self.env_patcher.stop()
+
     def test_hello_vela_is_normal_chat_not_market(self):
         router = load_module(ROUTER, "vela_router")
 
@@ -245,6 +252,27 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertIn("relationship_repair", intent.focus_tags)
         self.assertFalse(intent.codex_allowed)
         self.assertFalse(intent.market_allowed)
+
+    def test_real_dialogue_scenarios_route_without_tool_pollution(self):
+        router = load_module(ROUTER, "vela_router")
+
+        cases = {
+            "逻辑是什么呢": "daily_info",
+            "协助我分析一下？": "daily_info",
+            "这么选择会比较好吗？": "daily_info",
+            "今天市场是不是能加仓": "market_brief",
+            "VELA 现在和 DeepSeek / Codex / 记忆是什么关系": "memory_related",
+        }
+
+        for text, expected_intent in cases.items():
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, expected_intent)
+                if expected_intent != "market_brief":
+                    self.assertFalse(intent.market_allowed)
+                if expected_intent != "codex_task":
+                    self.assertFalse(intent.codex_allowed)
 
     def test_route_decision_is_structured_and_not_final_reply(self):
         router = load_module(ROUTER, "vela_router")

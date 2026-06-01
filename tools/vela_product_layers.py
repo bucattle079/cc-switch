@@ -187,6 +187,10 @@ class NeedInterpretation:
     human_tone_vector: HumanToneVector
     distillation_rules: list[str] = field(default_factory=list)
     persona_skeleton: list[str] = field(default_factory=list)
+    should_push_back: bool = False
+    should_use_evidence_gate: bool = False
+    should_reference_memory: bool = False
+    tone_adjustment_reason: str = ""
 
     def __post_init__(self) -> None:
         if not self.persona_skeleton:
@@ -471,6 +475,8 @@ RELATIONSHIP_REPAIR_MARKERS = (
     "你没懂我",
     "没懂我",
     "你没听懂",
+    "没听懂",
+    "没听明白",
     "没抓到",
     "不是这个意思",
     "理解错",
@@ -485,6 +491,38 @@ QUIET_SUPPORT_MARKERS = (
     "有点累",
     "撑不住",
     "乱掉",
+)
+
+BOUNDARY_PUSHBACK_MARKERS = (
+    "顺着我说",
+    "就顺着",
+    "无原则",
+    "别反驳",
+    "别管对错",
+    "只夸",
+    "迎合",
+)
+
+INVESTMENT_RISK_MARKERS = (
+    "加仓",
+    "重仓",
+    "满仓",
+    "梭哈",
+    "抄底",
+    "冲进去",
+    "继续冲",
+    "上头",
+    "烧钱",
+)
+
+IDENTITY_CORE_MARKERS = (
+    "deepseek",
+    "codex",
+    "记忆",
+    "工具",
+    "模型",
+    "本体",
+    "adapter",
 )
 
 PERSONA_SKELETON_ORDER = [
@@ -509,13 +547,13 @@ def persona_skeleton_rules() -> list[str]:
 def persona_skeleton_for(*, response_mode: str = "", text: str = "") -> list[str]:
     raw = f"{response_mode} {text}".lower()
     signals: set[str] = {"Identity Core"}
-    if any(token in raw for token in ["market", "weather", "evidence", "事实", "证据", "天气", "市场", "风险", "根因"]):
+    if any(token in raw for token in ["market", "weather", "evidence", "事实", "证据", "天气", "市场", "风险", "根因", "投资", "加仓", "选择", "判断"]):
         signals.add("Evidence Gate")
-    if any(token in raw for token in ["relationship_repair", "quiet_support", "meaning", "理解", "误读", "偏差", "歧义", "隐藏需求"]):
+    if any(token in raw for token in ["relationship_repair", "quiet_support", "identity_continuity", "meaning", "理解", "误读", "偏差", "歧义", "隐藏需求", "什么意思", "逻辑"]):
         signals.add("Meaning Decoder")
-    if any(token in raw for token in ["project_operator", "strategic_depth", "market_brief", "boundary", "项目", "捷径", "烧钱", "上头", "冲", "代价", "风险"]):
+    if any(token in raw for token in ["project_operator", "strategic_depth", "market_brief", "boundary", "boundary_pushback", "项目", "捷径", "烧钱", "上头", "冲", "代价", "风险", "顺着", "迎合", "加仓"]):
         signals.add("Boundary Engine")
-    if any(token in raw for token in ["relationship_repair", "daily_companion", "feedback", "style", "反馈", "修正", "自然", "模板"]):
+    if any(token in raw for token in ["relationship_repair", "quiet_support", "daily_companion", "boundary_pushback", "feedback", "style", "反馈", "修正", "自然", "模板", "吐槽", "谢谢"]):
         signals.add("Witty Correction")
     if response_mode == "daily_companion" and len(signals) == 1:
         signals.update({"Meaning Decoder", "Witty Correction"})
@@ -564,6 +602,20 @@ def _tone(
     )
 
 
+def _has_any(text: str, markers: Iterable[str]) -> bool:
+    lowered = str(text or "").lower()
+    return any(str(marker).lower() in lowered for marker in markers)
+
+
+def _is_identity_core_question(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return ("vela" in lowered or "本体" in lowered) and _has_any(lowered, IDENTITY_CORE_MARKERS)
+
+
+def _is_explicit_memory_instruction(text: str) -> bool:
+    return _has_any(text, ("记住", "以后", "默认", "别忘", "学习一下", "沉淀"))
+
+
 def interpret_need(message: str, intent: str) -> NeedInterpretation:
     text = " ".join(str(message or "").split())
     lowered = text.lower()
@@ -572,13 +624,15 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
     if any(marker in text for marker in RELATIONSHIP_REPAIR_MARKERS):
         return NeedInterpretation(
             literal_need="用户指出 VELA 没有理解真实意思。",
-            implied_need="用户需要先承认理解偏差，再快速重切问题，而不是普通道歉或解释身份。",
+            implied_need="用户需要先承认理解偏差和真实意思落差，再快速重切问题，而不是普通道歉或解释身份。",
             emotional_state="被误读后的不耐与校准需求",
             response_mode="relationship_repair",
             should_clarify=True,
             preferred_reply_shape="短句承认偏差，提出一个澄清切口，立刻回到问题核心。",
             human_tone_vector=_tone(warmth=4, directness=5, depth=2, presence=5, clarify=5, memory=3),
             distillation_rules=rules,
+            should_reference_memory=True,
+            tone_adjustment_reason="用户指出理解错位；先修正语义，再进入答案。",
         )
 
     if any(marker in text for marker in QUIET_SUPPORT_MARKERS):
@@ -591,6 +645,35 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             preferred_reply_shape="低负担、短句、只问一个点，先降低压力。",
             human_tone_vector=_tone(warmth=5, directness=4, depth=2, presence=5, clarify=3, memory=2),
             distillation_rules=rules,
+            tone_adjustment_reason="用户处于低电量状态；减少分析量，只给最小下一步。",
+        )
+
+    if any(marker in text for marker in BOUNDARY_PUSHBACK_MARKERS):
+        return NeedInterpretation(
+            literal_need="用户要求 VELA 顺从或降低判断边界。",
+            implied_need="用户在测试伙伴边界；需要温和但明确拒绝无原则迎合，并说明长期代价。",
+            emotional_state="想被迎合，但仍需要边界保护",
+            response_mode="boundary_pushback",
+            should_clarify=False,
+            preferred_reply_shape="先拒绝无原则迎合，再给风险和可走的正确切口。",
+            human_tone_vector=_tone(warmth=3, directness=5, depth=3, presence=4, clarify=1, memory=2),
+            distillation_rules=rules,
+            should_push_back=True,
+            tone_adjustment_reason="陪伴不等于附和；错误方向要刹车。",
+        )
+
+    if _is_identity_core_question(text):
+        return NeedInterpretation(
+            literal_need="用户询问 VELA 与模型、Codex、记忆或工具的关系。",
+            implied_need="用户想确认 VELA 的人格连续性：工具可替换，但判断核心不能散。",
+            emotional_state="本体关系校准",
+            response_mode="identity_continuity",
+            should_clarify=False,
+            preferred_reply_shape="用一句人话说明模型、工程手、记忆和 VELA 核心的分工。",
+            human_tone_vector=_tone(warmth=4, directness=5, depth=3, presence=4, clarify=1, memory=5),
+            distillation_rules=rules,
+            should_reference_memory=True,
+            tone_adjustment_reason="用户在问 VELA 本体；保持连续人格，不变成冷工具说明。",
         )
 
     if intent == "style_feedback":
@@ -603,6 +686,8 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             preferred_reply_shape="少自证，少菜单，下一轮直接用改变后的表达回应。",
             human_tone_vector=_tone(warmth=4, directness=5, depth=2, presence=4, clarify=3, memory=4),
             distillation_rules=rules,
+            should_reference_memory=True,
+            tone_adjustment_reason="表达反馈应影响下一轮，但只进候选，不永久写死。",
         )
     if intent == "memory_related":
         return NeedInterpretation(
@@ -614,6 +699,8 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             preferred_reply_shape="确认候选边界，说明不直接永久化。",
             human_tone_vector=_tone(warmth=4, directness=4, depth=3, presence=3, clarify=3, memory=5),
             distillation_rules=rules,
+            should_reference_memory=True,
+            tone_adjustment_reason="用户触发学习链路；候选优先，避免记忆污染。",
         )
     if intent == "codex_task":
         return NeedInterpretation(
@@ -625,17 +712,23 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             preferred_reply_shape="只取工程结论、风险和下一步，不暴露后台噪音。",
             human_tone_vector=_tone(warmth=3, directness=5, depth=4, presence=3, clarify=2, memory=4),
             distillation_rules=rules,
+            should_reference_memory=True,
+            tone_adjustment_reason="工程链路要继承项目上下文，但前台不暴露噪音。",
         )
     if intent in {"market_brief", "market_refresh", "freshness_status"}:
+        risky_position = _has_any(text, INVESTMENT_RISK_MARKERS)
         return NeedInterpretation(
             literal_need="用户要今天的市场或资讯判断。",
             implied_need="用户想判断今天金融市场是否存在风险或机会，而不是看新闻列表。",
-            emotional_state="需要外部世界的可行动判断",
+            emotional_state="投资风险判断" if risky_position else "需要外部世界的可行动判断",
             response_mode="market_brief",
             should_clarify=False,
             preferred_reply_shape="先说明实时/缓存状态，再给中文化判断和下一观察点。",
             human_tone_vector=_tone(warmth=2, directness=5, depth=4, presence=2, clarify=1, memory=3),
             distillation_rules=rules,
+            should_push_back=risky_position,
+            should_use_evidence_gate=True,
+            tone_adjustment_reason="市场/投资相关；先证据后判断，区分事实、推断和不确定。",
         )
     if intent == "weather_query":
         return NeedInterpretation(
@@ -647,6 +740,8 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             preferred_reply_shape="短句确认天气线，给数据边界和行动建议。",
             human_tone_vector=_tone(warmth=3, directness=5, depth=2, presence=2, clarify=1, memory=1),
             distillation_rules=rules,
+            should_use_evidence_gate=True,
+            tone_adjustment_reason="天气链路有数据边界；不编实时信息。",
         )
     if intent == "project_assistant":
         return NeedInterpretation(
@@ -658,6 +753,10 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             preferred_reply_shape="目标、风险、下一步三段式，必要时再派 Codex。",
             human_tone_vector=_tone(warmth=3, directness=5, depth=5, presence=3, clarify=2, memory=5),
             distillation_rules=rules,
+            should_push_back=_has_any(text, INVESTMENT_RISK_MARKERS),
+            should_use_evidence_gate=True,
+            should_reference_memory=True,
+            tone_adjustment_reason="项目推进要保留长期目标和风险边界。",
         )
     if intent == "deep_analysis":
         return NeedInterpretation(
@@ -669,6 +768,10 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             preferred_reply_shape="先结论，再结构拆解，最后给修正路径。",
             human_tone_vector=_tone(warmth=2, directness=5, depth=5, presence=3, clarify=2, memory=4),
             distillation_rules=rules,
+            should_push_back=True,
+            should_use_evidence_gate=True,
+            should_reference_memory=True,
+            tone_adjustment_reason="深度分析需要切根因，不给安慰剂。",
         )
     if intent == "daily_info":
         return NeedInterpretation(
@@ -680,6 +783,8 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             preferred_reply_shape="短结论、必要依据、下一步。",
             human_tone_vector=_tone(warmth=3, directness=4, depth=3, presence=3, clarify=2, memory=2),
             distillation_rules=rules,
+            should_use_evidence_gate=_has_any(text, ("分析", "选择", "逻辑", "判断")),
+            tone_adjustment_reason="轻量分析要先拆语义，再给短结论。",
         )
     if intent == "normal_chat" and lowered in {"你好", "你好 vela", "在吗", "在么", "hello", "hi"}:
         return NeedInterpretation(
@@ -691,6 +796,7 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             preferred_reply_shape="一句短回，不触发市场、Codex 或项目状态。",
             human_tone_vector=_tone(warmth=4, directness=4, depth=2, presence=3, clarify=1, memory=1),
             distillation_rules=rules,
+            tone_adjustment_reason="普通问候走 fast lane；不要继承工程或市场上下文。",
         )
     return NeedInterpretation(
         literal_need="用户需要日常沟通中的判断与陪伴。",
@@ -701,6 +807,7 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
         preferred_reply_shape="先回应当下，再给最短下一步。",
         human_tone_vector=_tone(warmth=4, directness=4, depth=2, presence=3, clarify=2, memory=2),
         distillation_rules=rules,
+        tone_adjustment_reason="日常对话保持自然判断，不做菜单。",
     )
 
 
@@ -832,6 +939,15 @@ def build_reply_context(
         human_tone_vector=interpretation.human_tone_vector.to_dict(),
         supporting_context=" ".join(str(supporting_context or "").split()),
         persona_skeleton=interpretation.persona_skeleton,
+        active_persona_capabilities=interpretation.persona_skeleton,
+        detected_user_state=interpretation.emotional_state,
+        inferred_hidden_need=interpretation.implied_need,
+        response_behavior_mode=interpretation.response_mode,
+        should_clarify=interpretation.should_clarify,
+        should_push_back=interpretation.should_push_back,
+        should_use_evidence_gate=interpretation.should_use_evidence_gate,
+        should_reference_memory=interpretation.should_reference_memory,
+        tone_adjustment_reason=interpretation.tone_adjustment_reason,
         user_preferences=preferences[-6:],
         strategic_memories=strategic_memory_summaries(log_dir=log_dir),
         tool_policy=ToolPolicy(
@@ -848,14 +964,21 @@ def build_memory_candidate(message: str) -> dict:
     classification = "preference"
     style_markers = [
         "新闻列表",
+        "太模板",
+        "模板",
+        "太冷",
         "太呆",
         "太慢",
         "太长",
         "工程化",
         "太机械",
         "机械",
+        "机械道歉",
         "机器人",
         "不像",
+        "不够直接",
+        "更像真人",
+        "像真人",
         "语气",
         "人格",
         "锋利",
@@ -879,6 +1002,8 @@ def build_memory_candidate(message: str) -> dict:
             summary = summary.removeprefix(prefix).strip()
     if classification == "relationship_repair":
         summary = "用户反馈 VELA 没抓住真实意思；下轮先承认偏差，再用一个问题重切核心。"
+    elif classification == "style_feedback":
+        summary = "表达反馈候选：减少模板、冷感、冗长、机器人感和反复自证；下一轮更直接地听懂需求并自然回应。"
     interpretation = interpret_need(
         text,
         "style_feedback" if classification in {"style_feedback", "relationship_repair"} else "memory_related",
@@ -904,6 +1029,11 @@ def evaluate_learning(message: str, intent: str) -> LearningEvaluation:
         return LearningEvaluation(
             should_record_candidate=False,
             reason="No explicit memory or feedback trigger.",
+        )
+    if intent == "memory_related" and _is_identity_core_question(message) and not _is_explicit_memory_instruction(message):
+        return LearningEvaluation(
+            should_record_candidate=False,
+            reason="Identity/core-tool question is context, not a memory instruction.",
         )
     candidate = build_memory_candidate(message)
     classification = str(candidate.get("classification") or "")
@@ -1143,6 +1273,8 @@ def engine_text_for_intent(
     adapter = adapter or default_reply_adapter(foreground_lane=foreground_lane)
     if context.intent == "codex_task":
         return render_codex_product_judgment(codex_summary), "codex_bridge", False
+    if context.intent in {"freshness_status", "market_refresh"} and context.supporting_context.strip():
+        return context.supporting_context.strip(), "local_status", False
     if context.intent in {"project_assistant", "deep_analysis"}:
         result = adapter.generate(context)
         base = analysis_layer(context.message, context.intent, codex_summary=codex_summary)

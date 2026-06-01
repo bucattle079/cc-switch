@@ -150,27 +150,36 @@ PROJECT_KEYWORDS = ["augsun", "rollqiia", "项目", "广告中心", "intelligenc
 DEEP_KEYWORDS = ["深入分析", "深度分析", "地狱验尸", "验尸", "架构判断", "架构", "推演", "复盘", "根因", "策略验尸"]
 STYLE_FEEDBACK_KEYWORDS = [
     "新闻列表",
+    "太模板",
+    "模板",
+    "太冷",
     "太呆",
     "太慢",
     "太长",
     "太工程化",
     "太机械",
     "机械",
+    "机械道歉",
     "机器人",
     "不像vela",
     "不像 vela",
+    "不够直接",
+    "更像真人",
+    "像真人",
     "不够锋利",
     "语气",
     "风格",
     "人格",
     "你没懂我",
     "没懂我",
+    "没听懂",
+    "没听明白",
     "没抓到",
     "不是这个意思",
     "理解错",
     "偏了",
 ]
-RELATIONSHIP_REPAIR_KEYWORDS = ["你没懂我", "没懂我", "没抓到", "不是这个意思", "理解错", "偏了"]
+RELATIONSHIP_REPAIR_KEYWORDS = ["你没懂我", "没懂我", "没听懂", "没听明白", "没抓到", "不是这个意思", "理解错", "偏了"]
 WEATHER_KEYWORDS = [
     "天气",
     "气温",
@@ -184,7 +193,7 @@ WEATHER_KEYWORDS = [
 ]
 WEATHER_TIME_WORDS = ["今天", "明天", "后天", "今晚", "早上", "中午", "下午", "晚上", "现在", "本周", "周末"]
 WEATHER_QUESTION_WORDS = ["天气", "气温", "冷吗", "热吗", "冷不冷", "热不热", "会下雨吗", "下雨吗", "下雪吗"]
-DAILY_INFO_KEYWORDS = ["解释", "整理", "总结", "帮我查", "帮我搜", "这是什么意思", "什么意思", "翻译", "普通检索"]
+DAILY_INFO_KEYWORDS = ["解释", "整理", "总结", "帮我查", "帮我搜", "这是什么意思", "什么意思", "逻辑", "分析一下", "协助我分析", "选择", "比较好吗", "翻译", "普通检索"]
 MEMORY_KEYWORDS = ["记住", "记忆", "长期", "以后", "默认", "偏好", "别忘", "学习一下", *STYLE_FEEDBACK_KEYWORDS]
 PERSONA_TOOL_PREFIXES = {"persona", "personality", "vela-personality"}
 PERSONA_TOOL_ALIASES = {
