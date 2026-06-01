@@ -319,6 +319,22 @@ def latest_session_reply_detail(latest_reply: dict[str, Any], *, max_session_age
     return "recent and clean"
 
 
+def runtime_next_action(failed: list[str]) -> dict[str, Any]:
+    if "weixin_inbound_seen" in failed or "latest_session_reply" in failed:
+        return {
+            "kind": "send_weixin_prompt",
+            "prompts": ["你好 VELA", "这是实时的吗？", "CODEX/"],
+            "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
+        }
+    if failed:
+        return {
+            "kind": "inspect_failed_checks",
+            "checks": failed,
+            "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
+        }
+    return {"kind": "none", "prompts": [], "verify_command": ""}
+
+
 def detect_cc_connect_process() -> bool:
     if os.name == "nt":
         completed = subprocess.run(
@@ -558,6 +574,7 @@ def run_runtime_audit(
         "cc_home": str(cc_home),
         "checks": checks,
         "failed": failed,
+        "next_action": runtime_next_action(failed),
         "latest_reply": {
             "timestamp": latest_reply.get("timestamp") or "",
             "age_hours": latest_reply.get("age_hours"),
@@ -826,6 +843,14 @@ def render_runtime_report(report: dict[str, Any]) -> str:
     latest = report.get("latest_reply") or {}
     if latest.get("preview"):
         lines.append(f"latest_reply: {latest['preview']}")
+    next_action = report.get("next_action") or {}
+    if next_action.get("kind") and next_action.get("kind") != "none":
+        lines.append(f"next_action: {next_action['kind']}")
+        prompts = next_action.get("prompts") or []
+        if prompts:
+            lines.append("prompts: " + " / ".join(str(item) for item in prompts))
+        if next_action.get("verify_command"):
+            lines.append(f"verify: {next_action['verify_command']}")
     return "\n".join(lines)
 
 
