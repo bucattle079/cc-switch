@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -450,15 +451,19 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
             cc_home = Path(tmp) / ".cc-connect"
             sessions = cc_home / "sessions"
             sessions.mkdir(parents=True)
+            state_dir = cc_home / "weixin" / "codex-wechat" / "bot"
+            state_dir.mkdir(parents=True)
+            context_tokens = state_dir / "context_tokens.json"
+            context_tokens.write_text('{"opaque":"cursor"}', encoding="utf-8")
             (cc_home / "config.toml").write_text(
-                """
+                f"""
 [[commands]]
 name = "vela-router"
-exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args}}}}"
 
 [[commands]]
 name = "vela-talk"
-exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args:VELA}}}}"
 
 [[projects]]
 name = "VELA"
@@ -466,10 +471,17 @@ name = "VELA"
 [projects.intent_router]
 enabled = true
 command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+
+[[projects.platforms]]
+type = "weixin"
+
+[projects.platforms.options]
+state_dir = "{str(state_dir).replace("\\", "/")}"
 """.strip(),
                 encoding="utf-8",
             )
-            (sessions / "VELA_test.json").write_text(
+            session_file = sessions / "VELA_test.json"
+            session_file.write_text(
                 json.dumps(
                     {
                         "sessions": {
@@ -488,6 +500,9 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
                 ),
                 encoding="utf-8",
             )
+            older_than_inbound = datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc).timestamp()
+            os.utime(session_file, (older_than_inbound, older_than_inbound))
+            os.utime(context_tokens, (older_than_inbound, older_than_inbound))
             (cc_home / "cc-connect.log").write_text(
                 'time=2026-06-01T09:00:00+08:00 level=INFO msg="message received" platform=weixin content_len=6\n',
                 encoding="utf-8",
@@ -504,8 +519,15 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
         self.assertFalse(report["checks"]["inbound_to_reply"]["ok"])
         self.assertIn("message received", report["checks"]["inbound_to_reply"]["detail"])
         self.assertNotIn("content_len", report["checks"]["inbound_to_reply"]["detail"])
+        self.assertIn("weixin_dispatch_trace", report["failed"])
+        trace = report["checks"]["weixin_dispatch_trace"]["detail"]
+        self.assertIn("session_file_after_inbound=no", trace)
+        self.assertIn("context_tokens_after_inbound=no", trace)
+        self.assertNotIn("opaque", json.dumps(report, ensure_ascii=False))
+        self.assertNotIn(str(state_dir), json.dumps(report, ensure_ascii=False))
         self.assertEqual(report["next_action"]["kind"], "inspect_weixin_reply_dispatch")
         self.assertIn("inbound_to_reply", report["next_action"]["checks"])
+        self.assertIn("weixin_dispatch_trace", report["next_action"]["checks"])
         self.assertIn("cc_connect_process", report["next_action"]["checks"])
 
     def test_runtime_audit_requires_weixin_inbound_not_only_internal_session_send(self):

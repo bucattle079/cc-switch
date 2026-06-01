@@ -55,4 +55,5 @@
 - [x] Run focused tests for partner upgrade, router, reply engine, product layers, and Codex bridge.
 - [x] Run all Python unit tests.
 - [x] Run the eight WeChat acceptance prompts through `tools/vela_router.py` or `reply_for()` with send-once state isolated when needed.
+- [x] Add runtime audit dispatch trace for Weixin inbound gaps: session file and context-token movement are reported without exposing message content, IDs, cursors, tokens, or local paths.
 - [x] Report remaining production risks: live external search/API freshness, persistent cc-connect env injection, and any screenshot limitations.

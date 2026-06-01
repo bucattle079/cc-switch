@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 import tomllib
-from typing import Any
+from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tools") not in sys.path:
@@ -361,7 +361,7 @@ def runtime_next_action(failed: list[str]) -> dict[str, Any]:
     if "inbound_to_reply" in failed:
         return {
             "kind": "inspect_weixin_reply_dispatch",
-            "checks": ["inbound_to_reply", "latest_session_reply", "cc_connect_process"],
+            "checks": ["inbound_to_reply", "weixin_dispatch_trace", "latest_session_reply", "cc_connect_process"],
             "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
             "wait_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90",
         }
@@ -561,14 +561,66 @@ def latest_inbound_message(log_path: Path) -> dict[str, Any]:
     return {"timestamp": latest.isoformat(), "found": True}
 
 
-def weixin_poll_state(vela_project: dict[str, Any], *, max_age_minutes: int = 15) -> dict[str, Any]:
+def latest_path_mtime(paths: Iterable[Path]) -> datetime | None:
+    latest: datetime | None = None
+    for path in paths:
+        try:
+            if not path.exists() or not path.is_file():
+                continue
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            continue
+        if latest is None or mtime > latest:
+            latest = mtime
+    return latest
+
+
+def weixin_state_dir(vela_project: dict[str, Any]) -> Path | None:
     platforms = [item for item in vela_project.get("platforms", []) if isinstance(item, dict)]
     weixin = next((item for item in platforms if item.get("type") == "weixin"), {})
     options = weixin.get("options") if isinstance(weixin.get("options"), dict) else {}
     state_dir_raw = str(options.get("state_dir") or "").strip()
-    if not state_dir_raw:
+    return Path(state_dir_raw) if state_dir_raw else None
+
+
+def _after_inbound_label(mtime: datetime | None, inbound_time: datetime, *, unknown_when_missing: bool = False) -> str:
+    if mtime is None:
+        return "unknown" if unknown_when_missing else "missing"
+    return "yes" if mtime >= inbound_time else "no"
+
+
+def weixin_dispatch_trace(
+    *,
+    cc_home: Path,
+    vela_project: dict[str, Any],
+    inbound_time: datetime | None,
+    reply_time: datetime | None,
+) -> dict[str, Any]:
+    if inbound_time is None:
+        return runtime_check(True, "no inbound to trace")
+    if reply_time and reply_time >= inbound_time:
+        return runtime_check(True, "reply newer/equal than inbound")
+
+    session_mtime = latest_path_mtime(
+        path for path in (cc_home / "sessions").glob("VELA*.json") if ".bak-" not in path.name
+    )
+    state_dir = weixin_state_dir(vela_project)
+    context_mtime = latest_path_mtime([state_dir / "context_tokens.json"]) if state_dir else None
+    session_label = _after_inbound_label(session_mtime, inbound_time)
+    context_label = _after_inbound_label(context_mtime, inbound_time, unknown_when_missing=state_dir is None)
+    any_runtime_state_moved = session_label == "yes" or context_label == "yes"
+    detail = (
+        "inbound observed; "
+        f"session_file_after_inbound={session_label}; "
+        f"context_tokens_after_inbound={context_label}"
+    )
+    return runtime_check(any_runtime_state_moved, detail)
+
+
+def weixin_poll_state(vela_project: dict[str, Any], *, max_age_minutes: int = 15) -> dict[str, Any]:
+    state_dir = weixin_state_dir(vela_project)
+    if not state_dir:
         return runtime_check(False, "weixin state_dir missing")
-    state_dir = Path(state_dir_raw)
     poll_file = state_dir / "get_updates.buf"
     if not poll_file.exists():
         return runtime_check(False, "weixin poll buffer missing")
@@ -733,6 +785,12 @@ def run_runtime_audit(
             else f"message received at {inbound_time.isoformat()} is newer than latest VELA session reply"
         )
     checks["inbound_to_reply"] = runtime_check(inbound_ok, inbound_detail)
+    checks["weixin_dispatch_trace"] = weixin_dispatch_trace(
+        cc_home=cc_home,
+        vela_project=vela_project,
+        inbound_time=inbound_time,
+        reply_time=reply_time,
+    )
 
     failed = [name for name, check in checks.items() if not check["ok"]]
     return {
