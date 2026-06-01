@@ -1070,6 +1070,26 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertTrue(rows[0]["persistent"])
         self.assertTrue(session_files)
 
+    def test_context_builder_reads_session_notes_as_short_term_context(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            product.record_session_note(
+                "继续 AugSun 项目",
+                "project_assistant",
+                "判断：先拆目标、风险和最小下一步。",
+                log_dir=Path(tmp),
+            )
+
+            context = product.build_reply_context(
+                "继续",
+                intent="normal_chat",
+                log_dir=Path(tmp),
+            )
+
+        self.assertIn("短期笔记:project_assistant", context.recent_summary)
+        self.assertIn("AugSun", context.recent_summary)
+        self.assertIn("最小下一步", context.recent_summary)
+
     def test_confirmed_preferences_require_user_confirmation(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:

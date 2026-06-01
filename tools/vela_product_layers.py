@@ -1011,6 +1011,21 @@ def strategic_memory_summaries(log_dir: Path | None = None, limit: int = 4) -> l
     return summaries[-limit:]
 
 
+def session_note_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
+    summaries: list[str] = []
+    for row in latest_learning_rows("session-notes-*.jsonl", log_dir=log_dir, limit=limit):
+        intent = str(row.get("intent") or "unknown").strip()
+        message = str(row.get("message_summary") or "").strip()
+        response = str(row.get("response_summary") or "").strip()
+        if not message and not response:
+            continue
+        summary = f"短期笔记:{intent}:{message}"
+        if response:
+            summary = f"{summary} -> {response}"
+        summaries.append(summary[:360])
+    return summaries[-limit:]
+
+
 def infer_pressure_scenario(message: str, intent: str) -> str:
     text = str(message or "").lower()
     if intent == "style_feedback":
@@ -1099,7 +1114,10 @@ def build_reply_context(
     last_response = str(last.get("response_preview") or "")
     repeated_message = bool(last) and str(last.get("message_summary") or "") == normalized_message[:240]
     recent_summary = " / ".join(
-        f"{row.get('intent', 'unknown')}:{row.get('message_summary', '')}" for row in interactions[-3:]
+        [
+            f"{row.get('intent', 'unknown')}:{row.get('message_summary', '')}" for row in interactions[-3:]
+        ]
+        + session_note_summaries(log_dir=log_dir, limit=3)
     )
     preferences = [
         str(row.get("summary"))
