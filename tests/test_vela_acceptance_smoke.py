@@ -64,6 +64,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "feedback_push_then_continue",
             "feedback_too_long_then_continue",
             "feedback_too_cold_then_hello",
+            "feedback_customer_voice_then_continue",
         }:
             self.assertIn(required, scenario_ids)
         self.assertGreaterEqual(report["case_count"], 23)

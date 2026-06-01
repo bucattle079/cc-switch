@@ -274,6 +274,13 @@ TWO_TURN_CASES = [
         "expected_intent": "normal_chat",
         "required_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短"],
     },
+    {
+        "id": "feedback_customer_voice_then_continue",
+        "feedback": "你刚刚还是像客服，下一句别解释身份，直接说人话",
+        "followup": "继续",
+        "expected_intent": "normal_chat",
+        "required_reply_tokens": ["少菜单", "多判断", "不摆路牌", "少解释"],
+    },
 ]
 
 
