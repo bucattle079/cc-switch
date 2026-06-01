@@ -644,7 +644,13 @@ class OpenAIResponsesAdapter(ReplyAdapter):
                 data = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             record_adapter_failure(adapter=self.name, reason=type(exc).__name__, log_dir=self.log_dir)
-            return FallbackReplyAdapter().generate(context)
+            fallback = FallbackReplyAdapter().generate(context)
+            return ReplyEngineResult(
+                text=fallback.text,
+                source=f"openai_failure:{type(exc).__name__}",
+                used_api=False,
+                adapter=fallback.adapter,
+            )
 
         text = extract_openai_text(data)
         if not text:
@@ -703,7 +709,13 @@ class DeepSeekChatAdapter(ReplyAdapter):
                 data = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             record_adapter_failure(adapter=self.name, reason=type(exc).__name__, log_dir=self.log_dir)
-            return FallbackReplyAdapter().generate(context)
+            fallback = FallbackReplyAdapter().generate(context)
+            return ReplyEngineResult(
+                text=fallback.text,
+                source=f"deepseek_failure:{type(exc).__name__}",
+                used_api=False,
+                adapter=fallback.adapter,
+            )
 
         text = extract_chat_completion_text(data)
         if not text:

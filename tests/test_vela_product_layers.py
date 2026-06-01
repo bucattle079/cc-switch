@@ -117,6 +117,35 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertEqual(result.reply_adapter, "deepseek_chat")
         self.assertTrue(result.real_gpt_enabled)
 
+    def test_deep_lane_timeout_fallback_surfaces_status(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+
+        class TimeoutFallbackAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K，先验尸：模型线超时，先不装完整深度分析。",
+                    source="deepseek_failure:TimeoutError",
+                    used_api=False,
+                    adapter="fallback",
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "地狱验尸一下 VELA 为什么不智能",
+                intent="deep_analysis",
+                log_dir=Path(tmp),
+                reply_adapter=TimeoutFallbackAdapter(),
+            )
+
+        self.assertFalse(result.real_gpt_enabled)
+        self.assertEqual(result.reply_adapter, "fallback")
+        self.assertIn("深度线超过前台预算", result.text)
+        self.assertIn("先给状态", result.text)
+        self.assertNotIn("TimeoutError", result.text)
+
     def test_non_codex_lanes_select_deepseek_without_weather_api(self):
         product = load_product_module()
         env = {"DEEPSEEK_API_KEY": "sk-test-secret"}

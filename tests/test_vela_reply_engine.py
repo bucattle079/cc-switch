@@ -223,6 +223,7 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         self.assertEqual(result.adapter, "fallback")
         self.assertFalse(result.used_api)
+        self.assertEqual(result.source, "openai_failure:TimeoutError")
         self.assertEqual(row["adapter"], "openai_responses")
         self.assertIn("TimeoutError", row["reason"])
         self.assertNotIn("sk-test-secret", json.dumps(row))
@@ -525,6 +526,7 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         self.assertEqual(result.adapter, "fallback")
         self.assertFalse(result.used_api)
+        self.assertEqual(result.source, "deepseek_failure:TimeoutError")
         self.assertEqual(row["adapter"], "deepseek_chat")
         self.assertIn("TimeoutError", row["reason"])
         self.assertNotIn("sk-deepseek-secret", json.dumps(row))

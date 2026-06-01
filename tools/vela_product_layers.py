@@ -1603,6 +1603,22 @@ def render_deep_analysis_reply() -> str:
     return render_vela_persona(analysis_layer("", "deep_analysis"))
 
 
+def should_surface_deep_lane_status(result: ReplyEngineResult) -> bool:
+    source = str(result.source or "").lower()
+    return not result.used_api and result.adapter == "fallback" and source.startswith("deepseek_failure:")
+
+
+def render_deep_lane_status_judgment(context: ReplyContext, result: ReplyEngineResult, base: AnalysisPacket) -> str:
+    fallback_text = re.sub(r"^\s*K\s*[,，:：]\s*", "", str(result.text or "")).strip()
+    fallback_text = fallback_text or base.judgment
+    target = "项目推进判断" if context.intent == "project_assistant" else "深度分析"
+    return (
+        "深度线超过前台预算，先给状态：模型没有在前台预算内返回；"
+        f"我先给可执行判断，不把空等包装成完整{target}。"
+        f"当前可用判断：{fallback_text}"
+    )
+
+
 def sanitize_codex_summary(codex_output: str) -> str:
     """Keep Codex status useful while removing runtime/accounting metadata."""
     raw = str(codex_output or "")
@@ -1671,10 +1687,13 @@ def engine_text_for_intent(
     if context.intent in {"project_assistant", "deep_analysis"}:
         result = adapter.generate(context)
         base = analysis_layer(context.message, context.intent, codex_summary=codex_summary)
+        judgment = result.text or base.judgment
+        if should_surface_deep_lane_status(result):
+            judgment = render_deep_lane_status_judgment(context, result, base)
         packet = AnalysisPacket(
             intent=base.intent,
             facts=base.facts,
-            judgment=result.text or base.judgment,
+            judgment=judgment,
             risks=base.risks,
             next_actions=base.next_actions,
             confidence=base.confidence,
