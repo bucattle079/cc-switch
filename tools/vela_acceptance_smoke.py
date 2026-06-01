@@ -180,7 +180,15 @@ SINGLE_TURN_CASES = [
         "id": "market_no_raw_english",
         "message": "今天的资讯给我，但不要英文生肉新闻",
         "expected_intent": "market_brief",
-        "required_reply_tokens": ["不是实时直播", "实时源：未接入"],
+        "required_reply_tokens": ["不是实时直播", "实时源：未接入", "60秒判断", "下一观察点"],
+        "forbidden_reply_tokens": ["VELA 市场简报", "关键风险\n1.", "Market & World Briefing"],
+        "max_reply_chars": 900,
+    },
+    {
+        "id": "market_expand_full_report_available",
+        "message": "今天的资讯展开全部来源，我要完整报告",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["不是实时直播", "实时源：未接入", "VELA 市场简报", "关键风险"],
     },
     {
         "id": "market_policy_not_news_list",

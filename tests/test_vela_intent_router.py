@@ -235,6 +235,30 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertNotIn("VELA 市场简报", reply)
         self.assertNotIn("关键风险\n1.", reply)
 
+    def test_plain_market_news_is_compact_not_full_report(self):
+        router = load_module(ROUTER, "vela_router")
+
+        reply = router.render_cached_market_reply("今天的资讯给我，但不要英文生肉新闻")
+
+        self.assertLess(len(reply), 900)
+        self.assertIn("不是实时直播", reply)
+        self.assertIn("60秒判断", reply)
+        self.assertIn("下一观察点", reply)
+        self.assertNotIn("VELA 市场简报", reply)
+        self.assertNotIn("A股\n- 上证", reply)
+        self.assertNotIn("关键风险\n1.", reply)
+        self.assertNotIn("Market & World Briefing", reply)
+        self.assertNotIn("Samsung", reply)
+        self.assertNotIn("Nvidia", reply)
+
+    def test_expanded_market_news_can_return_full_report(self):
+        router = load_module(ROUTER, "vela_router")
+
+        reply = router.render_cached_market_reply("今天的资讯展开全部来源")
+
+        self.assertIn("VELA 市场简报", reply)
+        self.assertIn("关键风险", reply)
+
     def test_market_lane_records_interaction_session_and_hidden_need(self):
         router = load_module(ROUTER, "vela_router")
 
@@ -571,7 +595,8 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertIn("以下基于最近缓存", reply)
         self.assertIn("更新时间", reply)
         self.assertNotIn("data_status", reply)
-        self.assertIn("VELA", reply)
+        self.assertIn("60秒判断", reply)
+        self.assertNotIn("VELA 市场简报", reply)
         self.assertNotIn("direction:", reply)
         self.assertNotIn("score:", reply)
 

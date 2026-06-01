@@ -847,6 +847,43 @@ def format_market_brief(brief: MarketBrief, detail: bool = False) -> str:
     return "\n".join(lines)
 
 
+_FRONTSTAGE_TRANSLATIONS = (
+    ("Samsung/SK Hynix", "三星电子/SK海力士"),
+    ("SK Hynix", "SK海力士"),
+    ("Samsung", "三星电子"),
+    ("Nvidia", "英伟达"),
+    ("Nasdaq", "纳斯达克"),
+    ("S&P 500", "标普500"),
+    ("10Y", "10年期"),
+)
+
+
+def _market_frontstage_text(text: str) -> str:
+    translated = text
+    for source, target in _FRONTSTAGE_TRANSLATIONS:
+        translated = translated.replace(source, target)
+    return translated
+
+
+def format_market_frontstage_summary(brief: MarketBrief) -> str:
+    lines = [
+        "60秒判断",
+        "- A股：偏震荡修复，成交量和涨跌家数没确认前，不把反弹当胜利。",
+        "- 美股：风险偏好看 AI 龙头、美元、美债和 VIX；盘前乐观不等于现金盘买账。",
+        "- 韩国：半导体链条仍是加分项，但三星电子和 SK 海力士不能先掉队。",
+        "- 今日变量：美债、美元、人民币、油价、AI 龙头，其次才是地缘标题。",
+    ]
+    if brief.main_line:
+        lines.extend(["", f"判断：{brief.main_line}"])
+    if brief.vela_judgment:
+        lines.extend(["", "要点："])
+        lines.extend(f"- {_market_frontstage_text(item)}" for item in brief.vela_judgment[:2])
+    if brief.watch_next:
+        watch_next = [_market_frontstage_text(item) for item in brief.watch_next[:3]]
+        lines.extend(["", "下一观察点：" + "；".join(watch_next)])
+    return "\n".join(lines)
+
+
 def market_slot_profile(slot: str) -> dict[str, str]:
     if slot == "09:00":
         return {

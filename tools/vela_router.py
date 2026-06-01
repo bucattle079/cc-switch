@@ -16,6 +16,7 @@ from vela_market_briefing import (
     build_market_brief,
     format_freshness_status,
     format_market_brief,
+    format_market_frontstage_summary,
     format_status_boundary,
     market_freshness_status,
 )
@@ -561,7 +562,10 @@ def render_cached_market_reply(text: str) -> str:
     if brief is None:
         return guard_wechat_output(status_text + "\n\n当前没有可用市场缓存；需要刷新链路接入外部检索/API 后再生成报告。")
     prefix = "以下基于最近缓存，先给可用判断；这不是实时直播。"
-    body = format_market_brief(brief, detail=is_expanded_market_query(text))
+    if is_expanded_market_query(text):
+        body = format_market_brief(brief, detail=True)
+    else:
+        body = format_market_frontstage_summary(brief)
     return guard_wechat_output(f"{prefix}\n{status_text}\n\n{body}")
 
 
