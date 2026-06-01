@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
+import tomllib
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +19,8 @@ if str(ROOT / "tools") not in sys.path:
 import vela_router as router
 from vela_product_layers import FallbackReplyAdapter, run_layered_response
 
+
+DEFAULT_CC_CONNECT_HOME = Path(os.environ.get("VELA_CC_CONNECT_HOME", r"C:\Users\Admin\.cc-connect"))
 
 LEAK_TOKENS = (
     "raw payload",
@@ -210,6 +215,144 @@ def preview(text: str, limit: int = 260) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 1] + "…"
+
+
+def runtime_check(ok: bool, detail: str = "") -> dict[str, Any]:
+    return {"ok": bool(ok), "detail": detail}
+
+
+def detect_cc_connect_process() -> bool:
+    if os.name == "nt":
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "(Get-Process cc-connect,cc-connect-patched -ErrorAction SilentlyContinue | Select-Object -First 1).Id",
+            ],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        return bool((completed.stdout or "").strip())
+    completed = subprocess.run(
+        ["pgrep", "-f", "cc-connect"],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    return completed.returncode == 0 and bool((completed.stdout or "").strip())
+
+
+def parse_timestamp(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def latest_session_reply(sessions_dir: Path) -> dict[str, Any]:
+    candidates: list[tuple[datetime, float, Path, str]] = []
+    if not sessions_dir.exists():
+        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": []}
+    for path in sessions_dir.glob("VELA*.json"):
+        if ".bak-" in path.name:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for session in (data.get("sessions") or {}).values():
+            for item in session.get("history", []):
+                if item.get("role") != "assistant" or not item.get("content"):
+                    continue
+                parsed = parse_timestamp(str(item.get("timestamp") or item.get("created_at") or ""))
+                if parsed is None:
+                    parsed = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+                candidates.append((parsed, path.stat().st_mtime, path, str(item["content"])))
+    if not candidates:
+        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": []}
+    timestamp, _mtime, path, content = sorted(candidates, key=lambda item: (item[0], item[1]))[-1]
+    age_hours = max(0.0, (datetime.now(timezone.utc) - timestamp).total_seconds() / 3600)
+    return {
+        "content": content,
+        "timestamp": timestamp.isoformat(),
+        "path": str(path),
+        "age_hours": round(age_hours, 2),
+        "leaks": find_leaks(content),
+    }
+
+
+def run_runtime_audit(
+    *,
+    cc_home: Path | None = None,
+    process_running: bool | None = None,
+    max_session_age_hours: int = 48,
+) -> dict[str, Any]:
+    cc_home = cc_home or DEFAULT_CC_CONNECT_HOME
+    config_path = cc_home / "config.toml"
+    checks: dict[str, dict[str, Any]] = {}
+    config: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            checks["config"] = runtime_check(True, "cc-connect config loaded")
+        except tomllib.TOMLDecodeError as exc:
+            checks["config"] = runtime_check(False, f"config parse failed: {exc}")
+    else:
+        checks["config"] = runtime_check(False, "cc-connect config missing")
+
+    projects = [item for item in config.get("projects", []) if isinstance(item, dict)]
+    vela_project = next((item for item in projects if item.get("name") == "VELA"), {})
+    intent_router = vela_project.get("intent_router") or {}
+    router_command = str(intent_router.get("command") or "")
+    checks["router_config"] = runtime_check(
+        bool(intent_router.get("enabled")) and "vela_router.py" in router_command and "--stdin" in router_command,
+        router_command,
+    )
+
+    commands = {item.get("name"): item for item in config.get("commands", []) if isinstance(item, dict)}
+    command_names = ("vela-router", "vela-talk")
+    commands_ok = all("vela_router.py" in str((commands.get(name) or {}).get("exec") or "") for name in command_names)
+    checks["commands"] = runtime_check(commands_ok, ", ".join(name for name in command_names if name in commands))
+
+    running = detect_cc_connect_process() if process_running is None else bool(process_running)
+    checks["cc_connect_process"] = runtime_check(running, "running" if running else "not running")
+
+    latest_reply = latest_session_reply(cc_home / "sessions")
+    age = latest_reply.get("age_hours")
+    reply_recent = isinstance(age, (int, float)) and age <= max_session_age_hours
+    reply_clean = bool(latest_reply.get("content")) and not latest_reply.get("leaks")
+    checks["latest_session_reply"] = runtime_check(
+        reply_recent and reply_clean,
+        "recent and clean" if reply_recent and reply_clean else "missing, stale, or foreground leak detected",
+    )
+
+    failed = [name for name, check in checks.items() if not check["ok"]]
+    return {
+        "ok": not failed,
+        "cc_home": str(cc_home),
+        "checks": checks,
+        "failed": failed,
+        "latest_reply": {
+            "timestamp": latest_reply.get("timestamp") or "",
+            "age_hours": latest_reply.get("age_hours"),
+            "preview": preview(str(latest_reply.get("content") or "")),
+            "leaks": latest_reply.get("leaks") or [],
+        },
+    }
 
 
 def required_tokens_present(text: str, tokens: list[str] | None) -> bool:
@@ -456,17 +599,47 @@ def render_text_report(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_runtime_report(report: dict[str, Any]) -> str:
+    lines = [
+        f"VELA cc-connect runtime audit: {'OK' if report['ok'] else 'FAIL'}",
+        f"cc_home: {report['cc_home']}",
+    ]
+    if report["failed"]:
+        lines.append("failed: " + ", ".join(report["failed"]))
+    for name, check in report["checks"].items():
+        mark = "OK" if check["ok"] else "FAIL"
+        detail = str(check.get("detail") or "")
+        lines.append(f"- {mark} {name}: {detail}")
+    latest = report.get("latest_reply") or {}
+    if latest.get("preview"):
+        lines.append(f"latest_reply: {latest['preview']}")
+    return "\n".join(lines)
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run VELA local foreground acceptance smoke scenarios.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     parser.add_argument("--entrypoint", action="store_true", help="Run through router.reply_for with safe stubs.")
     parser.add_argument("--fake-deepseek-env", action="store_true", help="Set a temporary DeepSeek key sentinel during smoke.")
     parser.add_argument("--log-dir", type=Path, default=None, help="Use this learning-loop directory instead of a temp dir.")
+    parser.add_argument("--runtime-audit", action="store_true", help="Audit local cc-connect runtime config/process/session state.")
+    parser.add_argument("--cc-home", type=Path, default=DEFAULT_CC_CONNECT_HOME, help="cc-connect home directory for runtime audit.")
+    parser.add_argument("--max-session-age-hours", type=int, default=48, help="Maximum acceptable age for latest VELA session reply.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    if args.runtime_audit:
+        report = run_runtime_audit(
+            cc_home=args.cc_home,
+            max_session_age_hours=args.max_session_age_hours,
+        )
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(render_runtime_report(report))
+        return 0 if report["ok"] else 1
     report = run_smoke_suite(
         log_dir=args.log_dir,
         use_entrypoint=args.entrypoint,

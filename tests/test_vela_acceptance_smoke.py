@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 import unittest
 
 
@@ -112,6 +113,138 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         refresh = next(case for case in report["cases"] if case["id"] == "market_refresh_entry")
         self.assertEqual(refresh["latest_quality_log"]["quality_flags"][1], "adapter:local_status")
         self.assertFalse(refresh["bridge_executed"])
+
+    def test_runtime_audit_reports_router_config_and_live_process_gap(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            sessions = cc_home / "sessions"
+            sessions.mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                """
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+work_dir = "C:/Users/Admin/Desktop/CC-WECHAT"
+timeout_seconds = 75
+""".strip(),
+                encoding="utf-8",
+            )
+            stale_time = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+            (sessions / "VELA_test.json").write_text(
+                json.dumps(
+                    {
+                        "sessions": {
+                            "s1": {
+                                "history": [
+                                    {
+                                        "role": "assistant",
+                                        "content": "K，在。少菜单，直接看目标。",
+                                        "timestamp": stale_time,
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=False,
+                max_session_age_hours=24,
+            )
+
+        self.assertFalse(report["ok"])
+        self.assertTrue(report["checks"]["config"]["ok"])
+        self.assertTrue(report["checks"]["router_config"]["ok"])
+        self.assertTrue(report["checks"]["commands"]["ok"])
+        self.assertFalse(report["checks"]["cc_connect_process"]["ok"])
+        self.assertFalse(report["checks"]["latest_session_reply"]["ok"])
+        self.assertIn("cc_connect_process", report["failed"])
+        self.assertIn("latest_session_reply", report["failed"])
+        self.assertEqual(report["latest_reply"]["leaks"], [])
+
+    def test_runtime_audit_cli_json_reports_nonzero_for_live_gap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            (cc_home / "sessions").mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                """
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+""".strip(),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-X",
+                    "utf8",
+                    str(SMOKE),
+                    "--runtime-audit",
+                    "--json",
+                    "--cc-home",
+                    str(cc_home),
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                check=False,
+            )
+
+        report = json.loads(completed.stdout)
+        self.assertEqual(completed.returncode, 1)
+        self.assertFalse(report["ok"])
+        self.assertIn("latest_session_reply", report["failed"])
+        self.assertTrue(report["failed"])
+        self.assertNotIn("DEEPSEEK_API_KEY", completed.stdout)
+
+    def test_runtime_process_detector_checks_patched_cc_connect_binary(self):
+        smoke = load_smoke_module()
+        calls = []
+        original_run = smoke.subprocess.run
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout="24272\n", stderr="")
+
+        smoke.subprocess.run = fake_run
+        try:
+            detected = smoke.detect_cc_connect_process()
+        finally:
+            smoke.subprocess.run = original_run
+
+        self.assertTrue(detected)
+        command_text = " ".join(calls[0])
+        self.assertIn("cc-connect", command_text)
+        self.assertIn("cc-connect-patched", command_text)
 
 
 if __name__ == "__main__":
