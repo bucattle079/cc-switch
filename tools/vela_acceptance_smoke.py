@@ -50,14 +50,36 @@ SINGLE_TURN_CASES = [
         "expected_intent": "normal_chat",
     },
     {
+        "id": "normal_one_next_step",
+        "message": "我现在脑子糊住了，只给我一个下一步",
+        "expected_intent": "normal_chat",
+    },
+    {
+        "id": "daily_info_plain_sort",
+        "message": "把这段逻辑整理成三条结论",
+        "expected_intent": "daily_info",
+    },
+    {
         "id": "weather_jinjiang",
         "message": "明天晋江会不会下雨，能不能出门",
         "expected_intent": "weather_query",
         "required_reply_tokens": ["实时源：未接入", "天气"],
     },
     {
+        "id": "weather_new_york_cold",
+        "message": "今天纽约冷吗，出门要不要加外套",
+        "expected_intent": "weather_query",
+        "required_reply_tokens": ["实时源：未接入", "天气"],
+    },
+    {
         "id": "market_add_position",
         "message": "我不想看新闻列表，A股今天先等还是冲",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["不是实时直播", "实时源：未接入"],
+    },
+    {
+        "id": "market_no_raw_english",
+        "message": "今天的资讯给我，但不要英文生肉新闻",
         "expected_intent": "market_brief",
         "required_reply_tokens": ["不是实时直播", "实时源：未接入"],
     },
@@ -73,6 +95,26 @@ SINGLE_TURN_CASES = [
         "expected_intent": "codex_task",
         "codex_summary": "Codex smoke：只验证路由与前台边界，不执行真实桥接。",
         "side_effects_allowed": False,
+    },
+    {
+        "id": "project_augsun_continue",
+        "message": "继续 AugSun 项目，别讲愿景，给三条风险",
+        "expected_intent": "project_assistant",
+    },
+    {
+        "id": "deep_autopsy_vela",
+        "message": "地狱验尸一下 VELA 为什么不智能",
+        "expected_intent": "deep_analysis",
+    },
+    {
+        "id": "identity_memory_boundary",
+        "message": "VELA 你到底是 DeepSeek 还是 Codex？记忆放哪",
+        "expected_intent": "memory_related",
+    },
+    {
+        "id": "style_feedback_no_customer_voice",
+        "message": "别客服话术，像个真伙伴一样说",
+        "expected_intent": "style_feedback",
     },
 ]
 

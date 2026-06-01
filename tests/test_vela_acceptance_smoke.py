@@ -33,10 +33,18 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         scenario_ids = {case["id"] for case in report["cases"]}
         for required in {
             "normal_hello",
+            "normal_one_next_step",
+            "daily_info_plain_sort",
             "weather_jinjiang",
+            "weather_new_york_cold",
             "market_add_position",
+            "market_no_raw_english",
             "freshness_status",
             "codex_status_route_only",
+            "project_augsun_continue",
+            "deep_autopsy_vela",
+            "identity_memory_boundary",
+            "style_feedback_no_customer_voice",
             "feedback_smarter_then_hello",
             "feedback_misread_then_hello",
             "feedback_push_then_continue",
