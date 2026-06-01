@@ -393,13 +393,17 @@ def deepseek_runtime_status(env: dict[str, str] | None = None) -> dict[str, Any]
 
 
 def detect_cc_connect_process() -> bool:
+    return detect_cc_connect_process_count() > 0
+
+
+def detect_cc_connect_process_count() -> int:
     if os.name == "nt":
         completed = subprocess.run(
             [
                 "powershell",
                 "-NoProfile",
                 "-Command",
-                "(Get-Process cc-connect,cc-connect-patched -ErrorAction SilentlyContinue | Select-Object -First 1).Id",
+                "(Get-Process cc-connect,cc-connect-patched -ErrorAction SilentlyContinue | Measure-Object).Count",
             ],
             text=True,
             encoding="utf-8",
@@ -408,7 +412,10 @@ def detect_cc_connect_process() -> bool:
             timeout=5,
             check=False,
         )
-        return bool((completed.stdout or "").strip())
+        try:
+            return max(0, int((completed.stdout or "0").strip() or "0"))
+        except ValueError:
+            return 0
     completed = subprocess.run(
         ["pgrep", "-f", "cc-connect"],
         text=True,
@@ -418,7 +425,27 @@ def detect_cc_connect_process() -> bool:
         timeout=5,
         check=False,
     )
-    return completed.returncode == 0 and bool((completed.stdout or "").strip())
+    if completed.returncode != 0:
+        return 0
+    return len([line for line in (completed.stdout or "").splitlines() if line.strip()])
+
+
+def cc_connect_process_check(
+    *,
+    process_running: bool | None = None,
+    process_count: int | None = None,
+) -> dict[str, Any]:
+    if process_count is None:
+        if process_running is not None:
+            process_count = 1 if process_running else 0
+        else:
+            process_count = detect_cc_connect_process_count()
+    process_count = max(0, int(process_count))
+    if process_count == 0:
+        return runtime_check(False, "not running")
+    if process_count > 1:
+        return runtime_check(False, f"multiple cc-connect processes detected; count={process_count}; keep one service instance")
+    return runtime_check(True, "running; count=1")
 
 
 def parse_timestamp(value: str) -> datetime | None:
@@ -621,6 +648,7 @@ def run_runtime_audit(
     *,
     cc_home: Path | None = None,
     process_running: bool | None = None,
+    process_count: int | None = None,
     max_session_age_hours: int = 48,
     learning_loop_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -659,8 +687,10 @@ def run_runtime_audit(
     checks["commands"] = runtime_check(commands_ok, ", ".join(name for name in command_names if name in commands))
     checks["weixin_poll_state"] = weixin_poll_state(vela_project)
 
-    running = detect_cc_connect_process() if process_running is None else bool(process_running)
-    checks["cc_connect_process"] = runtime_check(running, "running" if running else "not running")
+    checks["cc_connect_process"] = cc_connect_process_check(
+        process_running=process_running,
+        process_count=process_count,
+    )
 
     latest_reply = latest_session_reply(cc_home / "sessions")
     age = latest_reply.get("age_hours")

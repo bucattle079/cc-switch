@@ -407,6 +407,43 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
         self.assertIn("cc-connect", command_text)
         self.assertIn("cc-connect-patched", command_text)
 
+    def test_runtime_audit_flags_multiple_cc_connect_processes(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            (cc_home / "sessions").mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                """
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=True,
+                process_count=2,
+                max_session_age_hours=9999,
+            )
+
+        self.assertFalse(report["checks"]["cc_connect_process"]["ok"])
+        self.assertIn("multiple", report["checks"]["cc_connect_process"]["detail"])
+        self.assertIn("count=2", report["checks"]["cc_connect_process"]["detail"])
+        self.assertIn("cc_connect_process", report["failed"])
+
     def test_runtime_audit_flags_inbound_message_newer_than_session_reply(self):
         smoke = load_smoke_module()
         with tempfile.TemporaryDirectory() as tmp:
