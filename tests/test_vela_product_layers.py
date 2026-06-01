@@ -791,6 +791,23 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("内部诊断", text)
         self.assertIn("K", text)
 
+    def test_guardrail_rewrites_learning_schema_leaks_before_wechat(self):
+        product = load_product_module()
+
+        text = product.guard_wechat_output(
+            "Strategic Memory Candidate project_goal: AugSun 长期目标\n"
+            "response_quality_signals=['preference_or_feedback_adapted']\n"
+            "user_preferences=['少菜单']"
+        )
+
+        self.assertIn("K", text)
+        self.assertNotIn("Strategic Memory Candidate", text)
+        self.assertNotIn("project_goal", text)
+        self.assertNotIn("response_quality_signals", text)
+        self.assertNotIn("user_preferences", text)
+        self.assertNotIn("preference_or_feedback_adapted", text)
+        self.assertNotIn("[", text)
+
     def test_codex_summary_hides_runtime_metadata_before_wechat(self):
         product = load_product_module()
 
