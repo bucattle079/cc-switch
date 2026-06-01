@@ -183,6 +183,8 @@ timeout_seconds = 75
         self.assertTrue(report["checks"]["commands"]["ok"])
         self.assertFalse(report["checks"]["cc_connect_process"]["ok"])
         self.assertFalse(report["checks"]["latest_session_reply"]["ok"])
+        self.assertIn("stale", report["checks"]["latest_session_reply"]["detail"])
+        self.assertIn("fresh WeChat prompt", report["checks"]["latest_session_reply"]["detail"])
         self.assertIn("cc_connect_process", report["failed"])
         self.assertIn("latest_session_reply", report["failed"])
         self.assertEqual(report["latest_reply"]["leaks"], [])
@@ -315,6 +317,74 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
         self.assertFalse(report["checks"]["inbound_to_reply"]["ok"])
         self.assertIn("message received", report["checks"]["inbound_to_reply"]["detail"])
         self.assertNotIn("content_len", report["checks"]["inbound_to_reply"]["detail"])
+
+    def test_runtime_audit_requires_weixin_inbound_not_only_internal_session_send(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            sessions = cc_home / "sessions"
+            sessions.mkdir(parents=True)
+            state_dir = cc_home / "weixin" / "codex-wechat" / "bot"
+            state_dir.mkdir(parents=True)
+            (state_dir / "get_updates.buf").write_text("opaque-poll-cursor", encoding="utf-8")
+            (cc_home / "config.toml").write_text(
+                f"""
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args}}}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args:VELA}}}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+
+[[projects.platforms]]
+type = "weixin"
+
+[projects.platforms.options]
+state_dir = "{str(state_dir).replace("\\", "/")}"
+token = "test-token"
+""".strip(),
+                encoding="utf-8",
+            )
+            (sessions / "VELA_test.json").write_text(
+                json.dumps(
+                    {
+                        "sessions": {
+                            "s1": {
+                                "history": [
+                                    {
+                                        "role": "assistant",
+                                        "content": "K，在。少菜单，直接看目标。",
+                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=True,
+                max_session_age_hours=24,
+            )
+
+        self.assertFalse(report["ok"])
+        self.assertTrue(report["checks"]["latest_session_reply"]["ok"])
+        self.assertFalse(report["checks"]["weixin_inbound_seen"]["ok"])
+        self.assertIn("weixin_inbound_seen", report["failed"])
+        self.assertNotIn("latest_session_reply", report["failed"])
+        self.assertIn("fresh WeChat prompt", report["checks"]["weixin_inbound_seen"]["detail"])
 
     def test_runtime_audit_dry_runs_configured_router_command(self):
         smoke = load_smoke_module()

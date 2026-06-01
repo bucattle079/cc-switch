@@ -301,6 +301,24 @@ def runtime_check(ok: bool, detail: str = "") -> dict[str, Any]:
     return {"ok": bool(ok), "detail": detail}
 
 
+def latest_session_reply_detail(latest_reply: dict[str, Any], *, max_session_age_hours: int) -> str:
+    content = str(latest_reply.get("content") or "")
+    leaks = list(latest_reply.get("leaks") or [])
+    age = latest_reply.get("age_hours")
+    if not content:
+        return "no VELA assistant reply found; send a fresh WeChat prompt to verify live foreground"
+    if leaks:
+        return "latest VELA assistant reply has foreground leak markers; do not treat live check as clean"
+    if not isinstance(age, (int, float)):
+        return "latest VELA assistant reply timestamp is unreadable; send a fresh WeChat prompt to verify live foreground"
+    if age > max_session_age_hours:
+        return (
+            f"latest VELA assistant reply is stale ({age:.1f}h > {max_session_age_hours}h); "
+            "send a fresh WeChat prompt to verify live foreground"
+        )
+    return "recent and clean"
+
+
 def detect_cc_connect_process() -> bool:
     if os.name == "nt":
         completed = subprocess.run(
@@ -503,13 +521,25 @@ def run_runtime_audit(
     age = latest_reply.get("age_hours")
     reply_recent = isinstance(age, (int, float)) and age <= max_session_age_hours
     reply_clean = bool(latest_reply.get("content")) and not latest_reply.get("leaks")
+    latest_reply_detail = latest_session_reply_detail(
+        latest_reply,
+        max_session_age_hours=max_session_age_hours,
+    )
     checks["latest_session_reply"] = runtime_check(
         reply_recent and reply_clean,
-        "recent and clean" if reply_recent and reply_clean else "missing, stale, or foreground leak detected",
+        latest_reply_detail,
     )
 
     inbound = latest_inbound_message(cc_home / "cc-connect.log")
     inbound_time = parse_timestamp(str(inbound.get("timestamp") or ""))
+    checks["weixin_inbound_seen"] = runtime_check(
+        bool(inbound_time),
+        (
+            f"Weixin inbound observed at {inbound_time.isoformat()}"
+            if inbound_time
+            else "no Weixin inbound message in cc-connect log; send a fresh WeChat prompt to verify live foreground"
+        ),
+    )
     reply_time = parse_timestamp(str(latest_reply.get("timestamp") or ""))
     inbound_ok = True
     inbound_detail = "no inbound message in cc-connect log"
