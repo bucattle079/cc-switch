@@ -478,6 +478,9 @@ class FallbackReplyAdapter(ReplyAdapter):
         } and context.supporting_context.strip():
             text = context.supporting_context.strip()
             return ReplyEngineResult(text=text, source="fallback_supporting_context", used_api=False, adapter=self.name)
+        if context.intent == "project_assistant" and context.strategic_memories:
+            text = self._project_memory_fallback(context)
+            return ReplyEngineResult(text=text, source="fallback_project_memory", used_api=False, adapter=self.name)
         variants = self._variants_for(context)
         text = self._pick_variant(variants, context)
         return ReplyEngineResult(text=text, source="fallback_variant", used_api=False, adapter=self.name)
@@ -486,6 +489,27 @@ class FallbackReplyAdapter(ReplyAdapter):
         if context.supporting_context.strip():
             return context.supporting_context.strip()
         return "K，天气源未接入，我不编实时温度。按风险处理：带伞，看温差，给行程留余量。"
+
+    def _project_memory_fallback(self, context: ReplyContext) -> str:
+        goal = self._first_strategic_memory_text(context)
+        if not goal:
+            return self._pick_variant(self.PROJECT_VARIANTS, context)
+        return (
+            f"K，项目线不重开。先按这条方向推进：{goal}。\n"
+            "下一步：锁一个可验证闭环，砍掉装饰需求，只派 Codex 做能交付的最小动作。"
+        )
+
+    def _first_strategic_memory_text(self, context: ReplyContext) -> str:
+        for item in context.strategic_memories:
+            text = " ".join(str(item or "").split()).strip()
+            if not text:
+                continue
+            if "：" in text:
+                text = text.split("：", 1)[1].strip()
+            if ":" in text and text.lower().startswith(("strategic", "project", "persona", "decision")):
+                text = text.split(":", 1)[1].strip()
+            return text[:140]
+        return ""
 
     def _variants_for(self, context: ReplyContext) -> tuple[str, ...]:
         message = context.message.strip().lower()

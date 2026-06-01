@@ -163,6 +163,23 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertNotIn("少菜单", result.text)
         self.assertNotIn("说目标", result.text)
 
+    def test_fallback_project_reply_uses_strategic_memory_without_schema(self):
+        engine = load_reply_engine()
+        adapter = engine.FallbackReplyAdapter()
+        context = engine.ReplyContext(
+            message="继续 AugSun 项目",
+            intent="project_assistant",
+            strategic_memories=["战略候选（未确认，project_goal）：AugSun 长期目标是先跑通最小商业闭环"],
+        )
+
+        result = adapter.generate(context)
+
+        self.assertIn("AugSun", result.text)
+        self.assertIn("最小商业闭环", result.text)
+        self.assertNotIn("project_goal", result.text)
+        self.assertNotIn("战略候选", result.text)
+        self.assertNotIn("未确认", result.text)
+
     def test_fallback_gratitude_stays_warm_not_pushy(self):
         engine = load_reply_engine()
         adapter = engine.FallbackReplyAdapter()
