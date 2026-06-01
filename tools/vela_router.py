@@ -16,6 +16,7 @@ from vela_market_briefing import (
     build_market_brief,
     format_freshness_status,
     format_market_brief,
+    format_status_boundary,
     market_freshness_status,
 )
 from vela_product_layers import (
@@ -78,6 +79,15 @@ MARKET_KEYWORDS = [
     "黄金",
     "vix",
     "市场",
+    "加仓",
+    "减仓",
+    "仓位",
+    "能不能加仓",
+    "满仓",
+    "重仓",
+    "抄底",
+    "冲进去",
+    "先等",
     "看盘",
     "早盘",
     "午盘",
@@ -91,6 +101,41 @@ MARKET_KEYWORDS = [
     "新闻",
     "来源",
     "简报",
+]
+EXPLICIT_MARKET_DECISION_KEYWORDS = [
+    "a股",
+    "a 股",
+    "上证",
+    "沪深300",
+    "美股",
+    "nasdaq",
+    "s&p",
+    "sp500",
+    "韩国",
+    "kospi",
+    "日本",
+    "nikkei",
+    "美元",
+    "美债",
+    "人民币",
+    "油价",
+    "黄金",
+    "vix",
+    "加仓",
+    "减仓",
+    "仓位",
+    "满仓",
+    "重仓",
+    "抄底",
+    "冲进去",
+    "看盘",
+    "早盘",
+    "午盘",
+    "收盘",
+    "盘前",
+    "盘后",
+    "半导体",
+    "芯片",
 ]
 FRESHNESS_KEYWORDS = [
     "实时",
@@ -160,12 +205,20 @@ STYLE_FEEDBACK_KEYWORDS = [
     "太机械",
     "机械",
     "机械道歉",
+    "客服话术",
     "机器人",
     "不像vela",
     "不像 vela",
     "不够直接",
+    "真伙伴",
     "更像真人",
     "像真人",
+    "不够像真人",
+    "更智能",
+    "智能的伙伴",
+    "理解一下我的意思",
+    "不要拖",
+    "继续推进",
     "不够锋利",
     "语气",
     "风格",
@@ -176,10 +229,12 @@ STYLE_FEEDBACK_KEYWORDS = [
     "没听明白",
     "没抓到",
     "不是这个意思",
+    "不是我要的",
     "理解错",
+    "重新判断",
     "偏了",
 ]
-RELATIONSHIP_REPAIR_KEYWORDS = ["你没懂我", "没懂我", "没听懂", "没听明白", "没抓到", "不是这个意思", "理解错", "偏了"]
+RELATIONSHIP_REPAIR_KEYWORDS = ["你没懂我", "没懂我", "没听懂", "没听明白", "没抓到", "不是这个意思", "不是我要的", "理解错", "重新判断", "偏了"]
 WEATHER_KEYWORDS = [
     "天气",
     "气温",
@@ -195,6 +250,7 @@ WEATHER_TIME_WORDS = ["今天", "明天", "后天", "今晚", "早上", "中午"
 WEATHER_QUESTION_WORDS = ["天气", "气温", "冷吗", "热吗", "冷不冷", "热不热", "会下雨吗", "下雨吗", "下雪吗"]
 DAILY_INFO_KEYWORDS = ["解释", "整理", "总结", "帮我查", "帮我搜", "这是什么意思", "什么意思", "逻辑", "分析一下", "协助我分析", "选择", "比较好吗", "翻译", "普通检索"]
 MEMORY_KEYWORDS = ["记住", "记忆", "长期", "以后", "默认", "偏好", "别忘", "学习一下", *STYLE_FEEDBACK_KEYWORDS]
+MEMORY_PRIORITY_KEYWORDS = ["记住", "记忆", "长期", "以后", "默认", "偏好", "别忘", "学习一下", "沉淀"]
 PERSONA_TOOL_PREFIXES = {"persona", "personality", "vela-personality"}
 PERSONA_TOOL_ALIASES = {
     "人格": ["status"],
@@ -289,6 +345,17 @@ def classify_intent(text: str) -> Intent:
         return Intent("market_refresh", 0.94, market_focus_tags(norm), market_allowed=True)
     if is_freshness_question(norm) and not is_market_summary_request(norm):
         return Intent("freshness_status", 0.95, ["freshness"])
+    if contains_any(norm, DEEP_KEYWORDS):
+        return Intent("deep_analysis", 0.82, deep_focus_tags(norm))
+    if contains_any(norm, MEMORY_KEYWORDS) and contains_any(norm, MEMORY_PRIORITY_KEYWORDS):
+        return Intent("memory_related", 0.88, memory_focus_tags(norm))
+    if contains_any(norm, CODEX_KEYWORDS):
+        return Intent("codex_task", 0.86, ["codex"], codex_allowed=True)
+    if contains_any(norm, PROJECT_KEYWORDS) and not is_explicit_market_judgment_request(norm):
+        return Intent("project_assistant", 0.78, ["project"])
+    if is_explicit_market_judgment_request(norm):
+        tags = market_focus_tags(norm)
+        return Intent("market_brief", 0.9, tags, market_allowed=True)
     if contains_any(norm, STYLE_FEEDBACK_KEYWORDS):
         tags = ["memory", "style_feedback"]
         if contains_any(norm, RELATIONSHIP_REPAIR_KEYWORDS):
@@ -296,8 +363,6 @@ def classify_intent(text: str) -> Intent:
         return Intent("style_feedback", 0.9, tags)
     if contains_any(norm, MEMORY_KEYWORDS):
         return Intent("memory_related", 0.88, memory_focus_tags(norm))
-    if contains_any(norm, CODEX_KEYWORDS):
-        return Intent("codex_task", 0.86, ["codex"], codex_allowed=True)
     if contains_any(norm, MARKET_KEYWORDS):
         tags = market_focus_tags(norm)
         return Intent("market_brief", 0.9, tags, market_allowed=True)
@@ -305,8 +370,6 @@ def classify_intent(text: str) -> Intent:
         return Intent("world_brief", 0.82, ["geopolitics", "global"])
     if contains_any(norm, PROJECT_KEYWORDS):
         return Intent("project_assistant", 0.78, ["project"])
-    if contains_any(norm, DEEP_KEYWORDS):
-        return Intent("deep_analysis", 0.82, deep_focus_tags(norm))
     if is_daily_info_request(norm):
         return Intent("daily_info", 0.74, ["daily_info"])
     return Intent("normal_chat", 0.7, [])
@@ -326,6 +389,14 @@ def is_market_summary_request(text: str) -> bool:
     if "实时吗" in text or ("是实时" in text and "不是实时" not in text):
         return False
     return contains_any(text, MARKET_KEYWORDS) or contains_any(text, ["资讯", "新闻", "市场"])
+
+
+def is_explicit_market_judgment_request(text: str) -> bool:
+    if contains_any(text, EXPLICIT_MARKET_DECISION_KEYWORDS):
+        return True
+    if "市场" in text and contains_any(text, ["怎么看", "如何", "能不能", "要不要", "先等", "冲", "风险"]):
+        return True
+    return False
 
 
 def is_market_refresh_request(text: str) -> bool:
@@ -472,6 +543,7 @@ def render_market_refresh_reply(text: str) -> str:
     lines = [
         "已识别为实时资讯请求。我不拿缓存冒充实时，也不把旧报告包装成刚发生。",
         f"最近缓存：{status.last_updated}",
+        format_status_boundary(status),
         refresh_line,
         "",
         "失效控制：如果外部实时源/API 未接通或刷新超过前台预算，我只返回状态，不把缓存伪装成实时情报。",
@@ -493,6 +565,7 @@ def render_weather_reply(text: str) -> str:
     reply = (
         f"K，{location}天气这条走天气线，不走闲聊。\n"
         "天气不调用外部天气 API，VELA 不编实时温度、降雨概率或精确预报。\n"
+        "状态边界：实时源：未接入；缓存摘要：不可用；模型仅生成：是；可用性：天气实时数据不可用。\n"
         "我只按常识和风险给行动判断：带伞，看温差，给行程留余量；要秒级预报请看本机天气源。"
     )
     return guard_wechat_output(reply)

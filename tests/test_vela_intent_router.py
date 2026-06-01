@@ -117,7 +117,9 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         self.assertIn("晋江", reply)
         self.assertIn("天气", reply)
+        self.assertIn("实时源：未接入", reply)
         self.assertNotIn("DeepSeek", reply)
+        self.assertNotIn("real_time_source_available", reply)
         self.assertNotIn("Market & World Briefing", reply)
         self.assertNotIn("CODEX", reply)
         self.assertNotIn("weather_query", reply)
@@ -254,6 +256,18 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertFalse(intent.codex_allowed)
         self.assertFalse(intent.market_allowed)
 
+    def test_human_iteration_feedback_variants_route_without_tool_pollution(self):
+        router = load_module(ROUTER, "vela_router")
+
+        for text in ["我需要你更智能", "你理解一下我的意思", "继续推进，不要拖", "不够像真人", "不要机械道歉"]:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, "style_feedback")
+                self.assertIn("style_feedback", intent.focus_tags)
+                self.assertFalse(intent.market_allowed)
+                self.assertFalse(intent.codex_allowed)
+
     def test_real_dialogue_scenarios_route_without_tool_pollution(self):
         router = load_module(ROUTER, "vela_router")
 
@@ -274,6 +288,32 @@ class VelaIntentRouterTests(unittest.TestCase):
                     self.assertFalse(intent.market_allowed)
                 if expected_intent != "codex_task":
                     self.assertFalse(intent.codex_allowed)
+
+    def test_realistic_wechat_mixed_scenarios_keep_tool_boundaries(self):
+        router = load_module(ROUTER, "vela_router")
+
+        cases = [
+            ("刚才那句不是我要的，别解释，重新判断", "style_feedback", False, False),
+            ("我现在脑子糊住了，只给我一个下一步", "normal_chat", False, False),
+            ("继续 VELA 项目，别讲愿景，给三条风险", "project_assistant", False, False),
+            ("我今天有点上头，想直接满仓冲进去", "market_brief", True, False),
+            ("明天晋江会不会下雨，能不能出门", "weather_query", False, False),
+            ("这是实时数据吗？没有就明说", "freshness_status", False, False),
+            ("CODEX/ 现在做到哪了，别发日志", "codex_task", False, True),
+            ("VELA 你到底是 DeepSeek 还是 Codex？记忆放哪", "memory_related", False, False),
+            ("别客服话术，像个真伙伴一样说", "style_feedback", False, False),
+            ("我不想看新闻列表，A股今天先等还是冲", "market_brief", True, False),
+            ("你就别反驳我，夸我决定英明就行", "normal_chat", False, False),
+            ("地狱验尸一下：为什么它还是不聪明", "deep_analysis", False, False),
+        ]
+
+        for text, expected_intent, market_allowed, codex_allowed in cases:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, expected_intent)
+                self.assertEqual(intent.market_allowed, market_allowed)
+                self.assertEqual(intent.codex_allowed, codex_allowed)
 
     def test_route_decision_is_structured_and_not_final_reply(self):
         router = load_module(ROUTER, "vela_router")
@@ -304,8 +344,10 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertLess(elapsed, 2.0)
         self.assertIn("更新时间", reply)
         self.assertIn("数据来源", reply)
+        self.assertIn("实时源：未接入", reply)
         self.assertNotIn("data_status", reply)
         self.assertNotIn("source_type", reply)
+        self.assertNotIn("real_time_source_available", reply)
         self.assertNotIn("Market & World Briefing", reply)
 
     def test_refresh_market_question_uses_refresh_lane_without_blocking(self):
@@ -327,12 +369,14 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertLess(elapsed, 2.0)
         self.assertIn("不拿缓存冒充实时", reply)
         self.assertIn("前台先返回状态", reply)
+        self.assertIn("实时源：未接入", reply)
         self.assertIn("--lock-file", popen_args)
         self.assertNotIn("以下基于最近缓存", reply)
         self.assertNotIn("VELA 市场简报", reply)
         self.assertNotIn("Market & World Briefing", reply)
         self.assertNotIn("data_status", reply)
         self.assertNotIn("source_type", reply)
+        self.assertNotIn("real_time_source_available", reply)
 
     def test_explicit_realtime_retrieval_request_does_not_return_cached_brief(self):
         router = load_module(ROUTER, "vela_router")
@@ -740,10 +784,16 @@ class VelaMarketBriefingTests(unittest.TestCase):
 
         self.assertEqual(status.data_status, "cached")
         self.assertEqual(status.source_type, "cache")
+        self.assertFalse(status.real_time_source_available)
+        self.assertTrue(status.cached_summary_available)
+        self.assertFalse(status.model_generated_only)
+        self.assertFalse(status.unavailable)
         self.assertIn("更新时间", text)
         self.assertIn("数据来源", text)
+        self.assertIn("实时源：未接入", text)
         self.assertNotIn("last_updated", text)
         self.assertNotIn("source_type", text)
+        self.assertNotIn("real_time_source_available", text)
         self.assertIn("不是实时直播", text)
 
 

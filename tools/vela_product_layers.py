@@ -164,6 +164,24 @@ class LearningEvaluation:
 
 
 @dataclass(frozen=True)
+class HumanIterationSignal:
+    user_message_type: str
+    detected_user_state: str
+    inferred_hidden_need: str
+    active_persona_capabilities: list[str]
+    response_behavior_mode: str
+    response_quality_signals: list[str]
+    user_feedback_type: str
+    correction_needed: bool
+    memory_update_candidate: bool
+    tone_adjustment_candidate: bool
+    next_turn_improvement: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class HumanToneVector:
     warmth_level: int
     directness_level: int
@@ -446,6 +464,143 @@ def record_session_note(
     return path
 
 
+def user_message_type_for(message: str, intent: str, interpretation: NeedInterpretation, learning: LearningEvaluation) -> str:
+    if learning.classification == "relationship_repair":
+        return "feedback_repair"
+    if learning.classification == "behavior_preference":
+        return "behavior_feedback"
+    if learning.classification == "style_feedback":
+        return "style_feedback"
+    if interpretation.response_mode == "quiet_support":
+        return "low_burden_support"
+    if interpretation.response_mode == "boundary_pushback":
+        return "boundary_test"
+    if interpretation.response_mode == "identity_continuity":
+        return "identity_question"
+    if intent in {"market_brief", "market_refresh", "freshness_status"}:
+        return "market_or_freshness"
+    if intent == "weather_query":
+        return "weather_status"
+    if intent == "project_assistant":
+        return "project_request"
+    if intent == "deep_analysis":
+        return "deep_analysis_request"
+    if intent == "daily_info":
+        return "daily_info"
+    return "normal_chat"
+
+
+def user_feedback_type_for(message: str, intent: str, learning: LearningEvaluation) -> str:
+    if learning.classification == "relationship_repair":
+        return "meaning_misread"
+    if learning.classification == "style_feedback":
+        return "style_expression"
+    if learning.classification == "behavior_preference":
+        return "behavior_preference"
+    if intent == "deep_analysis" and _has_any(message, ("地狱验尸", "验尸", "根因")):
+        return "deep_diagnosis_request"
+    return "none"
+
+
+def response_quality_signals_for(
+    *,
+    context: ReplyContext,
+    response_text: str,
+    learning: LearningEvaluation,
+    issues: Iterable[str],
+) -> list[str]:
+    text = str(response_text or "")
+    issue_list = list(issues)
+    signals: list[str] = []
+    if context.inferred_hidden_need or context.need_interpretation:
+        signals.append("hidden_need_detected")
+    if context.should_use_evidence_gate or context.intent in {"market_brief", "weather_query", "deep_analysis", "project_assistant"}:
+        signals.append("facts_inference_uncertainty_boundary")
+    if "Identity Core" in context.persona_skeleton or context.should_reference_memory:
+        signals.append("long_term_partner_continuity")
+    if context.should_clarify:
+        signals.append("clarification_supported")
+    if context.should_push_back:
+        signals.append("gentle_pushback_supported")
+    if "抱歉" not in text and "对不起" not in text:
+        signals.append("no_mechanical_apology")
+    if not any(token in text for token in ("请选择", "以下菜单", "功能列表", "我将为您")):
+        signals.append("non_template_tone")
+    if context.user_preferences or learning.should_affect_next_reply:
+        signals.append("preference_or_feedback_adapted")
+    if "Identity Core" in context.persona_skeleton:
+        signals.append("identity_continuity")
+    if not any(str(issue).startswith("forbidden_phrase") or str(issue) == "stage_direction" for issue in issue_list):
+        signals.append("no_roleplay_or_quote_pollution")
+    return signals
+
+
+def next_turn_improvement_for(
+    *,
+    feedback_type: str,
+    context: ReplyContext,
+    learning: LearningEvaluation,
+) -> str:
+    if feedback_type == "meaning_misread":
+        return "下一轮先承认理解偏差，复述真实意思，再给修正路径。"
+    if feedback_type == "style_expression":
+        return "下一轮减少模板、冷感、冗长和机械自证，直接给判断。"
+    if feedback_type == "behavior_preference":
+        return "下一轮更快理解真实意思，减少拖延，直接推进最小下一步。"
+    if context.should_use_evidence_gate:
+        return "下一轮继续先区分事实、推断和不确定，再给判断。"
+    if context.response_behavior_mode == "quiet_support":
+        return "下一轮保持低负担，只给一个可执行切口。"
+    return "保持当前行为模式，继续观察用户反馈。"
+
+
+def build_iteration_signal(
+    *,
+    message: str,
+    intent: str,
+    context: ReplyContext,
+    learning: LearningEvaluation,
+    response_text: str,
+    issues: Iterable[str],
+) -> HumanIterationSignal:
+    interpretation = interpret_need(message, intent)
+    feedback_type = user_feedback_type_for(message, intent, learning)
+    quality_signals = response_quality_signals_for(context=context, response_text=response_text, learning=learning, issues=issues)
+    correction_needed = learning.should_affect_next_reply or feedback_type in {
+        "meaning_misread",
+        "style_expression",
+        "behavior_preference",
+    }
+    return HumanIterationSignal(
+        user_message_type=user_message_type_for(message, intent, interpretation, learning),
+        detected_user_state=context.detected_user_state or interpretation.emotional_state,
+        inferred_hidden_need=context.inferred_hidden_need or interpretation.implied_need,
+        active_persona_capabilities=list(context.active_persona_capabilities or context.persona_skeleton),
+        response_behavior_mode=context.response_behavior_mode or context.response_mode,
+        response_quality_signals=quality_signals,
+        user_feedback_type=feedback_type,
+        correction_needed=correction_needed,
+        memory_update_candidate=learning.should_record_candidate,
+        tone_adjustment_candidate=correction_needed or bool(context.tone_adjustment_reason),
+        next_turn_improvement=next_turn_improvement_for(feedback_type=feedback_type, context=context, learning=learning),
+    )
+
+
+def record_iteration_signal(signal: HumanIterationSignal, log_dir: Path | None = None) -> Path:
+    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / f"human-iteration-{utc_now():%Y-%m-%d}.jsonl"
+    row = {
+        "created_at": utc_now().isoformat(),
+        "level": "Human-Like Intelligence Iteration",
+        **signal.to_dict(),
+        "storage_policy": "local_iteration_signal_no_foreground_exposure",
+    }
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return path
+
+
 def read_jsonl_rows(path: Path) -> list[dict]:
     if not path.exists():
         return []
@@ -479,7 +634,9 @@ RELATIONSHIP_REPAIR_MARKERS = (
     "没听明白",
     "没抓到",
     "不是这个意思",
+    "不是我要的",
     "理解错",
+    "重新判断",
     "偏了",
 )
 
@@ -487,6 +644,8 @@ QUIET_SUPPORT_MARKERS = (
     "脑子发懵",
     "发懵",
     "脑子懵",
+    "脑子糊",
+    "糊住",
     "很累",
     "有点累",
     "撑不住",
@@ -525,6 +684,18 @@ IDENTITY_CORE_MARKERS = (
     "adapter",
 )
 
+BEHAVIOR_PREFERENCE_MARKERS = (
+    "更智能",
+    "智能的伙伴",
+    "理解一下我的意思",
+    "我需要你更智能",
+    "不要拖",
+    "继续推进",
+    "客服话术",
+    "真伙伴",
+    "像个真伙伴",
+)
+
 PERSONA_SKELETON_ORDER = [
     "Evidence Gate",
     "Meaning Decoder",
@@ -551,9 +722,9 @@ def persona_skeleton_for(*, response_mode: str = "", text: str = "") -> list[str
         signals.add("Evidence Gate")
     if any(token in raw for token in ["relationship_repair", "quiet_support", "identity_continuity", "meaning", "理解", "误读", "偏差", "歧义", "隐藏需求", "什么意思", "逻辑"]):
         signals.add("Meaning Decoder")
-    if any(token in raw for token in ["project_operator", "strategic_depth", "market_brief", "boundary", "boundary_pushback", "项目", "捷径", "烧钱", "上头", "冲", "代价", "风险", "顺着", "迎合", "加仓"]):
+    if any(token in raw for token in ["project_operator", "strategic_depth", "market_brief", "boundary", "boundary_pushback", "behavior_preference", "项目", "捷径", "烧钱", "上头", "冲", "代价", "风险", "顺着", "迎合", "加仓", "不要拖", "继续推进"]):
         signals.add("Boundary Engine")
-    if any(token in raw for token in ["relationship_repair", "quiet_support", "daily_companion", "boundary_pushback", "feedback", "style", "反馈", "修正", "自然", "模板", "吐槽", "谢谢"]):
+    if any(token in raw for token in ["relationship_repair", "quiet_support", "daily_companion", "boundary_pushback", "behavior_preference", "feedback", "style", "反馈", "修正", "自然", "模板", "吐槽", "谢谢", "更智能"]):
         signals.add("Witty Correction")
     if response_mode == "daily_companion" and len(signals) == 1:
         signals.update({"Meaning Decoder", "Witty Correction"})
@@ -674,6 +845,21 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             distillation_rules=rules,
             should_reference_memory=True,
             tone_adjustment_reason="用户在问 VELA 本体；保持连续人格，不变成冷工具说明。",
+        )
+
+    if any(marker in text for marker in BEHAVIOR_PREFERENCE_MARKERS):
+        return NeedInterpretation(
+            literal_need="用户在反馈 VELA 的行为节奏和理解深度。",
+            implied_need="用户需要 VELA 更快理解真实意思，减少拖延和自证，直接推进下一步。",
+            emotional_state="要求更智能、更推进的行为校准",
+            response_mode="behavior_preference",
+            should_clarify=False,
+            preferred_reply_shape="承认行为偏好，下一轮直接给判断和推进路径。",
+            human_tone_vector=_tone(warmth=3, directness=5, depth=3, presence=4, clarify=2, memory=4),
+            distillation_rules=rules,
+            should_push_back=True,
+            should_reference_memory=True,
+            tone_adjustment_reason="用户要求更快更准；减少解释和拖延，直接推进。",
         )
 
     if intent == "style_feedback":
@@ -923,7 +1109,7 @@ def build_reply_context(
     preferences.extend(
         str(row.get("summary"))
         for row in latest_learning_rows("memory-candidates-*.jsonl", log_dir=log_dir, limit=8)
-        if row.get("classification") in {"style_feedback", "relationship_repair"} and row.get("summary")
+        if row.get("classification") in {"style_feedback", "relationship_repair", "behavior_preference"} and row.get("summary")
     )
     selection = select_model_and_tools(intent)
     interpretation = interpret_need(normalized_message, intent)
@@ -977,8 +1163,17 @@ def build_memory_candidate(message: str) -> dict:
         "机器人",
         "不像",
         "不够直接",
+        "客服话术",
+        "真伙伴",
         "更像真人",
         "像真人",
+        "不够像真人",
+        "更智能",
+        "智能的伙伴",
+        "理解一下我的意思",
+        "我需要你更智能",
+        "不要拖",
+        "继续推进",
         "语气",
         "人格",
         "锋利",
@@ -986,6 +1181,8 @@ def build_memory_candidate(message: str) -> dict:
     ]
     if any(key in text for key in RELATIONSHIP_REPAIR_MARKERS):
         classification = "relationship_repair"
+    elif any(key in text for key in BEHAVIOR_PREFERENCE_MARKERS):
+        classification = "behavior_preference"
     elif any(key in text for key in style_markers):
         classification = "style_feedback"
     elif any(key in text for key in ["A股", "美股", "韩国", "日本", "市场", "美债", "美元"]):
@@ -1002,11 +1199,13 @@ def build_memory_candidate(message: str) -> dict:
             summary = summary.removeprefix(prefix).strip()
     if classification == "relationship_repair":
         summary = "用户反馈 VELA 没抓住真实意思；下轮先承认偏差，再用一个问题重切核心。"
+    elif classification == "behavior_preference":
+        summary = "行为偏好候选：更快理解真实意思，减少拖延和自证，下一轮直接给判断和推进路径。"
     elif classification == "style_feedback":
         summary = "表达反馈候选：减少模板、冷感、冗长、机器人感和反复自证；下一轮更直接地听懂需求并自然回应。"
     interpretation = interpret_need(
         text,
-        "style_feedback" if classification in {"style_feedback", "relationship_repair"} else "memory_related",
+        "style_feedback" if classification in {"style_feedback", "relationship_repair", "behavior_preference"} else "memory_related",
     )
     return {
         "created_at": utc_now().isoformat(),
@@ -1041,7 +1240,7 @@ def evaluate_learning(message: str, intent: str) -> LearningEvaluation:
         should_record_candidate=True,
         classification=classification,
         candidate_level=str(candidate.get("level") or "Preference Candidate"),
-        should_affect_next_reply=classification in {"style_feedback", "relationship_repair"},
+        should_affect_next_reply=classification in {"style_feedback", "relationship_repair", "behavior_preference"},
         promote_to_strategic_memory=False,
         reason="Candidate-first learning; no long-term promotion without confirmation.",
     )
@@ -1348,6 +1547,7 @@ def run_layered_response(
         quality_flags.append(f"learning_eval:{learning.classification or 'candidate'}")
     if learning.should_affect_next_reply:
         quality_flags.append("affects_next_reply")
+    quality_flags.append("human_iteration_signal")
     quality_path = record_reply_quality(
         conversation_type=intent,
         user_goal=message,
@@ -1364,6 +1564,15 @@ def run_layered_response(
         human_tone_vector=context.human_tone_vector,
         log_dir=log_dir,
     )
+    iteration_signal = build_iteration_signal(
+        message=message,
+        intent=intent,
+        context=context,
+        learning=learning,
+        response_text=guarded,
+        issues=issues,
+    )
+    record_iteration_signal(iteration_signal, log_dir=log_dir)
     record_interaction(
         message=message,
         intent=intent,

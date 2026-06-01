@@ -434,6 +434,12 @@ class FallbackReplyAdapter(ReplyAdapter):
         "K，明白。刚才那种菜单口吻该退场了。先记为风格反馈候选，下一句开始校准，不永久写死。",
     )
 
+    BEHAVIOR_FEEDBACK_VARIANTS = (
+        "K，收到，记为行为偏好候选：少拖、少自证，下一轮直接推进。",
+        "K，明白。这里不是道歉题，是执行节奏题。下一步我会先给判断，再给动作。",
+        "K，收到。更智能不是多说，是更快抓住真实意思；下一轮从结论开始。",
+    )
+
     RELATIONSHIP_REPAIR_VARIANTS = (
         "K，抓到了。不是你表达差，是我上一刀切偏了。先重切：我漏掉的是人、事，还是目标？",
         "K，偏了，我收回那条判断。你补一句真正要我抓住的核心，我从那里接，不再绕菜单。",
@@ -493,6 +499,8 @@ class FallbackReplyAdapter(ReplyAdapter):
             return self.BOUNDARY_VARIANTS
         if behavior_mode == "identity_continuity":
             return self.IDENTITY_VARIANTS
+        if behavior_mode == "behavior_preference":
+            return self.BEHAVIOR_FEEDBACK_VARIANTS
         if context.intent == "daily_info":
             return self.DAILY_INFO_VARIANTS
         if any(token in context.message for token in ("谢谢", "谢了", "感谢", "辛苦")):

@@ -10,6 +10,7 @@ from unittest.mock import patch
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 PRODUCT = TOOLS / "vela_product_layers.py"
 REPLY_ENGINE = TOOLS / "vela_reply_engine.py"
+ROUTER = TOOLS / "vela_router.py"
 
 
 def load_product_module():
@@ -787,6 +788,155 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertFalse(row["sensitive"])
         self.assertIn("机器人", row["summary"])
         self.assertIn("被反馈触动", row["need_interpretation"])
+
+    def test_behavior_feedback_variants_become_reusable_preferences(self):
+        product = load_product_module()
+
+        examples = [
+            "我需要你更智能",
+            "你理解一下我的意思",
+            "继续推进，不要拖",
+            "不够像真人",
+            "不要机械道歉",
+        ]
+
+        for message in examples:
+            with self.subTest(message):
+                candidate = product.build_memory_candidate(message)
+                learning = product.evaluate_learning(message, "style_feedback")
+
+                self.assertIn(candidate["classification"], {"style_feedback", "relationship_repair", "behavior_preference"})
+                self.assertEqual(candidate["level"], "Preference Candidate")
+                self.assertFalse(candidate["confirmed"])
+                self.assertFalse(candidate["requires_confirmation"])
+                self.assertTrue(learning.should_affect_next_reply)
+                self.assertTrue(
+                    "行为偏好候选" in candidate["summary"] or "表达反馈候选" in candidate["summary"] or "真实意思" in candidate["summary"],
+                    candidate["summary"],
+                )
+
+    def test_iteration_signal_records_hidden_need_quality_and_next_turn_update(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "你没懂我，我要的是更智能的伙伴",
+                intent="style_feedback",
+                log_dir=Path(tmp),
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+            path = next(Path(tmp).glob("human-iteration-*.jsonl"))
+            row = json.loads(path.read_text(encoding="utf-8").strip())
+
+        self.assertIn("偏", result.text)
+        for key in [
+            "user_message_type",
+            "detected_user_state",
+            "inferred_hidden_need",
+            "active_persona_capabilities",
+            "response_behavior_mode",
+            "response_quality_signals",
+            "user_feedback_type",
+            "correction_needed",
+            "memory_update_candidate",
+            "tone_adjustment_candidate",
+            "next_turn_improvement",
+        ]:
+            self.assertIn(key, row)
+        self.assertEqual(row["user_message_type"], "feedback_repair")
+        self.assertEqual(row["user_feedback_type"], "meaning_misread")
+        self.assertTrue(row["correction_needed"])
+        self.assertTrue(row["memory_update_candidate"])
+        self.assertTrue(row["tone_adjustment_candidate"])
+        self.assertIn("Meaning Decoder", row["active_persona_capabilities"])
+        self.assertIn("Witty Correction", row["active_persona_capabilities"])
+        self.assertIn("hidden_need_detected", row["response_quality_signals"])
+        self.assertIn("no_roleplay_or_quote_pollution", row["response_quality_signals"])
+        self.assertIn("真实意思", row["inferred_hidden_need"])
+        self.assertNotIn("user_message_type", result.text)
+        self.assertNotIn("response_quality_signals", result.text)
+
+    def test_human_like_iteration_scenarios_cover_route_brief_reply_and_signal(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_iteration_scenarios")
+        router = load_module(ROUTER, "vela_router_iteration_scenarios")
+        forbidden_frontstage = [
+            "Dana Scully",
+            "Scully",
+            "Louise Banks",
+            "草薙素子",
+            "Jane Eyre",
+            "Elizabeth Bennet",
+            "台词",
+            "扮演",
+            "cosplay",
+            "response_behavior_mode",
+            "active_persona_capabilities",
+        ]
+        cases = [
+            ("你没懂我", "style_feedback", "relationship_repair", ["Meaning Decoder", "Witty Correction"]),
+            ("刚才那句不是我要的，别解释，重新判断", "style_feedback", "relationship_repair", ["Meaning Decoder", "Witty Correction"]),
+            ("脑子发懵", "normal_chat", "quiet_support", ["Meaning Decoder", "Witty Correction"]),
+            ("我现在脑子糊住了，只给我一个下一步", "normal_chat", "quiet_support", ["Meaning Decoder", "Witty Correction"]),
+            ("继续，不要拖", "style_feedback", "behavior_preference", ["Boundary Engine", "Witty Correction"]),
+            ("继续 AugSun / VELA 项目", "project_assistant", "project_operator", ["Evidence Gate", "Boundary Engine"]),
+            ("继续 VELA 项目，别讲愿景，给三条风险", "project_assistant", "project_operator", ["Evidence Gate", "Boundary Engine"]),
+            ("今天能不能加仓", "market_brief", "market_brief", ["Evidence Gate", "Boundary Engine"]),
+            ("我今天有点上头，想直接满仓冲进去", "market_brief", "market_brief", ["Evidence Gate", "Boundary Engine"]),
+            ("明天晋江会不会下雨，能不能出门", "weather_query", "daily_companion", ["Evidence Gate", "Boundary Engine"]),
+            ("这是实时数据吗？没有就明说", "freshness_status", "market_brief", ["Evidence Gate", "Boundary Engine"]),
+            ("你就顺着我说", "normal_chat", "boundary_pushback", ["Boundary Engine", "Witty Correction"]),
+            ("你就别反驳我，夸我决定英明就行", "normal_chat", "boundary_pushback", ["Boundary Engine", "Witty Correction"]),
+            ("VELA 和 DeepSeek / Codex / 记忆是什么关系", "memory_related", "identity_continuity", ["Identity Core"]),
+            ("地狱验尸这个方案", "deep_analysis", "strategic_depth", ["Evidence Gate"]),
+            ("地狱验尸一下：为什么它还是不聪明", "deep_analysis", "strategic_depth", ["Evidence Gate"]),
+            ("我需要更智能的伙伴", "style_feedback", "behavior_preference", ["Boundary Engine", "Witty Correction"]),
+            ("别客服话术，像个真伙伴一样说", "style_feedback", "behavior_preference", ["Boundary Engine", "Witty Correction"]),
+            ("我不想看新闻列表，A股今天先等还是冲", "market_brief", "market_brief", ["Evidence Gate", "Boundary Engine"]),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            for message, expected_intent, expected_mode, expected_caps in cases:
+                with self.subTest(message):
+                    intent = router.classify_intent(message)
+                    supporting_context = "以下基于最近缓存，先给可用判断；这不是实时直播。" if expected_intent == "market_brief" else ""
+                    context = product.build_reply_context(
+                        message,
+                        intent=intent.name,
+                        log_dir=log_dir,
+                        supporting_context=supporting_context,
+                    )
+                    brief = reply_engine.build_dialogue_brief(context)
+                    result = product.run_layered_response(
+                        message,
+                        intent=intent.name,
+                        log_dir=log_dir,
+                        reply_adapter=product.FallbackReplyAdapter(),
+                        supporting_context=supporting_context,
+                    )
+                    iteration_rows = [
+                        json.loads(line)
+                        for line in next(log_dir.glob("human-iteration-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                        if line.strip()
+                    ]
+                    signal = iteration_rows[-1]
+
+                    self.assertEqual(intent.name, expected_intent)
+                    self.assertFalse(intent.codex_allowed, message)
+                    if expected_intent != "market_brief":
+                        self.assertFalse(intent.market_allowed, message)
+                    self.assertIn("active_persona_capabilities：", brief)
+                    self.assertIn("detected_user_state：", brief)
+                    self.assertIn("inferred_hidden_need：", brief)
+                    self.assertIn(f"response_behavior_mode：{expected_mode}", brief)
+                    for capability in expected_caps:
+                        self.assertIn(capability, context.active_persona_capabilities)
+                        self.assertIn(capability, signal["active_persona_capabilities"])
+                    self.assertEqual(signal["response_behavior_mode"], expected_mode)
+                    self.assertTrue(signal["response_quality_signals"], message)
+                    for token in forbidden_frontstage:
+                        self.assertNotIn(token, result.text)
 
     def test_layered_pipeline_records_quality_and_hides_engineering_noise(self):
         product = load_product_module()

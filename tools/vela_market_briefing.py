@@ -84,6 +84,10 @@ class MarketFreshnessStatus:
     confidence_note: str
     slot: str = ""
     cache_path: str = ""
+    real_time_source_available: bool = False
+    cached_summary_available: bool = False
+    model_generated_only: bool = False
+    unavailable: bool = False
 
 
 VALID_DIRECTIONS = {"bullish", "bearish", "neutral", "uncertain"}
@@ -704,6 +708,10 @@ def market_freshness_status(query: str = "", now: datetime | None = None) -> Mar
             confidence_note="不是实时直播；适合方向判断，不适合秒级交易依据。",
             slot=current.slot,
             cache_path=str(cache_path(resolved_now, current.slot)),
+            real_time_source_available=False,
+            cached_summary_available=True,
+            model_generated_only=False,
+            unavailable=False,
         )
     latest, path = load_latest_cached_brief(resolved_now)
     if latest is not None:
@@ -717,6 +725,10 @@ def market_freshness_status(query: str = "", now: datetime | None = None) -> Mar
             confidence_note="当前时间段没有命中最新缓存；可先参考最近缓存，但要降低实时性权重。",
             slot=latest.slot,
             cache_path=str(path or ""),
+            real_time_source_available=False,
+            cached_summary_available=True,
+            model_generated_only=False,
+            unavailable=False,
         )
     return MarketFreshnessStatus(
         data_status="unavailable",
@@ -725,7 +737,18 @@ def market_freshness_status(query: str = "", now: datetime | None = None) -> Mar
         refresh_available=True,
         refresh_in_progress=False,
         confidence_note="本地没有可用市场缓存；需要外部检索/API 才能形成新报告。",
+        real_time_source_available=False,
+        cached_summary_available=False,
+        model_generated_only=False,
+        unavailable=True,
     )
+
+
+def format_status_boundary(status: MarketFreshnessStatus) -> str:
+    cache_text = "可用" if status.cached_summary_available else "不可用"
+    model_text = "是" if status.model_generated_only else "否"
+    availability = "不可用" if status.unavailable else ("缓存可用" if status.cached_summary_available else "待刷新")
+    return f"状态边界：实时源：未接入；缓存摘要：{cache_text}；模型仅生成：{model_text}；可用性：{availability}。"
 
 
 def format_freshness_status(status: MarketFreshnessStatus) -> str:
@@ -746,6 +769,7 @@ def format_freshness_status(status: MarketFreshnessStatus) -> str:
             first_line,
             f"更新时间：{status.last_updated}",
             f"数据来源：{source}，{cache_state}。",
+            format_status_boundary(status),
             f"刷新状态：{'可刷新，当前未在前台刷新。' if status.refresh_available else '暂不可刷新。'}",
             f"可信度：{status.confidence_note}",
         ]

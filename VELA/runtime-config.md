@@ -23,7 +23,7 @@ Adapter priority is:
 5. deterministic fallback replies
 
 Daily dialogue should use DeepSeek when `DEEPSEEK_API_KEY` is present. Command/Codex adapters are fallback or engineering lanes, not the default ordinary chat brain.
-Except for Codex-related instructions, WeChat-facing final wording should go through the DeepSeek dialogue adapter when configured. Local cache, freshness status, persona diagnostics, daily briefing output, and weather risk notes may be passed in as background context, but VELA/DeepSeek owns the final foreground wording.
+Except for Codex-related instructions, ordinary WeChat-facing dialogue should go through the DeepSeek dialogue adapter when configured. Hard status lanes are stricter: freshness status, market refresh state, and weather source boundaries keep local foreground wording so a model cannot blur cache, realtime availability, or unavailable data.
 
 ## Weather
 
@@ -51,9 +51,21 @@ Every WeChat-facing reply should carry internal context that is not exposed to t
 - `tone_adjustment_reason`: short internal reason for the tone shift.
 - `user_preferences`: confirmed preferences and recent style feedback candidates.
 - `strategic_memories`: confirmed long-term project/persona/decision memory, used only when relevant.
+- `human_iteration_signal`: local post-reply learning row with `user_message_type`, `detected_user_state`, `inferred_hidden_need`, `active_persona_capabilities`, `response_behavior_mode`, `response_quality_signals`, `user_feedback_type`, `correction_needed`, `memory_update_candidate`, `tone_adjustment_candidate`, and `next_turn_improvement`.
 
 These fields are prompt and learning inputs only. They must not appear in WeChat output as raw keys, schema names, paths, logs, or debug text.
 Mechanism distillation is abstract behavior only: VELA keeps her own identity, stores no source lines, and never roleplays a source character.
+
+## Factual Status Boundary
+
+Market, weather, and realtime-info lanes must distinguish:
+
+- `real_time_source_available`
+- `cached_summary_available`
+- `model_generated_only`
+- `unavailable`
+
+The raw field names stay inside local state and tests. WeChat output uses plain Chinese status labels, such as whether realtime source is connected, whether cache is available, whether the answer is only a model risk suggestion, and what the user can do next.
 
 ## Persona Skeleton
 
