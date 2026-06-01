@@ -548,11 +548,81 @@ def weixin_poll_state(vela_project: dict[str, Any], *, max_age_minutes: int = 15
     return runtime_check(fresh, detail)
 
 
+def _jsonl_rows(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return rows
+    for line in lines[-50:]:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def learning_loop_state(log_dir: Path | None = None) -> dict[str, Any]:
+    log_dir = log_dir or (ROOT / "VELA" / "learning-loop")
+    if not log_dir.exists():
+        return runtime_check(False, "learning loop missing")
+    if not log_dir.is_dir():
+        return runtime_check(False, "learning loop path is not a directory")
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".audit-", suffix=".tmp", dir=log_dir, delete=False) as handle:
+            temp_path = Path(handle.name)
+            handle.write(b"ok")
+        temp_path.unlink(missing_ok=True)
+    except OSError:
+        return runtime_check(False, "learning loop not writable")
+
+    categories: set[str] = set()
+    if any(_jsonl_rows(path) for path in log_dir.glob("session-notes-*.jsonl")):
+        categories.add("Session Notes")
+    if any(_jsonl_rows(path) for path in log_dir.glob("interaction-*.jsonl")):
+        categories.add("Interaction Log")
+    if any(_jsonl_rows(path) for path in log_dir.glob("human-iteration-*.jsonl")):
+        categories.add("Next-turn Feedback Signal")
+
+    for path in log_dir.glob("memory-candidates-*.jsonl"):
+        for row in _jsonl_rows(path):
+            level = str(row.get("level") or "")
+            classification = str(row.get("classification") or "")
+            if level == "Preference Candidate":
+                categories.add("Preference Candidate")
+            if classification in {"style_feedback", "relationship_repair", "behavior_preference"}:
+                categories.add("Style Feedback Candidate")
+            if level == "Strategic Memory Candidate" or classification == "strategic_goal":
+                categories.add("Strategic Memory Candidate")
+    if any(_jsonl_rows(path) for path in log_dir.glob("strategic-memory-*.jsonl")):
+        categories.add("Strategic Memory")
+
+    expected = {
+        "Session Notes",
+        "Interaction Log",
+        "Preference Candidate",
+        "Style Feedback Candidate",
+        "Strategic Memory",
+    }
+    missing = sorted(expected - categories)
+    detail = "categories: " + ", ".join(sorted(categories)) if categories else "categories: none"
+    if missing:
+        detail += "; missing: " + ", ".join(missing)
+    else:
+        detail += "; writable"
+    return runtime_check(not missing, detail)
+
+
 def run_runtime_audit(
     *,
     cc_home: Path | None = None,
     process_running: bool | None = None,
     max_session_age_hours: int = 48,
+    learning_loop_dir: Path | None = None,
 ) -> dict[str, Any]:
     cc_home = cc_home or DEFAULT_CC_CONNECT_HOME
     config_path = cc_home / "config.toml"
@@ -581,6 +651,7 @@ def run_runtime_audit(
         else runtime_check(False, "router config is not valid enough to dry-run")
     )
     checks["deepseek_runtime"] = deepseek_runtime_status()
+    checks["learning_loop_state"] = learning_loop_state(learning_loop_dir)
 
     commands = {item.get("name"): item for item in config.get("commands", []) if isinstance(item, dict)}
     command_names = ("vela-router", "vela-talk")

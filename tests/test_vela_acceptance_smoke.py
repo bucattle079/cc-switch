@@ -224,6 +224,70 @@ timeout_seconds = 75
         self.assertIn("latest_session_reply", report["failed"])
         self.assertEqual(report["latest_reply"]["leaks"], [])
 
+    def test_runtime_audit_reports_learning_loop_state(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            learning_loop = Path(tmp) / "VELA" / "learning-loop"
+            (cc_home / "sessions").mkdir(parents=True)
+            learning_loop.mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                """
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+""".strip(),
+                encoding="utf-8",
+            )
+            rows_by_file = {
+                "session-notes-2026-06-01.jsonl": [{"level": "Session Notes", "summary": "short context"}],
+                "interaction-2026-06-01.jsonl": [{"level": "Interaction Log", "message_summary": "hello"}],
+                "human-iteration-2026-06-01.jsonl": [{"response_quality_signals": ["preference_or_feedback_adapted"]}],
+                "memory-candidates-2026-06-01.jsonl": [
+                    {"level": "Preference Candidate", "classification": "style_feedback", "summary": "less robotic"},
+                    {"level": "Strategic Memory Candidate", "classification": "strategic_goal", "summary": "AugSun minimum loop"},
+                ],
+                "strategic-memory-2026-06-01.jsonl": [
+                    {"level": "Strategic Memory", "memory_type": "project_goal", "summary": "confirmed direction"}
+                ],
+            }
+            for filename, rows in rows_by_file.items():
+                (learning_loop / filename).write_text(
+                    "\n".join(json.dumps(row, ensure_ascii=False) for row in rows),
+                    encoding="utf-8",
+                )
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=False,
+                max_session_age_hours=9999,
+                learning_loop_dir=learning_loop,
+            )
+
+        check = report["checks"]["learning_loop_state"]
+        self.assertTrue(check["ok"], report)
+        for token in [
+            "Session Notes",
+            "Interaction Log",
+            "Preference Candidate",
+            "Style Feedback Candidate",
+            "Strategic Memory Candidate",
+            "Strategic Memory",
+        ]:
+            self.assertIn(token, check["detail"])
+        self.assertNotIn("confirmed direction", check["detail"])
+
     def test_runtime_audit_cli_json_reports_nonzero_for_live_gap(self):
         with tempfile.TemporaryDirectory() as tmp:
             cc_home = Path(tmp) / ".cc-connect"
