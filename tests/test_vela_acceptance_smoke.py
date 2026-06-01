@@ -6,6 +6,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -428,6 +429,90 @@ timeout_seconds = 75
 
         self.assertTrue(report["checks"]["router_command_dry_run"]["ok"], report)
         self.assertIn("normal_chat", report["checks"]["router_command_dry_run"]["detail"])
+        self.assertNotIn("DEEPSEEK_API_KEY", json.dumps(report, ensure_ascii=False))
+
+    def test_runtime_audit_reports_deepseek_runtime_without_secret_or_endpoint(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            (cc_home / "sessions").mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                """
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+""".strip(),
+                encoding="utf-8",
+            )
+            with patch.dict(
+                "os.environ",
+                {
+                    "DEEPSEEK_API_KEY": "sk-deepseek-secret",
+                    "DEEPSEEK_MODEL": "deepseek-chat",
+                    "DEEPSEEK_BASE_URL": "https://proxy.example/v1",
+                },
+                clear=True,
+            ):
+                report = smoke.run_runtime_audit(
+                    cc_home=cc_home,
+                    process_running=True,
+                    max_session_age_hours=9999,
+                )
+
+        self.assertTrue(report["checks"]["deepseek_runtime"]["ok"], report)
+        detail = report["checks"]["deepseek_runtime"]["detail"]
+        self.assertIn("adapter=deepseek_chat", detail)
+        self.assertIn("model=deepseek-chat", detail)
+        serialized = json.dumps(report, ensure_ascii=False)
+        self.assertNotIn("sk-deepseek-secret", serialized)
+        self.assertNotIn("proxy.example", serialized)
+        self.assertNotIn("DEEPSEEK_BASE_URL", serialized)
+
+    def test_runtime_audit_reports_fallback_when_deepseek_key_missing(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            (cc_home / "sessions").mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                """
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+""".strip(),
+                encoding="utf-8",
+            )
+            with patch.dict("os.environ", {}, clear=True):
+                report = smoke.run_runtime_audit(
+                    cc_home=cc_home,
+                    process_running=True,
+                    max_session_age_hours=9999,
+                )
+
+        self.assertTrue(report["checks"]["deepseek_runtime"]["ok"], report)
+        self.assertIn("adapter=fallback", report["checks"]["deepseek_runtime"]["detail"])
+        self.assertIn("DeepSeek key not configured", report["checks"]["deepseek_runtime"]["detail"])
         self.assertNotIn("DEEPSEEK_API_KEY", json.dumps(report, ensure_ascii=False))
 
     def test_runtime_audit_reports_weixin_poll_state_without_leaking_cursor(self):

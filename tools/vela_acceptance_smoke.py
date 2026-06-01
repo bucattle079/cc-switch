@@ -18,6 +18,7 @@ if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
 import vela_router as router
+import vela_reply_engine as reply_engine
 from vela_product_layers import FallbackReplyAdapter, run_layered_response
 
 
@@ -335,6 +336,23 @@ def runtime_next_action(failed: list[str]) -> dict[str, Any]:
     return {"kind": "none", "prompts": [], "verify_command": ""}
 
 
+def deepseek_runtime_status(env: dict[str, str] | None = None) -> dict[str, Any]:
+    status = reply_engine.reply_engine_status(env or os.environ)
+    adapter = str(status.get("adapter") or "fallback")
+    model = str(status.get("model") or "").strip()
+    config_source = str(status.get("config_source") or "")
+    if adapter == "deepseek_chat":
+        source_label = "canonical_env" if config_source == "DEEPSEEK_API_KEY" else "runtime_env"
+        detail = f"adapter=deepseek_chat; source={source_label}; model={model or 'unknown'}"
+    elif adapter == "fallback":
+        detail = "adapter=fallback; DeepSeek key not configured; foreground must not claim DeepSeek is live"
+    else:
+        detail = f"adapter={adapter}; source={config_source or 'runtime'}"
+        if model:
+            detail += f"; model={model}"
+    return runtime_check(True, detail)
+
+
 def detect_cc_connect_process() -> bool:
     if os.name == "nt":
         completed = subprocess.run(
@@ -523,6 +541,7 @@ def run_runtime_audit(
         if checks["router_config"]["ok"]
         else runtime_check(False, "router config is not valid enough to dry-run")
     )
+    checks["deepseek_runtime"] = deepseek_runtime_status()
 
     commands = {item.get("name"): item for item in config.get("commands", []) if isinstance(item, dict)}
     command_names = ("vela-router", "vela-talk")
