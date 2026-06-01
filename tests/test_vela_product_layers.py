@@ -638,6 +638,30 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertEqual(row["response_mode"], "relationship_repair")
         self.assertFalse(row["confirmed"])
 
+    def test_interaction_log_keeps_learning_signals_for_feedback(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "\u4f60\u6ca1\u61c2\u6211",
+                intent="style_feedback",
+                log_dir=Path(tmp),
+            )
+
+            rows = [
+                json.loads(line)
+                for line in next(Path(tmp).glob("interaction-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        row = rows[-1]
+        self.assertTrue(result.memory_candidate)
+        self.assertEqual(row.get("level"), "Interaction Log")
+        self.assertEqual(row.get("feedback_type"), "meaning_misread")
+        self.assertTrue(row.get("memory_candidate"))
+        self.assertFalse(row.get("repeated_message"))
+        self.assertIn("quality_issues", row)
+        self.assertIsInstance(row["quality_issues"], list)
+
     def test_quiet_support_reply_is_short_and_low_burden(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:

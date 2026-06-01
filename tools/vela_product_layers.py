@@ -415,6 +415,10 @@ def record_interaction(
     need_interpretation: str = "",
     response_mode: str = "",
     human_tone_vector: dict | None = None,
+    repeated_message: bool | None = None,
+    feedback_type: str = "",
+    memory_candidate: bool | None = None,
+    quality_issues: Iterable[str] | None = None,
     log_dir: Path | None = None,
 ) -> Path:
     log_dir = log_dir or LEARNING_LOOP_DIR
@@ -422,12 +426,14 @@ def record_interaction(
     path = log_dir / f"interaction-{utc_now():%Y-%m-%d}.jsonl"
     row = {
         "created_at": utc_now().isoformat(),
+        "level": "Interaction Log",
         "message_summary": " ".join(str(message or "").split())[:240],
         "intent": intent,
         "response_length": response_length(response_text),
         "response_preview": str(response_text or "").strip()[:800],
         "used_codex": used_codex,
         "used_retrieval": used_retrieval,
+        "storage_policy": "local_interaction_diagnostic_no_foreground_exposure",
     }
     if need_interpretation:
         row["need_interpretation"] = need_interpretation
@@ -435,6 +441,14 @@ def record_interaction(
         row["response_mode"] = response_mode
     if human_tone_vector:
         row["human_tone_vector"] = human_tone_vector
+    if repeated_message is not None:
+        row["repeated_message"] = bool(repeated_message)
+    if feedback_type:
+        row["feedback_type"] = feedback_type
+    if memory_candidate is not None:
+        row["memory_candidate"] = bool(memory_candidate)
+    if quality_issues is not None:
+        row["quality_issues"] = list(quality_issues)
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     return path
@@ -1633,6 +1647,10 @@ def run_layered_response(
         need_interpretation=context.need_interpretation,
         response_mode=context.response_mode,
         human_tone_vector=context.human_tone_vector,
+        repeated_message=context.repeated_message,
+        feedback_type=iteration_signal.user_feedback_type,
+        memory_candidate=memory_candidate,
+        quality_issues=issues,
         log_dir=log_dir,
     )
     record_session_note(
