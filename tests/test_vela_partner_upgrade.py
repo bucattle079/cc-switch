@@ -184,7 +184,9 @@ class VelaPartnerUpgradeTests(unittest.TestCase):
             )
 
         self.assertIn("K", result.text)
-        self.assertTrue(any(token in result.text for token in ["少菜单", "多判断", "机械味", "不摆路牌"]))
+        self.assertTrue(any(token in result.text for token in ["继续", "上一轮", "阻塞", "一个动作", "接着来"]))
+        for self_label in ["少菜单", "多判断", "机械味", "不摆路牌", "少解释"]:
+            self.assertNotIn(self_label, result.text)
         self.assertNotIn("要看盘，说 A股、美股或韩国", result.text)
 
     def test_project_progress_status_routes_to_codex_bridge(self):

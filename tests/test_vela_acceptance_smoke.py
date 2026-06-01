@@ -86,7 +86,9 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         for case in two_turn_cases:
             with self.subTest(case["id"]):
                 self.assertIn("preference_or_feedback_adapted", case["latest_iteration_signal"]["response_quality_signals"])
-                self.assertTrue(any(token in case["reply_preview"] for token in ("少菜单", "直接给判断", "不摆路牌", "少解释")))
+                self.assertTrue(any(token in case["reply_preview"] for token in ("我在", "在。", "听着", "继续", "上一轮", "阻塞", "一个动作", "接着来")))
+                for self_label in ("少菜单", "直接给判断", "不解释身份", "废话收短", "不摆路牌", "少解释", "机械味", "不像提示牌"):
+                    self.assertNotIn(self_label, case["reply_preview"])
 
         codex = next(case for case in report["cases"] if case["id"] == "codex_status_route_only")
         self.assertFalse(codex["side_effects_allowed"])

@@ -1682,7 +1682,7 @@ def analysis_layer(message: str, intent: str, codex_summary: str = "") -> Analys
         return AnalysisPacket(
             intent=intent,
             facts=[f"用户要求深度验尸：{text or '未给出具体对象'}"],
-            judgment="先找结构性故障，再分离噪音、风险和最短修正路径。",
+            judgment="根因不是智商不足，是意图识别、上下文承接和表达校准没有形成闭环；先找结构性故障，再分离噪音、风险和最短修正路径。",
             risks=["没有证据边界就直接下结论，会把锋利变成表演。"],
             next_actions=[
                 "列出误判点",
@@ -1722,7 +1722,7 @@ def render_memory_reply(message: str) -> str:
     if candidate["sensitive"]:
         return "这条涉及敏感信息，我先不写长期记忆。要存，必须你明确确认。"
     if candidate["classification"] == "style_feedback":
-        return "收到。少菜单，多判断；下一轮先给判断，再给依据。"
+        return "收到。先听懂真实意思，再给结论；我从这里重切。"
     summary = str(candidate.get("summary") or "").strip()
     if candidate["classification"] in {"market_focus", "behavior_preference", "project_state"}:
         return f"收到。先按待确认偏好处理：{summary}。你确认后我再固定。"
@@ -1842,6 +1842,8 @@ def deep_lane_model_reply_is_frontstage_ready(text: str, *, intent: str = "", me
     raw = normalize_supporting_context(text)
     if not raw:
         return False
+    if model_reply_has_frontstage_hazards(raw, intent=intent):
+        return False
     has_next = bool(re.search(r"(^|\n)\s*(?:\*\*)?(下一步|修正路径|最短路径)(?:\*\*)?\s*[:：]", raw))
     has_judgment = bool(
         re.search(r"(^|\n)\s*(K\s*[,，:：]\s*)?(?:\*\*)?(目标|判断|根因|结论)(?:\*\*)?\s*[:：]", raw)
@@ -1852,6 +1854,36 @@ def deep_lane_model_reply_is_frontstage_ready(text: str, *, intent: str = "", me
     if intent == "project_assistant" and not _has_any(message, ("风险", "三条风险")):
         return has_next and has_judgment
     return has_next and has_judgment and has_boundary
+
+
+def model_reply_has_frontstage_hazards(text: str, *, intent: str = "") -> bool:
+    raw = str(text or "")
+    common_hazards = (
+        "response_quality_signals",
+        "active_persona_capabilities",
+        "候选记录",
+        "候选经验",
+        "经验沉淀判断",
+        "写进短期笔记",
+        "你可以再试",
+    )
+    deep_hazards = (
+        "长期记忆是空",
+        "长期记忆为空",
+        "长期记忆是空的",
+        "如果你愿意",
+        "套皮 ChatGPT",
+        "套了层皮",
+        "下一轮我会",
+        "我会调整",
+        "你下次给",
+        "你下次",
+        "加一句指向",
+    )
+    if intent == "deep_analysis" and raw.rstrip().endswith(("，", "、", "：", ":", "；", ";", "-")):
+        return True
+    hazards = common_hazards + (deep_hazards if intent == "deep_analysis" else ())
+    return any(token.lower() in raw.lower() for token in hazards)
 
 
 def normalize_model_frontstage_reply(text: str) -> str:
@@ -1886,13 +1918,18 @@ def engine_text_for_intent(
     if context.intent in {"project_assistant", "deep_analysis"}:
         result = adapter.generate(context)
         base = analysis_layer(context.message, context.intent, codex_summary=codex_summary)
-        if result.used_api and deep_lane_model_reply_is_frontstage_ready(
+        has_hazards = model_reply_has_frontstage_hazards(result.text, intent=context.intent)
+        model_frontstage_ready = result.used_api and deep_lane_model_reply_is_frontstage_ready(
             result.text,
             intent=context.intent,
             message=context.message,
-        ):
+        )
+        if model_frontstage_ready:
             return normalize_model_frontstage_reply(result.text), result.adapter, result.used_api
-        judgment = result.text or base.judgment
+        if context.intent == "deep_analysis" and result.used_api:
+            judgment = base.judgment
+        else:
+            judgment = base.judgment if has_hazards else result.text or base.judgment
         if should_surface_deep_lane_status(result):
             judgment = render_deep_lane_status_judgment(context, result, base)
         packet = AnalysisPacket(
@@ -1910,6 +1947,8 @@ def engine_text_for_intent(
 
 
 def should_use_local_feedback_control(context: ReplyContext) -> bool:
+    if context.intent == "style_feedback":
+        return True
     if context.intent != "normal_chat":
         return False
     joined = "；".join(str(item or "") for item in context.user_preferences)

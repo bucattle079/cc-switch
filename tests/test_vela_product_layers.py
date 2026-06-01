@@ -57,6 +57,17 @@ class VelaProductLayerTests(unittest.TestCase):
             name = "openai_responses"
 
             def generate(self, context):
+                if context.intent in {"project_assistant", "deep_analysis"}:
+                    return reply_engine.ReplyEngineResult(
+                        text=(
+                            f"判断：GPT 接管：{context.intent} / {context.surface}\n"
+                            "风险：模型输出必须先过前台结构检查。\n"
+                            "下一步：保留结论，不泄露后台。"
+                        ),
+                        source="fake",
+                        used_api=True,
+                        adapter=self.name,
+                    )
                 return reply_engine.ReplyEngineResult(
                     text=f"K，GPT 接管：{context.intent} / {context.surface}",
                     source="fake",
@@ -276,7 +287,9 @@ class VelaProductLayerTests(unittest.TestCase):
             next_reply = product.run_layered_response("你好", intent="normal_chat", log_dir=Path(tmp))
 
         self.assertIn("K", next_reply.text)
-        self.assertTrue(any(token in next_reply.text for token in ["少菜单", "直接给判断", "机械味", "不像提示牌"]))
+        self.assertTrue(any(token in next_reply.text for token in ["我在", "在。", "听着", "慢慢说", "递过来"]))
+        for self_label in ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准"]:
+            self.assertNotIn(self_label, next_reply.text)
         self.assertNotIn("要看盘，说 A股、美股或韩国", next_reply.text)
 
     def test_recent_style_feedback_overrides_deepseek_for_next_normal_reply(self):
@@ -310,16 +323,18 @@ class VelaProductLayerTests(unittest.TestCase):
             )
 
         self.assertEqual(next_reply.reply_adapter, "fallback")
-        self.assertTrue(any(token in next_reply.text for token in ["少菜单", "直接给判断", "不解释身份"]))
+        self.assertTrue(any(token in next_reply.text for token in ["我在", "在。", "听着", "慢慢说", "递过来"]))
+        for self_label in ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准"]:
+            self.assertNotIn(self_label, next_reply.text)
         self.assertNotIn("刚忙完", next_reply.text)
 
     def test_two_turn_feedback_replay_proves_behavior_change(self):
         product = load_product_module()
 
         cases = [
-            ("我需要你更智能", "你好", ["少菜单", "直接给判断", "不解释身份", "废话收短"]),
-            ("你没懂我", "你好", ["少菜单", "直接给判断", "不解释身份", "废话收短"]),
-            ("继续推进，不要拖", "继续", ["少菜单", "多判断", "不摆路牌", "少解释"]),
+            ("我需要你更智能", "你好", ["我在", "在。", "听着", "慢慢说", "递过来"]),
+            ("你没懂我", "你好", ["我在", "在。", "听着", "慢慢说", "递过来"]),
+            ("继续推进，不要拖", "继续", ["继续", "上一轮", "阻塞", "一个动作", "接着来"]),
         ]
 
         for feedback, followup, expected_tokens in cases:
@@ -346,6 +361,8 @@ class VelaProductLayerTests(unittest.TestCase):
 
                 self.assertTrue(any(token in next_reply.text for token in expected_tokens), next_reply.text)
                 self.assertIn("preference_or_feedback_adapted", rows[-1]["response_quality_signals"])
+                for self_label in ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "不摆路牌", "少解释"]:
+                    self.assertNotIn(self_label, next_reply.text)
                 self.assertNotIn("我已校准", next_reply.text)
                 self.assertNotIn("response_quality_signals", next_reply.text)
                 self.assertNotIn("要看盘，说 A股、美股或韩国", next_reply.text)
@@ -369,8 +386,9 @@ class VelaProductLayerTests(unittest.TestCase):
             )
 
         self.assertIn("K", next_reply.text)
-        self.assertTrue(any(token in next_reply.text for token in ["我在", "听着", "慢一点", "不派任务"]))
-        self.assertTrue(any(token in next_reply.text for token in ["少菜单", "不解释身份", "先不派任务"]))
+        self.assertTrue(any(token in next_reply.text for token in ["我在", "听着", "慢一点", "慢慢说", "先不推你"]))
+        for self_label in ["少菜单", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准"]:
+            self.assertNotIn(self_label, next_reply.text)
         for tasky in ["目标", "卡点", "切开", "开刀", "任务单"]:
             self.assertNotIn(tasky, next_reply.text)
 
@@ -759,7 +777,7 @@ class VelaProductLayerTests(unittest.TestCase):
             row = json.loads(next(log_dir.glob("memory-candidates-*.jsonl")).read_text(encoding="utf-8").strip())
 
         self.assertIn("K", result.text)
-        self.assertTrue(any(token in result.text for token in ["少菜单", "说人话", "先听懂", "多判断"]))
+        self.assertTrue(any(token in result.text for token in ["说人话", "先听懂", "真实意思", "结论", "重切"]))
         for internal in ["风格反馈候选", "候选记录", "长期记忆", "写死", "已收进", "已校准"]:
             self.assertNotIn(internal, result.text)
         self.assertEqual(row["classification"], "style_feedback")
@@ -875,10 +893,17 @@ class VelaProductLayerTests(unittest.TestCase):
         reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
         variants = (
             reply_engine.FallbackReplyAdapter.CALIBRATED_NORMAL_VARIANTS
+            + reply_engine.FallbackReplyAdapter.WARM_CALIBRATED_GREETING_VARIANTS
             + reply_engine.FallbackReplyAdapter.CALIBRATED_CONTINUE_VARIANTS
         )
 
         for text in variants:
+            self.assertNotIn("少菜单", text)
+            self.assertNotIn("直接给判断", text)
+            self.assertNotIn("不解释身份", text)
+            self.assertNotIn("废话收短", text)
+            self.assertNotIn("不摆路牌", text)
+            self.assertNotIn("少解释", text)
             self.assertNotIn("机械味已压下去", text)
             self.assertNotIn("收到上一个校准", text)
             self.assertNotIn("这次不像提示牌", text)
@@ -895,9 +920,39 @@ class VelaProductLayerTests(unittest.TestCase):
         for text in variants:
             self.assertNotIn("我会", text)
             self.assertNotIn("我已", text)
+            self.assertNotIn("你可以再试", text)
+            self.assertNotIn("下一轮我", text)
             self.assertNotIn("已校准", text)
             self.assertNotIn("下一轮开始", text)
             self.assertNotIn("机械味已压下去", text)
+
+    def test_style_feedback_intent_uses_local_repair_without_model_promises(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_style_feedback_local")
+
+        class PromiseAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K，下一轮我会调整，你可以再试一次。",
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "你太像机器人了",
+                intent="style_feedback",
+                log_dir=Path(tmp),
+                reply_adapter=PromiseAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "fallback")
+        self.assertTrue(any(token in result.text for token in ["说人话", "先听懂", "结论", "重切"]))
+        for self_label in ["下一轮", "我会", "你可以再试", "长期记忆", "候选"]:
+            self.assertNotIn(self_label, result.text)
 
     def test_persona_renderer_keeps_facts_and_applies_vela_voice(self):
         product = load_product_module()
@@ -1555,8 +1610,116 @@ class VelaProductLayerTests(unittest.TestCase):
             "fallback",
             "last_response",
             "adapter",
+            "长期记忆是空的",
+            "写进短期笔记",
+            "如果你愿意",
+            "你可以再试",
         ]:
             self.assertNotIn(internal, result.text)
+
+    def test_deep_analysis_rejects_unbounded_model_memory_claims(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_deep_bad_model")
+
+        class BadDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "判断：VELA 不智能是因为长期记忆是空的。\n"
+                        "风险：你会继续觉得她只是套皮 ChatGPT。\n"
+                        "修正路径：如果你愿意，我可以把这条写进短期笔记；你可以再试一次。\n"
+                    ),
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "地狱验尸一下 VELA 为什么不智能",
+                intent="deep_analysis",
+                log_dir=Path(tmp),
+                reply_adapter=BadDeepSeekAdapter(),
+            )
+
+        self.assertIn("误判点", result.text)
+        self.assertIn("上下文断点", result.text)
+        self.assertTrue(any(token in result.text for token in ["修正路径", "下一步"]))
+        self.assertLessEqual(result.text.count("风险："), 1)
+        self.assertLessEqual(result.text.count("下一步："), 1)
+        for bad in ["长期记忆是空的", "写进短期笔记", "如果你愿意", "你可以再试", "套皮 ChatGPT"]:
+            self.assertNotIn(bad, result.text)
+
+    def test_deep_analysis_does_not_wrap_unstructured_model_paragraph(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_deep_unstructured_model")
+
+        class RamblingDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "判断：VELA 不智能不是能力问题。根因有三层："
+                        "信息供应链断了，风格校准太粗，工具边界太硬。"
+                        "风险：继续这样会让前台像半结构报告。"
+                    ),
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "地狱验尸一下 VELA 为什么不智能",
+                intent="deep_analysis",
+                log_dir=Path(tmp),
+                reply_adapter=RamblingDeepSeekAdapter(),
+            )
+
+        self.assertIn("根因", result.text)
+        self.assertIn("误判点", result.text)
+        self.assertIn("上下文断点", result.text)
+        self.assertLessEqual(result.text.count("判断："), 1)
+        self.assertLessEqual(result.text.count("风险："), 1)
+        self.assertNotIn("信息供应链断了", result.text)
+
+    def test_deep_analysis_rejects_blame_shift_or_truncated_model_reply(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_deep_blame_shift_model")
+
+        class BlameShiftAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "判断：VELA 不智能是语境盲区。\n"
+                        "根因：没有识别继续指向。\n"
+                        "风险：用户会继续觉得她在背稿。\n"
+                        "修正路径：你下次给“继续”时，加一句指向；我这边先停半秒，"
+                    ),
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "地狱验尸一下 VELA 为什么不智能",
+                intent="deep_analysis",
+                log_dir=Path(tmp),
+                reply_adapter=BlameShiftAdapter(),
+            )
+
+        self.assertIn("根因", result.text)
+        self.assertIn("误判点", result.text)
+        self.assertIn("上下文断点", result.text)
+        self.assertNotIn("你下次", result.text)
+        self.assertNotIn("加一句指向", result.text)
+        self.assertFalse(result.text.rstrip().endswith(("，", "、", "：", "；")))
 
     def test_session_notes_are_persisted_locally(self):
         product = load_product_module()
@@ -1637,7 +1800,9 @@ class VelaProductLayerTests(unittest.TestCase):
         joined_preferences = " ".join(context.user_preferences)
         self.assertIn("迭代提示", joined_preferences)
         self.assertIn("直接给判断", joined_preferences)
-        self.assertTrue(any(token in reply.text for token in ["少菜单", "直接给判断", "机械味", "不像提示牌"]))
+        self.assertTrue(any(token in reply.text for token in ["我在", "在。", "听着", "慢慢说", "递过来"]))
+        for self_label in ["少菜单", "直接给判断", "机械味", "不像提示牌", "已校准"]:
+            self.assertNotIn(self_label, reply.text)
         self.assertNotIn("我已校准", reply.text)
 
     def test_confirmed_preferences_require_user_confirmation(self):

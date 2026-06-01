@@ -203,7 +203,7 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         result = adapter.generate(context)
 
-        self.assertTrue(any(token in result.text for token in ["少菜单", "说人话", "先听懂", "多判断"]))
+        self.assertTrue(any(token in result.text for token in ["说人话", "先听懂", "真实意思", "结论", "重切"]))
         for internal in ["风格反馈候选", "行为偏好候选", "候选记录", "长期记忆", "已收进", "已校准"]:
             self.assertNotIn(internal, result.text)
         self.assertNotIn("你表达差", result.text)
@@ -479,7 +479,8 @@ class VelaReplyEngineTests(unittest.TestCase):
         brief = engine.build_dialogue_brief(context)
 
         self.assertIn("不要把系统问题简单归咎于用户", brief)
-        self.assertIn("是否值得沉淀为经验", brief)
+        self.assertIn("不要声称长期记忆为空", brief)
+        self.assertIn("行为修正路径", brief)
 
     def test_persona_profile_distills_companion_core_traits(self):
         engine = load_reply_engine()

@@ -293,7 +293,11 @@ def build_dialogue_brief(context: ReplyContext) -> str:
         )
     extra_requirements: list[str] = []
     if context.intent == "deep_analysis":
-        extra_requirements.append("深度验尸约束：不要把系统问题简单归咎于用户；必须判断是否值得沉淀为经验。")
+        extra_requirements.append(
+            "深度验尸约束：不要把系统问题简单归咎于用户；不要声称长期记忆为空；"
+            "不要请求把内容写进短期笔记；如涉及学习，只写行为修正路径。"
+            "输出用“判断 / 根因 / 风险 / 修正路径”四段。"
+        )
     return "\n".join(
         [
             f"用户原话：{context.message}",
@@ -401,21 +405,21 @@ class FallbackReplyAdapter(ReplyAdapter):
     )
 
     CALIBRATED_NORMAL_VARIANTS = (
-        "K，在。少菜单，直接看目标；把最硬的部分递过来，我负责切开。",
-        "K，在。废话收短，直接给判断；你把卡点摆出来，别让它在雾里养肥。",
-        "K，在。少菜单，不解释身份；说目标，我把噪音切掉。",
+        "K，在。你把最硬的那块递过来，我先切判断。",
+        "K，在。先别铺满信息，说最硌手的点。",
+        "K，在。目标给我一句，我直接接住。",
     )
 
     WARM_CALIBRATED_GREETING_VARIANTS = (
-        "K，我在。少菜单，先不派任务；你慢慢说。",
-        "K，在，听着。少菜单，不解释身份，今天先别急着推进。",
-        "K，在。少菜单，先暖一点，少分析；你说，我接住。",
+        "K，我在。你慢慢说，我听着。",
+        "K，在。先不推你，话从哪里开始都行。",
+        "K，我在。今天先轻一点，你说。",
     )
 
     CALIBRATED_CONTINUE_VARIANTS = (
-        "K，继续。少菜单，多判断；把当前卡点丢过来，我直接接上一刀。",
-        "K，继续。不摆路牌；沿上一轮往下，先说最硬的卡点。",
-        "K，接着来。少解释，多判断；别重开菜单，把下一块阻塞递过来。",
+        "K，继续。沿上一轮往下，先抓最硬的阻塞。",
+        "K，接着来。把现在最碍事的部分递过来。",
+        "K，继续。先收束到一个动作，别把战线铺散。",
     )
 
     DAILY_INFO_VARIANTS = (
@@ -455,9 +459,9 @@ class FallbackReplyAdapter(ReplyAdapter):
     )
 
     STYLE_FEEDBACK_VARIANTS = (
-        "K，收到。问题不是你挑剔，是我刚才像提示牌。少菜单，多判断。",
-        "K，明白。少解释身份，直接说人话；下一句先听懂，再判断。",
-        "K，收到。刚才那种菜单口吻退场，后面少菜单，多判断。",
+        "K，收到。问题不是你挑剔，是我刚才像提示牌；我从真实意思重切。",
+        "K，明白。先听懂，再给结论；这句开始说人话。",
+        "K，收到。刚才那种客服口吻退场；结论先落地，话少一点。",
     )
 
     BEHAVIOR_FEEDBACK_VARIANTS = (
