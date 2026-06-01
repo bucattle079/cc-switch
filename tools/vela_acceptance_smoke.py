@@ -84,6 +84,19 @@ SOURCE_NAME_LEAK_TOKENS = (
     "Jane " + "Eyre",
     "Elizabeth " + "Bennet",
 )
+MOJIBAKE_TOKENS = (
+    "锛",
+    "銆",
+    "浣犲",
+    "鎴戝",
+    "瀹炴椂",
+    "鍒ゆ柇",
+    "涓嬩竴",
+    "甯傚満",
+    "鑿滃崟",
+    "闀挎湡",
+    "鍊欓",
+)
 
 
 SINGLE_TURN_CASES = [
@@ -505,8 +518,12 @@ def latest_quality_log(log_dir: Path) -> dict[str, Any]:
 
 def find_leaks(text: str) -> list[str]:
     all_tokens = (*LEAK_TOKENS, *SOURCE_NAME_LEAK_TOKENS)
-    leaks = [token for token in all_tokens if token.lower() in str(text or "").lower()]
-    if WINDOWS_PATH_RE.search(str(text or "")):
+    raw_text = str(text or "")
+    lower_text = raw_text.lower()
+    leaks = [token for token in all_tokens if token.lower() in lower_text]
+    if any(token in raw_text for token in MOJIBAKE_TOKENS):
+        leaks.append("mojibake")
+    if WINDOWS_PATH_RE.search(raw_text):
         leaks.append("windows_path")
     return leaks
 
@@ -541,10 +558,16 @@ def latest_session_reply_detail(latest_reply: dict[str, Any], *, max_session_age
 
 
 def runtime_next_action(failed: list[str]) -> dict[str, Any]:
-    if "inbound_to_reply" in failed:
+    if "inbound_to_reply" in failed or "weixin_command_dispatch" in failed:
         return {
             "kind": "inspect_weixin_reply_dispatch",
-            "checks": ["inbound_to_reply", "weixin_dispatch_trace", "latest_session_reply", "cc_connect_process"],
+            "checks": [
+                "weixin_command_dispatch",
+                "inbound_to_reply",
+                "weixin_dispatch_trace",
+                "latest_session_reply",
+                "cc_connect_process",
+            ],
             "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
             "wait_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90",
         }
@@ -742,6 +765,30 @@ def latest_inbound_message(log_path: Path) -> dict[str, Any]:
     if latest is None:
         return {"timestamp": "", "found": False}
     return {"timestamp": latest.isoformat(), "found": True}
+
+
+def weixin_command_dispatch(log_path: Path, inbound_time: datetime | None) -> dict[str, Any]:
+    if inbound_time is None:
+        return runtime_check(True, "no inbound to trace")
+    if not log_path.exists():
+        return runtime_check(False, "cc-connect log missing; cannot prove vela-router dispatch")
+    latest: datetime | None = None
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return runtime_check(False, "cc-connect log unreadable; cannot prove vela-router dispatch")
+    for line in lines:
+        if 'msg="audit: command_executed"' not in line:
+            continue
+        if "project=VELA" not in line or "command=vela-router" not in line:
+            continue
+        match = CC_LOG_TIME_RE.search(line)
+        parsed = parse_timestamp(match.group(1) if match else "")
+        if parsed and parsed >= inbound_time and (latest is None or parsed > latest):
+            latest = parsed
+    if latest is None:
+        return runtime_check(False, "no logged vela-router dispatch after latest Weixin inbound")
+    return runtime_check(True, f"vela-router command dispatched at {latest.isoformat()}")
 
 
 def latest_path_mtime(paths: Iterable[Path]) -> datetime | None:
@@ -958,6 +1005,7 @@ def run_runtime_audit(
         ),
     )
     reply_time = parse_timestamp(str(latest_reply.get("timestamp") or ""))
+    checks["weixin_command_dispatch"] = weixin_command_dispatch(cc_home / "cc-connect.log", inbound_time)
     inbound_ok = True
     inbound_detail = "no inbound message in cc-connect log"
     if inbound_time:

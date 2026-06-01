@@ -118,6 +118,13 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         self.assertNotIn("DEEPSEEK_API_KEY", completed.stdout)
         self.assertNotIn("raw payload", completed.stdout.lower())
 
+    def test_foreground_leak_detector_flags_mojibake_text(self):
+        smoke = load_smoke_module()
+
+        leaks = smoke.find_leaks("K锛屽湪銆傚皯鑿滃崟锛岀洿鎺ョ湅鐩爣銆?")
+
+        self.assertIn("mojibake", leaks)
+
     def test_entrypoint_smoke_keeps_hard_lanes_local_when_deepseek_env_exists(self):
         smoke = load_smoke_module()
 
@@ -588,6 +595,74 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
         self.assertIn("inbound_to_reply", report["next_action"]["checks"])
         self.assertIn("weixin_dispatch_trace", report["next_action"]["checks"])
         self.assertIn("cc_connect_process", report["next_action"]["checks"])
+
+    def test_runtime_audit_flags_latest_weixin_inbound_without_router_dispatch(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            sessions = cc_home / "sessions"
+            sessions.mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                """
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+""".strip(),
+                encoding="utf-8",
+            )
+            session_file = sessions / "VELA_test.json"
+            session_file.write_text(
+                json.dumps(
+                    {
+                        "sessions": {
+                            "s1": {
+                                "history": [
+                                    {
+                                        "role": "assistant",
+                                        "content": "K，在。",
+                                        "timestamp": "2026-06-01T00:00:00+00:00",
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (cc_home / "cc-connect.log").write_text(
+                "\n".join(
+                    [
+                        'time=2026-06-01T20:47:31+08:00 level=INFO msg="message received" platform=weixin content_len=4',
+                        'time=2026-06-01T20:47:31+08:00 level=INFO msg="audit: command_executed" platform=weixin project=VELA command=vela-router type=custom',
+                        'time=2026-06-01T20:47:38+08:00 level=INFO msg="message received" platform=weixin content_len=24',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=True,
+                max_session_age_hours=9999,
+            )
+
+        self.assertFalse(report["checks"]["weixin_command_dispatch"]["ok"])
+        self.assertIn("latest Weixin inbound", report["checks"]["weixin_command_dispatch"]["detail"])
+        self.assertIn("weixin_command_dispatch", report["failed"])
+        self.assertEqual(report["next_action"]["kind"], "inspect_weixin_reply_dispatch")
+        self.assertIn("weixin_command_dispatch", report["next_action"]["checks"])
 
     def test_runtime_audit_requires_weixin_inbound_not_only_internal_session_send(self):
         smoke = load_smoke_module()
