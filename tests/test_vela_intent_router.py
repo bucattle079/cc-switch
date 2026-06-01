@@ -12,6 +12,7 @@ from unittest.mock import patch
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 ROUTER = TOOLS / "vela_router.py"
 MARKET = TOOLS / "vela_market_briefing.py"
+PRODUCT = TOOLS / "vela_product_layers.py"
 
 
 def load_module(path: Path, name: str):
@@ -684,6 +685,38 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         self.assertEqual(reply, "K real")
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
+
+    def test_structured_project_model_reply_is_not_wrapped_with_duplicate_sections(self):
+        product = load_module(PRODUCT, "vela_product_layers")
+
+        class StructuredProjectAdapter:
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return SimpleNamespace(
+                    text=(
+                        "K，目标：锁 AugSun 的最小用户闭环。\n"
+                        "风险：别开新模块，别让工程噪音进前台。\n"
+                        "下一步：先验证一个用户从触发到反馈的闭环。"
+                    ),
+                    source="deepseek_chat",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            reply = product.run_layered_response(
+                "继续 AugSun 项目",
+                intent="project_assistant",
+                reply_adapter=StructuredProjectAdapter(),
+                log_dir=Path(tmp),
+            ).text
+
+        self.assertIn("目标：锁 AugSun 的最小用户闭环", reply)
+        self.assertEqual(reply.count("风险："), 1)
+        self.assertEqual(reply.count("下一步："), 1)
+        self.assertNotIn("把 Codex 输出当产品判断", reply)
+        self.assertNotIn("别把好运气请来当部门主管", reply)
 
     def test_persona_alias_routes_through_guarded_local_tool_lane(self):
         router = load_module(ROUTER, "vela_router")

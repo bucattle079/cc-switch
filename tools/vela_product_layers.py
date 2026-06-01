@@ -1817,6 +1817,23 @@ def render_codex_product_judgment(codex_output: str) -> str:
     return "VELA · CODEX 产品判断摘要\n" + render_vela_persona(packet)
 
 
+def deep_lane_model_reply_is_frontstage_ready(text: str) -> bool:
+    raw = normalize_supporting_context(text)
+    if not raw:
+        return False
+    has_next = bool(re.search(r"(^|\n)\s*(下一步|修正路径)\s*[:：]", raw))
+    has_judgment = bool(re.search(r"(^|\n)\s*(K\s*[,，:：]\s*)?(目标|判断|根因|结论)\s*[:：]", raw))
+    has_boundary = bool(re.search(r"(^|\n)\s*(风险|依据|边界|误判点|上下文断点)\s*[:：]", raw))
+    return has_next and has_judgment and has_boundary
+
+
+def normalize_model_frontstage_reply(text: str) -> str:
+    cleaned = normalize_supporting_context(text)
+    cleaned = re.sub(r"(?im)^\s*(system|assistant|user)\s*[:：].*$", "", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 def engine_text_for_intent(
     context: ReplyContext,
     *,
@@ -1837,6 +1854,8 @@ def engine_text_for_intent(
     if context.intent in {"project_assistant", "deep_analysis"}:
         result = adapter.generate(context)
         base = analysis_layer(context.message, context.intent, codex_summary=codex_summary)
+        if result.used_api and deep_lane_model_reply_is_frontstage_ready(result.text):
+            return normalize_model_frontstage_reply(result.text), result.adapter, result.used_api
         judgment = result.text or base.judgment
         if should_surface_deep_lane_status(result):
             judgment = render_deep_lane_status_judgment(context, result, base)
