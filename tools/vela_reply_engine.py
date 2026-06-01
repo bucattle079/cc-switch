@@ -522,7 +522,26 @@ class FallbackReplyAdapter(ReplyAdapter):
         return self.NORMAL_VARIANTS
 
     def _is_style_feedback(self, text: str) -> bool:
-        return any(token in text for token in ("机器人", "机械", "新闻列表", "菜单", "不像 VELA", "太呆", "没懂我", "理解偏差"))
+        return any(
+            token in text
+            for token in (
+                "机器人",
+                "机械",
+                "新闻列表",
+                "菜单",
+                "不像 VELA",
+                "太呆",
+                "没懂我",
+                "理解偏差",
+                "行为偏好候选",
+                "表达反馈候选",
+                "真实意思",
+                "直接给判断",
+                "重切核心",
+                "拖延",
+                "自证",
+            )
+        )
 
     def _pick_variant(self, variants: tuple[str, ...], context: ReplyContext) -> str:
         seed = f"{context.intent}|{context.message}|{context.recent_summary}"

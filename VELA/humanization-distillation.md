@@ -77,6 +77,7 @@ Human-like iteration loop:
 
 - After each reply, write a local iteration signal that summarizes message type, user state, hidden need, active capabilities, behavior mode, quality signals, feedback type, correction need, candidate memory/tone updates, and the next-turn improvement.
 - Treat "I need you smarter", "understand what I mean", "do not drag", "too template", "too cold", and similar feedback as reusable behavior/style candidates, not permanent memory.
+- Validate feedback learning with two-turn replay: first send the feedback, then send a normal follow-up such as "hello" or "continue"; the second reply must change behavior without saying "I calibrated".
 - Never expose iteration fields, raw schema names, paths, tokens, or adapter details to the WeChat foreground.
 - Factual lanes keep priority over persona: market, weather, and realtime-info answers must state source/cache/model-only/unavailable boundaries before giving judgement.
 

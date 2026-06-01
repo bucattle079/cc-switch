@@ -250,6 +250,43 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertTrue(any(token in next_reply.text for token in ["少菜单", "直接给判断", "机械味", "不像提示牌"]))
         self.assertNotIn("要看盘，说 A股、美股或韩国", next_reply.text)
 
+    def test_two_turn_feedback_replay_proves_behavior_change(self):
+        product = load_product_module()
+
+        cases = [
+            ("我需要你更智能", "你好", ["少菜单", "直接给判断", "不解释身份", "废话收短"]),
+            ("你没懂我", "你好", ["少菜单", "直接给判断", "不解释身份", "废话收短"]),
+            ("继续推进，不要拖", "继续", ["少菜单", "多判断", "不摆路牌", "少解释"]),
+        ]
+
+        for feedback, followup, expected_tokens in cases:
+            with self.subTest(feedback):
+                with tempfile.TemporaryDirectory() as tmp:
+                    log_dir = Path(tmp)
+                    product.run_layered_response(
+                        feedback,
+                        intent="style_feedback",
+                        log_dir=log_dir,
+                        reply_adapter=product.FallbackReplyAdapter(),
+                    )
+                    next_reply = product.run_layered_response(
+                        followup,
+                        intent="normal_chat",
+                        log_dir=log_dir,
+                        reply_adapter=product.FallbackReplyAdapter(),
+                    )
+                    rows = [
+                        json.loads(line)
+                        for line in next(log_dir.glob("human-iteration-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                        if line.strip()
+                    ]
+
+                self.assertTrue(any(token in next_reply.text for token in expected_tokens), next_reply.text)
+                self.assertIn("preference_or_feedback_adapted", rows[-1]["response_quality_signals"])
+                self.assertNotIn("我已校准", next_reply.text)
+                self.assertNotIn("response_quality_signals", next_reply.text)
+                self.assertNotIn("要看盘，说 A股、美股或韩国", next_reply.text)
+
     def test_continue_uses_recent_context_instead_of_menu(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
