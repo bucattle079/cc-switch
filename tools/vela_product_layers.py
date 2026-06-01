@@ -712,6 +712,22 @@ QUIET_SUPPORT_MARKERS = (
     "乱掉",
 )
 
+LISTENING_SUPPORT_MARKERS = (
+    "不是要方案",
+    "有点烦",
+    "别分析",
+    "先听我说",
+    "听我说",
+    "陪我说",
+    "说会儿话",
+    "想聊",
+    "不要马上给我任务",
+    "不要给我任务",
+    "别给我任务",
+    "先别推进",
+    "话说完",
+)
+
 BOUNDARY_PUSHBACK_MARKERS = (
     "顺着我说",
     "就顺着",
@@ -864,6 +880,19 @@ def interpret_need(message: str, intent: str) -> NeedInterpretation:
             distillation_rules=rules,
             should_reference_memory=True,
             tone_adjustment_reason="用户指出理解错位；先修正语义，再进入答案。",
+        )
+
+    if any(marker in text for marker in LISTENING_SUPPORT_MARKERS):
+        return NeedInterpretation(
+            literal_need="用户明确要求先被听见，而不是立刻得到方案或任务。",
+            implied_need="用户需要低推进陪伴：先让话说完，再判断是否需要拆解。",
+            emotional_state="需要被听见、暂时不想被推着走",
+            response_mode="quiet_support",
+            should_clarify=False,
+            preferred_reply_shape="先听，不派任务，不抢分析；用一句短回应让用户继续说。",
+            human_tone_vector=_tone(warmth=5, directness=3, depth=1, presence=5, clarify=1, memory=2),
+            distillation_rules=rules,
+            tone_adjustment_reason="用户明确要求先听/不派任务；暂停推进，保留陪伴感。",
         )
 
     if any(marker in text for marker in QUIET_SUPPORT_MARKERS):

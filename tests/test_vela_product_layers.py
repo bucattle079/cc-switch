@@ -410,6 +410,27 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertLessEqual(interpretation.human_tone_vector.strategic_depth, 2)
         self.assertGreaterEqual(interpretation.human_tone_vector.warmth_level, 4)
 
+    def test_listening_request_does_not_become_task_assignment(self):
+        product = load_product_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "我只是想聊一下，不要马上给我任务",
+                intent="normal_chat",
+                log_dir=Path(tmp),
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            context = product.build_reply_context(
+                "别分析，先听我说会儿",
+                intent="normal_chat",
+                log_dir=Path(tmp),
+            )
+
+        self.assertEqual(context.response_mode, "quiet_support")
+        self.assertTrue(any(token in result.text for token in ["我听着", "你先说", "不用立刻变成任务"]))
+        for tasky in ["卡点", "目标", "开刀", "硌手", "混乱递过来"]:
+            self.assertNotIn(tasky, result.text)
+
     def test_humanization_interpretation_maps_project_operator(self):
         product = load_product_module()
 

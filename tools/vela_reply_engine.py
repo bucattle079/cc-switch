@@ -452,6 +452,30 @@ class FallbackReplyAdapter(ReplyAdapter):
         "K，脑子发懵时别硬推。先给我一个点，别扛整片雾。",
     )
 
+    LISTENING_SUPPORT_MARKERS = (
+        "不是要方案",
+        "有点烦",
+        "别分析",
+        "先听我说",
+        "听我说",
+        "陪我说",
+        "说会儿话",
+        "想聊",
+        "不要马上给我任务",
+        "不要给我任务",
+        "别给我任务",
+        "先别推进",
+        "话说完",
+        "先听",
+        "不派任务",
+    )
+
+    LISTENING_SUPPORT_VARIANTS = (
+        "K，我听着。先不用立刻变成任务，你把话说完。",
+        "K，你先说。现在不分析，我不抢方向盘。",
+        "K，在。我听着；这轮先让话落地，不急着推进。",
+    )
+
     BOUNDARY_VARIANTS = (
         "K，不行。我可以陪你，但不能替坏判断鼓掌。先把代价摊开，再决定要不要往前冲。",
         "K，我不顺着错路走。该刹车就刹车，长期风险比一时痛快更贵。",
@@ -518,6 +542,8 @@ class FallbackReplyAdapter(ReplyAdapter):
         if context.response_mode == "relationship_repair":
             return self.RELATIONSHIP_REPAIR_VARIANTS
         if context.response_mode == "quiet_support":
+            if self._is_listening_support(context):
+                return self.LISTENING_SUPPORT_VARIANTS
             return self.QUIET_SUPPORT_VARIANTS
         if behavior_mode == "boundary_pushback":
             return self.BOUNDARY_VARIANTS
@@ -544,6 +570,17 @@ class FallbackReplyAdapter(ReplyAdapter):
         if has_style_feedback:
             return self.CALIBRATED_NORMAL_VARIANTS
         return self.NORMAL_VARIANTS
+
+    def _is_listening_support(self, context: ReplyContext) -> bool:
+        raw = " ".join(
+            [
+                context.message or "",
+                context.tone_adjustment_reason or "",
+                context.need_interpretation or "",
+                context.inferred_hidden_need or "",
+            ]
+        )
+        return any(token in raw for token in self.LISTENING_SUPPORT_MARKERS)
 
     def _is_style_feedback(self, text: str) -> bool:
         return any(
