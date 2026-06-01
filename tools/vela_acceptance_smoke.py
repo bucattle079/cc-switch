@@ -327,14 +327,16 @@ def runtime_next_action(failed: list[str]) -> dict[str, Any]:
             "kind": "send_weixin_prompt",
             "prompts": ["你好 VELA", "这是实时的吗？", "CODEX/"],
             "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
+            "wait_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90",
         }
     if failed:
         return {
             "kind": "inspect_failed_checks",
             "checks": failed,
             "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
+            "wait_command": "",
         }
-    return {"kind": "none", "prompts": [], "verify_command": ""}
+    return {"kind": "none", "prompts": [], "verify_command": "", "wait_command": ""}
 
 
 def deepseek_runtime_status(env: dict[str, str] | None = None) -> dict[str, Any]:
@@ -921,6 +923,8 @@ def render_runtime_report(report: dict[str, Any]) -> str:
             lines.append("prompts: " + " / ".join(str(item) for item in prompts))
         if next_action.get("verify_command"):
             lines.append(f"verify: {next_action['verify_command']}")
+        if next_action.get("wait_command"):
+            lines.append(f"wait_verify: {next_action['wait_command']}")
     return "\n".join(lines)
 
 

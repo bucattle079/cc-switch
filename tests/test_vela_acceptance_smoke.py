@@ -440,9 +440,11 @@ token = "test-token"
         self.assertEqual(report["next_action"]["kind"], "send_weixin_prompt")
         self.assertIn("你好 VELA", report["next_action"]["prompts"])
         self.assertIn("--runtime-audit --json", report["next_action"]["verify_command"])
+        self.assertIn("--wait-live-seconds 90", report["next_action"]["wait_command"])
         rendered = smoke.render_runtime_report(report)
         self.assertIn("next_action: send_weixin_prompt", rendered)
         self.assertIn("你好 VELA", rendered)
+        self.assertIn("wait_verify:", rendered)
 
     def test_runtime_audit_dry_runs_configured_router_command(self):
         smoke = load_smoke_module()
