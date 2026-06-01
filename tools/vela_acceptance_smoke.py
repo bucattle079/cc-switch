@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 from typing import Any
 
@@ -604,6 +605,50 @@ def run_runtime_audit(
     }
 
 
+def wait_for_runtime_audit(
+    *,
+    cc_home: Path,
+    timeout_seconds: float,
+    poll_seconds: float = 2.0,
+    process_running: bool | None = None,
+    max_session_age_hours: int = 48,
+    audit_fn=run_runtime_audit,
+    sleep_fn=time.sleep,
+    monotonic_fn=time.monotonic,
+) -> dict[str, Any]:
+    timeout_seconds = max(0.0, float(timeout_seconds))
+    poll_seconds = max(0.2, float(poll_seconds))
+    start = monotonic_fn()
+    deadline = start + timeout_seconds
+    attempts = 0
+    status = "timed_out"
+    report: dict[str, Any] = {}
+    while True:
+        attempts += 1
+        report = audit_fn(
+            cc_home=cc_home,
+            process_running=process_running,
+            max_session_age_hours=max_session_age_hours,
+        )
+        now = monotonic_fn()
+        if report.get("ok"):
+            status = "satisfied"
+            break
+        if now >= deadline:
+            break
+        sleep_fn(min(poll_seconds, max(0.0, deadline - now)))
+    elapsed = max(0.0, monotonic_fn() - start)
+    report = dict(report)
+    report["wait"] = {
+        "enabled": True,
+        "status": status,
+        "attempts": attempts,
+        "timeout_seconds": round(timeout_seconds, 2),
+        "elapsed_seconds": round(elapsed, 2),
+    }
+    return report
+
+
 def required_tokens_present(text: str, tokens: list[str] | None) -> bool:
     if not tokens:
         return True
@@ -862,6 +907,12 @@ def render_runtime_report(report: dict[str, Any]) -> str:
     latest = report.get("latest_reply") or {}
     if latest.get("preview"):
         lines.append(f"latest_reply: {latest['preview']}")
+    wait = report.get("wait") or {}
+    if wait.get("enabled"):
+        lines.append(
+            f"wait: {wait.get('status')} after {wait.get('attempts')} attempts "
+            f"({wait.get('elapsed_seconds')}s/{wait.get('timeout_seconds')}s)"
+        )
     next_action = report.get("next_action") or {}
     if next_action.get("kind") and next_action.get("kind") != "none":
         lines.append(f"next_action: {next_action['kind']}")
@@ -882,16 +933,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--runtime-audit", action="store_true", help="Audit local cc-connect runtime config/process/session state.")
     parser.add_argument("--cc-home", type=Path, default=DEFAULT_CC_CONNECT_HOME, help="cc-connect home directory for runtime audit.")
     parser.add_argument("--max-session-age-hours", type=int, default=48, help="Maximum acceptable age for latest VELA session reply.")
+    parser.add_argument("--wait-live-seconds", type=float, default=0.0, help="When auditing runtime, wait this long for a fresh Weixin inbound and reply.")
+    parser.add_argument("--wait-poll-seconds", type=float, default=2.0, help="Polling interval for --wait-live-seconds.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     if args.runtime_audit:
-        report = run_runtime_audit(
-            cc_home=args.cc_home,
-            max_session_age_hours=args.max_session_age_hours,
-        )
+        if args.wait_live_seconds > 0:
+            report = wait_for_runtime_audit(
+                cc_home=args.cc_home,
+                timeout_seconds=args.wait_live_seconds,
+                poll_seconds=args.wait_poll_seconds,
+                max_session_age_hours=args.max_session_age_hours,
+            )
+        else:
+            report = run_runtime_audit(
+                cc_home=args.cc_home,
+                max_session_age_hours=args.max_session_age_hours,
+            )
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:

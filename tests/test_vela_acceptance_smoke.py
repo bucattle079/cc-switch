@@ -238,6 +238,57 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
         self.assertTrue(report["failed"])
         self.assertNotIn("DEEPSEEK_API_KEY", completed.stdout)
 
+    def test_runtime_audit_cli_wait_json_reports_wait_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            (cc_home / "sessions").mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                """
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+""".strip(),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-X",
+                    "utf8",
+                    str(SMOKE),
+                    "--runtime-audit",
+                    "--json",
+                    "--wait-live-seconds",
+                    "0.1",
+                    "--wait-poll-seconds",
+                    "0.05",
+                    "--cc-home",
+                    str(cc_home),
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                check=False,
+            )
+
+        report = json.loads(completed.stdout)
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(report["wait"]["status"], "timed_out")
+        self.assertGreaterEqual(report["wait"]["attempts"], 1)
+        self.assertIn("next_action", report)
+
     def test_runtime_process_detector_checks_patched_cc_connect_binary(self):
         smoke = load_smoke_module()
         calls = []
@@ -514,6 +565,57 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
         self.assertIn("adapter=fallback", report["checks"]["deepseek_runtime"]["detail"])
         self.assertIn("DeepSeek key not configured", report["checks"]["deepseek_runtime"]["detail"])
         self.assertNotIn("DEEPSEEK_API_KEY", json.dumps(report, ensure_ascii=False))
+
+    def test_runtime_wait_returns_when_live_audit_passes(self):
+        smoke = load_smoke_module()
+        clock = {"now": 0.0}
+        reports = [
+            {"ok": False, "failed": ["weixin_inbound_seen"], "checks": {}, "latest_reply": {}, "next_action": {}},
+            {"ok": True, "failed": [], "checks": {}, "latest_reply": {}, "next_action": {}},
+        ]
+
+        def fake_audit(**_kwargs):
+            return reports.pop(0)
+
+        report = smoke.wait_for_runtime_audit(
+            cc_home=Path("unused"),
+            timeout_seconds=10,
+            poll_seconds=1,
+            audit_fn=fake_audit,
+            sleep_fn=lambda seconds: clock.__setitem__("now", clock["now"] + seconds),
+            monotonic_fn=lambda: clock["now"],
+        )
+
+        self.assertTrue(report["ok"], report)
+        self.assertEqual(report["wait"]["status"], "satisfied")
+        self.assertEqual(report["wait"]["attempts"], 2)
+
+    def test_runtime_wait_times_out_with_last_audit_report(self):
+        smoke = load_smoke_module()
+        clock = {"now": 0.0}
+
+        def fake_audit(**_kwargs):
+            return {
+                "ok": False,
+                "failed": ["weixin_inbound_seen"],
+                "checks": {},
+                "latest_reply": {},
+                "next_action": {"kind": "send_weixin_prompt"},
+            }
+
+        report = smoke.wait_for_runtime_audit(
+            cc_home=Path("unused"),
+            timeout_seconds=3,
+            poll_seconds=1,
+            audit_fn=fake_audit,
+            sleep_fn=lambda seconds: clock.__setitem__("now", clock["now"] + seconds),
+            monotonic_fn=lambda: clock["now"],
+        )
+
+        self.assertFalse(report["ok"], report)
+        self.assertEqual(report["wait"]["status"], "timed_out")
+        self.assertGreaterEqual(report["wait"]["attempts"], 2)
+        self.assertIn("weixin_inbound_seen", report["failed"])
 
     def test_runtime_audit_reports_weixin_poll_state_without_leaking_cursor(self):
         smoke = load_smoke_module()

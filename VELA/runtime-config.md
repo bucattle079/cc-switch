@@ -84,6 +84,8 @@ Run `python -X utf8 tools/vela_acceptance_smoke.py` for a local, side-effect-saf
 
 Run `python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json` to audit the live cc-connect edge: local VELA router config, DeepSeek/default-dialogue runtime adapter state, a no-side-effect dry run of the configured router command, slash commands, Weixin poll-buffer freshness, cc-connect process state, latest VELA session reply freshness/foreground cleanliness, whether a Weixin inbound message was observed, and whether a newer inbound WeChat message lacks a newer VELA session reply. Internal `cc-connect send` messages can prove the agent/session path, but they do not prove the Weixin foreground. A failing runtime audit can still mean the code path is correct; it means the WeChat bridge is not currently proven live. The report includes `next_action` with safe WeChat prompts and the exact command to rerun after sending one.
 
+For the final live check, start `python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90`, then send one of the `next_action.prompts` from WeChat. The command waits for both the Weixin inbound log and a fresh clean VELA session reply before returning success.
+
 ## Persona Skeleton
 
 The runtime persona skeleton is mechanism-only:
