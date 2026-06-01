@@ -1241,6 +1241,24 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("need_interpretation", result.text)
         self.assertNotIn("背面需求", result.text)
 
+    def test_project_assistant_gives_three_risks_when_asked(self):
+        product = load_product_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "继续 VELA 项目，别讲愿景，给三条风险",
+                intent="project_assistant",
+                log_dir=Path(tmp),
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+        risk_section = result.text.split("风险：", 1)[1].split("下一步：", 1)[0]
+        risks = [line for line in risk_section.splitlines() if line.startswith("- ")]
+
+        self.assertGreaterEqual(len(risks), 3, result.text)
+        self.assertLess(len(result.text), 700)
+        self.assertNotIn("raw payload", result.text.lower())
+        self.assertNotIn("diff --git", result.text)
+
     def test_deep_analysis_surfaces_experience_memory_judgement(self):
         product = load_product_module()
 

@@ -1535,7 +1535,11 @@ def analysis_layer(message: str, intent: str, codex_summary: str = "") -> Analys
             intent=intent,
             facts=["用户要推进 AugSun / ROLLQIIA 或 VELA 产品化事项。"],
             judgment="先把目标、约束、当前卡点和最小下一步拆开，别让愿景压扁执行。",
-            risks=["把 Codex 输出当产品判断，会让前台变成工程日志。"],
+            risks=[
+                "把 Codex 输出当产品判断，会让前台变成工程日志。",
+                "只讲愿景不锁最小闭环，项目会继续漂亮地原地打转。",
+                "反馈只写日志不改变下一轮，VELA 会退回会说话的工具。",
+            ],
             next_actions=["列出当前目标", "标出最大阻塞", "需要代码执行时再交给 /CODEX"],
         )
     if intent == "deep_analysis":

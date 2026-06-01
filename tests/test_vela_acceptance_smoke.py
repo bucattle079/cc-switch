@@ -173,6 +173,18 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         self.assertTrue(impulse["max_reply_chars_ok"], impulse)
         self.assertEqual(impulse["forbidden_reply_tokens_found"], [])
 
+    def test_smoke_runner_checks_project_risk_count(self):
+        smoke = load_smoke_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = smoke.run_smoke_suite(log_dir=Path(tmp), use_entrypoint=True, fake_deepseek_env=True)
+
+        by_id = {case["id"]: case for case in report["cases"]}
+        project = by_id["project_augsun_continue"]
+        self.assertTrue(project["ok"], project)
+        self.assertGreaterEqual(project["risk_bullets"], 3)
+        self.assertTrue(project["min_risk_bullets_ok"], project)
+
     def test_runtime_audit_reports_router_config_and_live_process_gap(self):
         smoke = load_smoke_module()
         with tempfile.TemporaryDirectory() as tmp:

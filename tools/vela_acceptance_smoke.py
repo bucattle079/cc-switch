@@ -190,6 +190,8 @@ SINGLE_TURN_CASES = [
         "id": "project_augsun_continue",
         "message": "继续 AugSun 项目，别讲愿景，给三条风险",
         "expected_intent": "project_assistant",
+        "required_reply_tokens": ["风险：", "下一步："],
+        "min_risk_bullets": 3,
     },
     {
         "id": "project_followup_minimum_action",
@@ -881,12 +883,32 @@ def output_constraints(text: str, case: dict[str, Any]) -> dict[str, Any]:
         for token in (case.get("forbidden_reply_tokens") or [])
         if str(token) and str(token) in str(text or "")
     ]
+    risk_bullets = section_bullet_count(str(text or ""), "风险：", "下一步：")
+    min_risk_raw = case.get("min_risk_bullets")
+    min_risk_bullets: int | None = None
+    if min_risk_raw is not None:
+        try:
+            min_risk_bullets = int(min_risk_raw)
+        except (TypeError, ValueError):
+            min_risk_bullets = None
     return {
         "reply_chars": reply_chars,
         "max_reply_chars": max_chars,
         "max_reply_chars_ok": max_chars is None or reply_chars <= max_chars,
         "forbidden_reply_tokens_found": forbidden,
+        "risk_bullets": risk_bullets,
+        "min_risk_bullets": min_risk_bullets,
+        "min_risk_bullets_ok": min_risk_bullets is None or risk_bullets >= min_risk_bullets,
     }
+
+
+def section_bullet_count(text: str, heading: str, next_heading: str) -> int:
+    if heading not in text:
+        return 0
+    section = text.split(heading, 1)[1]
+    if next_heading in section:
+        section = section.split(next_heading, 1)[0]
+    return len([line for line in section.splitlines() if line.startswith("- ")])
 
 
 def route_case(message: str) -> Any:
@@ -955,6 +977,7 @@ def run_single_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
             and required_ok
             and tool_boundary_ok
             and constraints["max_reply_chars_ok"]
+            and constraints["min_risk_bullets_ok"]
             and not constraints["forbidden_reply_tokens_found"]
             and not leaks
         ),
@@ -1020,6 +1043,7 @@ def run_entrypoint_single_case(case: dict[str, Any], base_log_dir: Path) -> dict
             and required_ok
             and tool_boundary_ok
             and constraints["max_reply_chars_ok"]
+            and constraints["min_risk_bullets_ok"]
             and not constraints["forbidden_reply_tokens_found"]
             and not leaks
         ),

@@ -84,6 +84,7 @@ Human-like iteration loop:
 Realistic scenario pack:
 
 - Mixed project/risk phrasing such as "continue VELA project, give risks" stays in project mode; generic "risk" must not drag it into market.
+- Project prompts asking for risks must return concrete risk bullets, not a single vague warning; pair them with the next executable step.
 - Investment impulse phrasing such as "full position, rush in" enters market risk judgement and must not become ordinary chat.
 - Investment impulse replies stay compact: state freshness/cache boundary, brake the position impulse, and give a retreat condition instead of dumping the full market brief.
 - "I do not want a news list, should A-shares wait or move" remains market judgement while preserving the style feedback signal.
