@@ -780,7 +780,11 @@ def weixin_command_dispatch(log_path: Path, inbound_time: datetime | None) -> di
     for line in lines:
         if 'msg="audit: command_executed"' not in line:
             continue
-        if "project=VELA" not in line or "command=vela-router" not in line:
+        if "project=VELA" not in line:
+            continue
+        routed_by_command = "command=vela-router" in line
+        routed_by_inbound_router = "type=inbound_router" in line or "command=inbound-router" in line
+        if not (routed_by_command or routed_by_inbound_router):
             continue
         match = CC_LOG_TIME_RE.search(line)
         parsed = parse_timestamp(match.group(1) if match else "")

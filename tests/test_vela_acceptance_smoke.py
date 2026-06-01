@@ -664,6 +664,28 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
         self.assertEqual(report["next_action"]["kind"], "inspect_weixin_reply_dispatch")
         self.assertIn("weixin_command_dispatch", report["next_action"]["checks"])
 
+    def test_runtime_audit_accepts_logged_inbound_router_dispatch(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "cc-connect.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        'time=2026-06-01T20:47:38+08:00 level=INFO msg="message received" platform=weixin content_len=24',
+                        'time=2026-06-01T20:47:39+08:00 level=INFO msg="audit: command_executed" platform=weixin project=VELA command=inbound-router type=inbound_router',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            check = smoke.weixin_command_dispatch(
+                log_path,
+                smoke.parse_timestamp("2026-06-01T20:47:38+08:00"),
+            )
+
+        self.assertTrue(check["ok"])
+        self.assertIn("dispatched", check["detail"])
+
     def test_runtime_audit_requires_weixin_inbound_not_only_internal_session_send(self):
         smoke = load_smoke_module()
         with tempfile.TemporaryDirectory() as tmp:
