@@ -815,6 +815,12 @@ def reply_for(text: str) -> str:
             supporting_context=supporting_context,
             reply_adapter=FallbackReplyAdapter(),
         ).text
+    if intent.name == "style_feedback":
+        return run_layered_response(
+            text,
+            intent=intent.name,
+            reply_adapter=FallbackReplyAdapter(),
+        ).text
     if intent.name == "codex_task":
         return guard_wechat_output(render_codex_bridge(text))
     if intent.name == "normal_chat" and is_fast_greeting(text) and should_force_fallback_for_greeting(text):

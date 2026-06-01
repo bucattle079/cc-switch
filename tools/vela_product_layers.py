@@ -1805,6 +1805,9 @@ def engine_text_for_intent(
         return context.supporting_context.strip(), "local_status", False
     if context.intent == "memory_related" and _is_explicit_memory_instruction(context.message):
         return render_memory_reply(context.message), "local_memory_guard", False
+    if should_use_local_feedback_control(context):
+        result = FallbackReplyAdapter().generate(context)
+        return result.text, result.adapter, result.used_api
     if context.intent in {"project_assistant", "deep_analysis"}:
         result = adapter.generate(context)
         base = analysis_layer(context.message, context.intent, codex_summary=codex_summary)
@@ -1823,6 +1826,23 @@ def engine_text_for_intent(
         return render_vela_persona(packet), result.adapter, result.used_api
     result = adapter.generate(context)
     return result.text, result.adapter, result.used_api
+
+
+def should_use_local_feedback_control(context: ReplyContext) -> bool:
+    if context.intent != "normal_chat":
+        return False
+    joined = "；".join(str(item or "") for item in context.user_preferences)
+    return any(
+        marker in joined
+        for marker in (
+            "style_feedback",
+            "relationship_repair",
+            "behavior_preference",
+            "style_expression",
+            "meaning_misread",
+            "behavior_preference",
+        )
+    )
 
 
 def avoid_repeated_reply(text: str, context: ReplyContext) -> str:

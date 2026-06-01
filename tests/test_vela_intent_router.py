@@ -135,6 +135,17 @@ class VelaIntentRouterTests(unittest.TestCase):
                                     self.assertEqual(run.call_args.kwargs["intent"], expected_intent)
                                     self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
 
+    def test_deepseek_env_does_not_take_over_style_feedback_lane(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，少菜单，多判断。")) as run:
+                reply = router.reply_for("你太像机器人了")
+
+        self.assertEqual(reply, "K，少菜单，多判断。")
+        self.assertEqual(run.call_args.kwargs["intent"], "style_feedback")
+        self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
+
     def test_weather_reply_is_weather_surface_not_menu(self):
         router = load_module(ROUTER, "vela_router")
 

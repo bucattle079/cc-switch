@@ -279,6 +279,40 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertTrue(any(token in next_reply.text for token in ["少菜单", "直接给判断", "机械味", "不像提示牌"]))
         self.assertNotIn("要看盘，说 A股、美股或韩国", next_reply.text)
 
+    def test_recent_style_feedback_overrides_deepseek_for_next_normal_reply(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_feedback_control")
+
+        class FakeDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K。刚忙完？",
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.run_layered_response(
+                "你刚才太像机器人了",
+                intent="style_feedback",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            next_reply = product.run_layered_response(
+                "你好",
+                intent="normal_chat",
+                log_dir=log_dir,
+                reply_adapter=FakeDeepSeekAdapter(),
+            )
+
+        self.assertEqual(next_reply.reply_adapter, "fallback")
+        self.assertTrue(any(token in next_reply.text for token in ["少菜单", "直接给判断", "不解释身份"]))
+        self.assertNotIn("刚忙完", next_reply.text)
+
     def test_two_turn_feedback_replay_proves_behavior_change(self):
         product = load_product_module()
 
@@ -850,6 +884,20 @@ class VelaProductLayerTests(unittest.TestCase):
             self.assertNotIn("这次不像提示牌", text)
             self.assertNotIn("我已校准", text)
             self.assertNotIn("已校准", text)
+
+    def test_feedback_control_variants_do_not_self_certify(self):
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+        variants = (
+            reply_engine.FallbackReplyAdapter.STYLE_FEEDBACK_VARIANTS
+            + reply_engine.FallbackReplyAdapter.BEHAVIOR_FEEDBACK_VARIANTS
+        )
+
+        for text in variants:
+            self.assertNotIn("我会", text)
+            self.assertNotIn("我已", text)
+            self.assertNotIn("已校准", text)
+            self.assertNotIn("下一轮开始", text)
+            self.assertNotIn("机械味已压下去", text)
 
     def test_persona_renderer_keeps_facts_and_applies_vela_voice(self):
         product = load_product_module()
