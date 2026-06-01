@@ -38,6 +38,7 @@ LEAK_TOKENS = (
 )
 
 WINDOWS_PATH_RE = re.compile(r"[A-Za-z]:\\")
+CC_LOG_TIME_RE = re.compile(r"\btime=([^\s]+)")
 SOURCE_NAME_LEAK_TOKENS = (
     "Dana " + "Scul" + "ly",
     "Scul" + "ly",
@@ -295,6 +296,26 @@ def latest_session_reply(sessions_dir: Path) -> dict[str, Any]:
     }
 
 
+def latest_inbound_message(log_path: Path) -> dict[str, Any]:
+    if not log_path.exists():
+        return {"timestamp": "", "found": False}
+    latest: datetime | None = None
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return {"timestamp": "", "found": False}
+    for line in lines:
+        if 'msg="message received"' not in line:
+            continue
+        match = CC_LOG_TIME_RE.search(line)
+        parsed = parse_timestamp(match.group(1) if match else "")
+        if parsed and (latest is None or parsed > latest):
+            latest = parsed
+    if latest is None:
+        return {"timestamp": "", "found": False}
+    return {"timestamp": latest.isoformat(), "found": True}
+
+
 def run_runtime_audit(
     *,
     cc_home: Path | None = None,
@@ -340,6 +361,20 @@ def run_runtime_audit(
         "recent and clean" if reply_recent and reply_clean else "missing, stale, or foreground leak detected",
     )
 
+    inbound = latest_inbound_message(cc_home / "cc-connect.log")
+    inbound_time = parse_timestamp(str(inbound.get("timestamp") or ""))
+    reply_time = parse_timestamp(str(latest_reply.get("timestamp") or ""))
+    inbound_ok = True
+    inbound_detail = "no inbound message in cc-connect log"
+    if inbound_time:
+        inbound_ok = bool(reply_time and reply_time >= inbound_time)
+        inbound_detail = (
+            f"message received at {inbound_time.isoformat()} has a newer/equal session reply"
+            if inbound_ok
+            else f"message received at {inbound_time.isoformat()} is newer than latest VELA session reply"
+        )
+    checks["inbound_to_reply"] = runtime_check(inbound_ok, inbound_detail)
+
     failed = [name for name, check in checks.items() if not check["ok"]]
     return {
         "ok": not failed,
@@ -352,6 +387,7 @@ def run_runtime_audit(
             "preview": preview(str(latest_reply.get("content") or "")),
             "leaks": latest_reply.get("leaks") or [],
         },
+        "latest_inbound": inbound,
     }
 
 

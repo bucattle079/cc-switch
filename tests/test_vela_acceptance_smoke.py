@@ -246,6 +246,67 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
         self.assertIn("cc-connect", command_text)
         self.assertIn("cc-connect-patched", command_text)
 
+    def test_runtime_audit_flags_inbound_message_newer_than_session_reply(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            sessions = cc_home / "sessions"
+            sessions.mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                """
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{args:VELA}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+""".strip(),
+                encoding="utf-8",
+            )
+            (sessions / "VELA_test.json").write_text(
+                json.dumps(
+                    {
+                        "sessions": {
+                            "s1": {
+                                "history": [
+                                    {
+                                        "role": "assistant",
+                                        "content": "K，在。少菜单，直接看目标。",
+                                        "timestamp": "2026-06-01T00:00:00+00:00",
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (cc_home / "cc-connect.log").write_text(
+                'time=2026-06-01T09:00:00+08:00 level=INFO msg="message received" platform=weixin content_len=6\n',
+                encoding="utf-8",
+            )
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=True,
+                max_session_age_hours=9999,
+            )
+
+        self.assertFalse(report["ok"])
+        self.assertIn("inbound_to_reply", report["failed"])
+        self.assertFalse(report["checks"]["inbound_to_reply"]["ok"])
+        self.assertIn("message received", report["checks"]["inbound_to_reply"]["detail"])
+        self.assertNotIn("content_len", report["checks"]["inbound_to_reply"]["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()
