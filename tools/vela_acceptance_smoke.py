@@ -172,6 +172,14 @@ SINGLE_TURN_CASES = [
         "max_reply_chars": 120,
     },
     {
+        "id": "normal_project_opt_out_plain_chat",
+        "message": "先别聊项目，我只是想普通聊会儿",
+        "expected_intent": "normal_chat",
+        "required_reply_tokens": ["我听着", "不用立刻变成任务", "慢慢说"],
+        "forbidden_reply_tokens": ["事实：", "风险：", "下一步：", "项目线", "Codex", "目标", "阻塞", "判断哪部分"],
+        "max_reply_chars": 140,
+    },
+    {
         "id": "daily_info_plain_sort",
         "message": "把这段逻辑整理成三条结论",
         "expected_intent": "daily_info",

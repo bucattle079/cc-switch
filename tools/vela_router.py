@@ -277,6 +277,27 @@ CODEX_KEYWORDS = [
     "电脑控制",
 ]
 PROJECT_KEYWORDS = ["项目", "广告中心", "intelligence center", "规划", "功能如何"]
+PROJECT_OPT_OUT_KEYWORDS = [
+    "先别聊项目",
+    "别聊项目",
+    "不聊项目",
+    "先别推进项目",
+    "别推进项目",
+    "不要项目线",
+    "不是项目任务",
+    "不是让你推进项目",
+    "不要项目",
+]
+PLAIN_CHAT_RESET_KEYWORDS = [
+    "普通聊",
+    "打个招呼",
+    "想普通聊",
+    "聊会儿",
+    "聊一下",
+    "陪我说",
+    "说会儿话",
+    "把话说完",
+]
 DEEP_KEYWORDS = ["深入分析", "深度分析", "地狱验尸", "验尸", "架构判断", "架构", "推演", "复盘", "根因", "策略验尸"]
 STYLE_FEEDBACK_KEYWORDS = [
     "新闻列表",
@@ -486,6 +507,8 @@ def classify_intent(text: str) -> Intent:
         return Intent("deep_analysis", 0.82, deep_focus_tags(norm))
     if contains_any(norm, MEMORY_KEYWORDS) and contains_any(norm, MEMORY_PRIORITY_KEYWORDS):
         return Intent("memory_related", 0.88, memory_focus_tags(norm))
+    if is_project_opt_out_chat(norm):
+        return Intent("normal_chat", 0.86, ["conversation_boundary"])
     if is_context_leakage_feedback(norm):
         return Intent("style_feedback", 0.92, ["memory", "style_feedback", "relationship_repair"])
     if contains_any(norm, CODEX_KEYWORDS):
@@ -525,6 +548,10 @@ def is_context_leakage_feedback(text: str) -> bool:
         text,
         CONTEXT_LEAKAGE_SUBJECT_KEYWORDS,
     )
+
+
+def is_project_opt_out_chat(text: str) -> bool:
+    return contains_any(text, PROJECT_OPT_OUT_KEYWORDS) and contains_any(text, PLAIN_CHAT_RESET_KEYWORDS)
 
 
 def contains_any(text: str, words: list[str]) -> bool:

@@ -554,6 +554,42 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["intent"], "style_feedback")
         self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
 
+    def test_project_opt_out_chat_does_not_route_to_project_assistant(self):
+        router = load_module(ROUTER, "vela_router")
+
+        cases = [
+            "先别聊项目，我只是想普通聊会儿",
+            "先别推进项目，我只是打个招呼",
+            "不要项目线，普通聊一下",
+            "刚刚不是让你推进项目，普通聊",
+        ]
+
+        for text in cases:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, "normal_chat")
+                self.assertFalse(intent.codex_allowed)
+                self.assertFalse(intent.market_allowed)
+
+    def test_project_opt_out_chat_reply_stays_in_companion_lane(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，我听着。你先说。")) as run:
+            reply = router.reply_for("不要项目线，普通聊一下")
+
+        self.assertEqual(reply, "K，我听着。你先说。")
+        self.assertEqual(run.call_args.kwargs["intent"], "normal_chat")
+
+    def test_project_opt_out_chat_real_reply_does_not_turn_into_judgment_intake(self):
+        router = load_module(ROUTER, "vela_router")
+
+        reply = router.reply_for("先别聊项目，我只是想普通聊会儿")
+
+        self.assertTrue(any(token in reply for token in ["我听着", "慢慢说", "不用立刻变成任务"]))
+        for token in ["事实：", "风险：", "下一步：", "项目线", "Codex", "目标", "阻塞", "判断哪部分"]:
+            self.assertNotIn(token, reply)
+
     def test_codex_status_question_routes_to_codex_task_without_market(self):
         router = load_module(ROUTER, "vela_router")
 

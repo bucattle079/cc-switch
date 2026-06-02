@@ -931,6 +931,11 @@ LISTENING_SUPPORT_MARKERS = (
     "别给我任务",
     "先别推进",
     "话说完",
+    "普通聊",
+    "打个招呼",
+    "别聊项目",
+    "不聊项目",
+    "不要项目线",
 )
 
 BOUNDARY_PUSHBACK_MARKERS = (
