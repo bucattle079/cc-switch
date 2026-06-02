@@ -65,7 +65,15 @@ class VelaRealtimeInfoTests(unittest.TestCase):
         self.assertIn("纽约", reply)
         self.assertIn("06:30", reply)
         self.assertIn("UTC-04:00", reply)
-        for token in ["DeepSeek API", "信息不用铺满", "你慢慢说", "先说最烦的点"]:
+        for token in [
+            "DeepSeek API",
+            "信息不用铺满",
+            "你慢慢说",
+            "先说最烦的点",
+            "闲聊模板",
+            "冒充答案",
+            "本地时区直接计算",
+        ]:
             self.assertNotIn(token, reply)
 
     def test_weather_query_uses_live_forecast_payload_not_boundary_template(self):

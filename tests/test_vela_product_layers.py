@@ -301,7 +301,7 @@ class VelaProductLayerTests(unittest.TestCase):
             def generate(self, context):
                 captured["context"] = context
                 return reply_engine.ReplyEngineResult(
-                    text="K，纽约现在约 06:30（UTC-04:00）。判断：按纽约本地时区计算，不拿闲聊挡答案。",
+                    text="K，纽约现在约 06:30（UTC-04:00）。判断：纽约那边还是清晨，发消息可以，电话先别打。",
                     source="fake",
                     used_api=True,
                     adapter=self.name,
@@ -312,7 +312,7 @@ class VelaProductLayerTests(unittest.TestCase):
                 "现在美国时间纽约约是几点",
                 intent="daily_info",
                 log_dir=Path(tmp),
-                supporting_context="K，纽约现在约 06:30（2026-06-02，UTC-04:00）。\n判断：这是按本地时区直接计算的当前时间，不拿闲聊模板冒充答案。",
+                supporting_context="K，纽约现在约 06:30（2026-06-02，UTC-04:00）。\n判断：纽约那边还是清晨；发消息可以，电话先别打，别拿时差考验关系。",
                 reply_adapter=FakeDeepSeekAdapter(),
             )
 
@@ -320,6 +320,8 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertTrue(result.real_gpt_enabled)
         self.assertTrue(result.used_retrieval)
         self.assertIn("UTC-04:00", captured["context"].supporting_context)
+        self.assertNotIn("闲聊模板", result.text)
+        self.assertNotIn("冒充答案", result.text)
         self.assertIn("06:30", result.text)
         self.assertNotIn("信息不用铺满", result.text)
 

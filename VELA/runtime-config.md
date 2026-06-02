@@ -28,7 +28,7 @@ The local cc-connect startup script maps canonical `DEEPSEEK_MODEL` and `DEEPSEE
 
 ## Weather
 
-Weather does not require a dedicated weather API in this VELA runtime. Weather prompts keep their `weather_query` intent so they do not fall into casual chat, but they do not enable external retrieval. VELA must not invent realtime temperature, rain probability, or precise forecast data. The model should answer as a risk-framing companion: state the boundary, then give practical actions such as umbrella, temperature-gap caution, and schedule buffer.
+Weather prompts keep their `weather_query` intent so they do not fall into casual chat. They first use the realtime weather evidence layer, then the dialogue adapter renders VELA's concise answer when configured. If the source is unavailable, the foreground must say so and fall back to conservative travel-risk guidance; VELA must not invent temperature, rain probability, or precise forecast data.
 
 ## Companion Core
 

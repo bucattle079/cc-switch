@@ -315,6 +315,21 @@ def _utc_offset_text(dt: datetime) -> str:
     return f"UTC{sign}{hours:02d}:{minutes:02d}"
 
 
+def _time_query_judgment(label: str, local: datetime) -> str:
+    hour = local.hour
+    if 5 <= hour < 8:
+        return f"{label}那边还是清晨；发消息可以，电话先别打，别拿时差考验关系。"
+    if 8 <= hour < 12:
+        return f"{label}那边是上午，可以联系；正式事先发一句铺垫，别直接把人从日程里拽出来。"
+    if 12 <= hour < 14:
+        return f"{label}那边在午间；急事发消息，电话晚一点更稳。"
+    if 14 <= hour < 18:
+        return f"{label}那边是下午，沟通窗口还开着；要谈正事，现在能推进。"
+    if 18 <= hour < 22:
+        return f"{label}那边到晚上了；轻消息可以，硬任务别压过去。"
+    return f"{label}那边已经是深夜；除非真急，别把时差当成执行力。"
+
+
 def render_time_query_reply(text: str, *, now_utc: datetime | None = None) -> str:
     label, timezone_name = timezone_for_time_query(text)
     local = _now_utc(now_utc).astimezone(ZoneInfo(timezone_name))
@@ -323,5 +338,5 @@ def render_time_query_reply(text: str, *, now_utc: datetime | None = None) -> st
     offset = _utc_offset_text(local)
     return (
         f"K，{label}现在约 {time_text}（{date_text}，{offset}）。\n"
-        "判断：这是按本地时区直接计算的当前时间，不拿闲聊模板冒充答案。"
+        f"判断：{_time_query_judgment(label, local)}"
     )

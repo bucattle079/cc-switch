@@ -679,7 +679,7 @@ class VelaIntentRouterTests(unittest.TestCase):
 
     def test_current_time_question_passes_fact_context_to_deepseek_layer(self):
         router = load_module(ROUTER, "vela_router")
-        fact = "K，纽约现在约 06:30（2026-06-02，UTC-04:00）。\n判断：按本地时区计算。"
+        fact = "K，纽约现在约 06:30（2026-06-02，UTC-04:00）。\n判断：纽约那边还是清晨；发消息可以，电话先别打。"
 
         with patch.object(router, "render_time_query_reply", return_value=fact):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，纽约现在约 06:30。")) as run:
