@@ -664,6 +664,87 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
         self.assertEqual(report["next_action"]["kind"], "inspect_weixin_reply_dispatch")
         self.assertIn("weixin_command_dispatch", report["next_action"]["checks"])
 
+    def test_runtime_audit_treats_inbound_before_service_start_as_not_current(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            sessions = cc_home / "sessions"
+            sessions.mkdir(parents=True)
+            state_dir = cc_home / "weixin" / "codex-wechat" / "bot"
+            state_dir.mkdir(parents=True)
+            (state_dir / "get_updates.buf").write_text("poll", encoding="utf-8")
+            (cc_home / "config.toml").write_text(
+                f"""
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args}}}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args:VELA}}}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+
+[[projects.platforms]]
+type = "weixin"
+
+[projects.platforms.options]
+state_dir = "{str(state_dir).replace("\\", "/")}"
+""".strip(),
+                encoding="utf-8",
+            )
+            (sessions / "VELA_test.json").write_text(
+                json.dumps(
+                    {
+                        "sessions": {
+                            "s1": {
+                                "history": [
+                                    {
+                                        "role": "assistant",
+                                        "content": "K，在。",
+                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (cc_home / "cc-connect.log").write_text(
+                "\n".join(
+                    [
+                        'time=2026-06-01T20:47:38+08:00 level=INFO msg="message received" platform=weixin content_len=24',
+                        'time=2026-06-01T20:47:39+08:00 level=INFO msg="audit: command_executed" platform=weixin project=VELA command=vela-router type=custom',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=True,
+                process_started_at="2026-06-01T21:08:40+08:00",
+                max_session_age_hours=24,
+            )
+
+        self.assertFalse(report["ok"])
+        self.assertFalse(report["checks"]["weixin_inbound_seen"]["ok"])
+        self.assertIn("older than current cc-connect process start", report["checks"]["weixin_inbound_seen"]["detail"])
+        self.assertTrue(report["checks"]["weixin_command_dispatch"]["ok"])
+        self.assertEqual(report["checks"]["weixin_command_dispatch"]["detail"], "no inbound to trace")
+        self.assertTrue(report["checks"]["inbound_to_reply"]["ok"])
+        self.assertEqual(report["next_action"]["kind"], "send_weixin_prompt")
+        self.assertEqual(report["latest_inbound"]["timestamp"], "2026-06-01T12:47:38+00:00")
+        self.assertEqual(report["latest_inbound"]["current_window_timestamp"], "")
+        self.assertEqual(report["latest_inbound"]["service_started_at"], "2026-06-01T13:08:40+00:00")
+
     def test_runtime_audit_accepts_logged_inbound_router_dispatch(self):
         smoke = load_smoke_module()
         with tempfile.TemporaryDirectory() as tmp:

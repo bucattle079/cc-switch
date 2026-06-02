@@ -574,7 +574,7 @@ def runtime_next_action(failed: list[str]) -> dict[str, Any]:
     if "weixin_inbound_seen" in failed or "latest_session_reply" in failed:
         return {
             "kind": "send_weixin_prompt",
-            "prompts": ["你好 VELA", "这是实时的吗？", "CODEX/"],
+            "prompts": ["你好 VELA", "今天的A股市场如何", "这是实时的吗？", "CODEX/"],
             "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
             "wait_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90",
         }
@@ -641,6 +641,28 @@ def detect_cc_connect_process_count() -> int:
     if completed.returncode != 0:
         return 0
     return len([line for line in (completed.stdout or "").splitlines() if line.strip()])
+
+
+def detect_cc_connect_process_started_at() -> datetime | None:
+    if os.name != "nt":
+        return None
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "$p=Get-Process cc-connect,cc-connect-patched -ErrorAction SilentlyContinue | "
+            "Sort-Object StartTime -Descending | Select-Object -First 1; "
+            "if ($p) { $p.StartTime.ToUniversalTime().ToString('o') }",
+        ],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    return parse_timestamp((completed.stdout or "").strip())
 
 
 def cc_connect_process_check(
@@ -944,6 +966,7 @@ def run_runtime_audit(
     cc_home: Path | None = None,
     process_running: bool | None = None,
     process_count: int | None = None,
+    process_started_at: datetime | str | None = None,
     max_session_age_hours: int = 48,
     learning_loop_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -986,6 +1009,12 @@ def run_runtime_audit(
         process_running=process_running,
         process_count=process_count,
     )
+    if isinstance(process_started_at, str):
+        service_started_at = parse_timestamp(process_started_at)
+    else:
+        service_started_at = process_started_at
+    if service_started_at is None and process_running is None and process_count is None:
+        service_started_at = detect_cc_connect_process_started_at()
 
     latest_reply = latest_session_reply(cc_home / "sessions")
     age = latest_reply.get("age_hours")
@@ -1001,13 +1030,24 @@ def run_runtime_audit(
     )
 
     inbound = latest_inbound_message(cc_home / "cc-connect.log")
-    inbound_time = parse_timestamp(str(inbound.get("timestamp") or ""))
+    latest_inbound_time = parse_timestamp(str(inbound.get("timestamp") or ""))
+    inbound_time = latest_inbound_time
+    inbound_before_current_service = bool(
+        latest_inbound_time and service_started_at and latest_inbound_time < service_started_at
+    )
+    if inbound_before_current_service:
+        inbound_time = None
     checks["weixin_inbound_seen"] = runtime_check(
         bool(inbound_time),
         (
             f"Weixin inbound observed at {inbound_time.isoformat()}"
             if inbound_time
-            else "no Weixin inbound message in cc-connect log; send a fresh WeChat prompt to verify live foreground"
+            else (
+                "latest Weixin inbound is older than current cc-connect process start; "
+                "send a fresh WeChat prompt to verify live foreground"
+                if inbound_before_current_service
+                else "no Weixin inbound message in cc-connect log; send a fresh WeChat prompt to verify live foreground"
+            )
         ),
     )
     reply_time = parse_timestamp(str(latest_reply.get("timestamp") or ""))
@@ -1058,7 +1098,11 @@ def run_runtime_audit(
             "preview": preview(str(latest_reply.get("content") or "")),
             "leaks": latest_reply.get("leaks") or [],
         },
-        "latest_inbound": inbound,
+        "latest_inbound": {
+            **inbound,
+            "current_window_timestamp": inbound_time.isoformat() if inbound_time else "",
+            "service_started_at": service_started_at.isoformat() if service_started_at else "",
+        },
     }
 
 
