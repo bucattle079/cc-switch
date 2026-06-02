@@ -194,15 +194,24 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertEqual(now_searchable.model_adapter, "deepseek_chat")
         self.assertTrue(now_searchable.allow_retrieval)
 
-        for message in ["现在这个政策怎么样", "现在帮我搜一下OpenAI"]:
+        for message in [
+            "现在这个政策怎么样",
+            "现在帮我搜一下OpenAI",
+            "最新小米汽车有什么公告",
+            "目前小米汽车有什么公告",
+            "当前小米汽车有什么公告",
+            "实时小米汽车有什么公告",
+        ]:
             with self.subTest(message=message):
                 selection = product.select_model_and_tools("daily_info", env=env, message=message)
                 self.assertEqual(selection.model_adapter, "deepseek_chat")
                 self.assertTrue(selection.allow_retrieval)
 
-        now_world = product.select_model_and_tools("world_brief", env=env, message="现在日本地震新闻")
-        self.assertEqual(now_world.model_adapter, "deepseek_chat")
-        self.assertTrue(now_world.allow_retrieval)
+        for message in ["现在日本地震新闻", "最新日本地震新闻"]:
+            with self.subTest(message=message):
+                now_world = product.select_model_and_tools("world_brief", env=env, message=message)
+                self.assertEqual(now_world.model_adapter, "deepseek_chat")
+                self.assertTrue(now_world.allow_retrieval)
 
         codex = product.select_model_and_tools("codex_task", env=env)
         self.assertEqual(codex.model_adapter, "codex_bridge")
@@ -2136,7 +2145,9 @@ class VelaProductLayerTests(unittest.TestCase):
 
         self.assertNotIn("要看盘，说 A股、美股或韩国", cleaned)
         self.assertNotIn("要动 Codex，用 /CODEX", cleaned)
-        self.assertIn("菜单", cleaned)
+        self.assertNotIn("菜单", cleaned)
+        self.assertNotIn("拦截", cleaned)
+        self.assertIn("K", cleaned)
 
     def test_dialogue_guardrail_removes_performance_markers(self):
         product = load_product_module()

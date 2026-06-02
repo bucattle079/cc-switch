@@ -137,11 +137,11 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "weather_jinjiang",
             "market_add_position",
             "market_current_a_share_realtime_compact",
-            "market_current_news_realtime_compact",
             "freshness_status",
         }
         now_info_ids = {
             "market_current_now_info_realtime_compact",
+            "market_current_news_realtime_compact",
             "market_current_us_info_not_a_share",
             "market_current_global_not_a_share",
         }

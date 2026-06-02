@@ -23,7 +23,7 @@ VELA_DIR = ROOT / "VELA"
 LEARNING_LOOP_DIR = VELA_DIR / "learning-loop"
 VOICE_CONTRACT = VELA_DIR / "voice-contract.json"
 
-CURRENT_INFO_TRIGGERS = ("现在",)
+CURRENT_INFO_TRIGGERS = ("现在", "目前", "当前", "当下", "此刻", "最新", "实时")
 CURRENT_INFO_INTENTS = {"daily_info", "market_brief", "world_brief", "weather_query"}
 CURRENT_INFO_SURFACE_MARKERS = (
     "资讯",
@@ -421,7 +421,7 @@ def guard_layered_output(
     if intent == "normal_chat" and any(
         token in str(text or "") for token in ("要看盘，说 A股、美股或韩国", "要动 Codex，用 /CODEX")
     ):
-        return guard_wechat_output(ensure_k_address("菜单口吻已拦截。在线，说目标，我来收束。"), max_chars=max_chars)
+        return guard_wechat_output(ensure_k_address("在线。先不拉资讯或工程状态；你说当下这件事，我给判断。"), max_chars=max_chars)
     if intent == "normal_chat" and any(marker in lowered for marker in codex_status_leak_markers):
         return guard_wechat_output(ensure_k_address("在线。先不拉工程状态；你说目标，我给判断。"), max_chars=max_chars)
     if intent != "codex_task" and used_codex:
@@ -902,7 +902,9 @@ def _has_any(text: str, markers: Iterable[str]) -> bool:
 
 def is_current_information_request(message: str, intent: str) -> bool:
     text = " ".join(str(message or "").split())
-    if not _has_any(text, CURRENT_INFO_TRIGGERS):
+    non_realtime_triggers = tuple(marker for marker in CURRENT_INFO_TRIGGERS if marker != "实时")
+    has_time_marker = _has_any(text, non_realtime_triggers) or ("实时" in text and "不是实时" not in text)
+    if not has_time_marker:
         return False
     if intent not in CURRENT_INFO_INTENTS:
         return False

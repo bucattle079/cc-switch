@@ -182,6 +182,7 @@ REFRESH_KEYWORDS = [
     "要实时",
 ]
 CURRENT_MARKET_TIME_KEYWORDS = ["今天", "现在", "目前", "当前", "当下", "此刻", "最新", "实时", "盘中", "早盘", "午盘", "收盘"]
+CURRENT_INFO_TIME_KEYWORDS = ["现在", "目前", "当前", "当下", "此刻", "最新", "实时"]
 CURRENT_MARKET_SURFACE_KEYWORDS = [
     "a股",
     "a 股",
@@ -451,8 +452,6 @@ def classify_intent(text: str) -> Intent:
         return Intent("weather_query", 0.9, weather_focus_tags(raw))
     if is_market_refresh_request(norm):
         return Intent("market_refresh", 0.94, market_focus_tags(norm), market_allowed=True)
-    if is_freshness_question(norm) and not is_market_summary_request(norm):
-        return Intent("freshness_status", 0.95, ["freshness"])
     if contains_any(norm, DEEP_KEYWORDS):
         return Intent("deep_analysis", 0.82, deep_focus_tags(norm))
     if contains_any(norm, MEMORY_KEYWORDS) and contains_any(norm, MEMORY_PRIORITY_KEYWORDS):
@@ -462,9 +461,11 @@ def classify_intent(text: str) -> Intent:
     if contains_any(norm, PROJECT_KEYWORDS) and not is_explicit_market_judgment_request(norm):
         return Intent("project_assistant", 0.78, ["project"])
     if is_current_world_info_request(norm):
-        return Intent("world_brief", 0.84, ["geopolitics", "global"])
+        return Intent("world_brief", 0.84, ["geopolitics", "global", "current_info"])
     if is_current_general_info_request(norm):
         return Intent("daily_info", 0.82, ["daily_info", "current_info"])
+    if is_freshness_question(norm) and not is_market_summary_request(norm):
+        return Intent("freshness_status", 0.95, ["freshness"])
     if is_explicit_market_judgment_request(norm):
         tags = market_focus_tags(norm)
         return Intent("market_brief", 0.9, tags, market_allowed=True)
@@ -526,9 +527,16 @@ def is_current_market_query(text: str) -> bool:
     return contains_any(norm, CURRENT_MARKET_TIME_KEYWORDS) and contains_any(norm, CURRENT_MARKET_SURFACE_KEYWORDS)
 
 
+def has_current_info_time_word(text: str) -> bool:
+    norm = normalize(text)
+    if contains_any(norm, [word for word in CURRENT_INFO_TIME_KEYWORDS if word != "实时"]):
+        return True
+    return "实时" in norm and "不是实时" not in norm
+
+
 def is_current_world_info_request(text: str) -> bool:
     norm = normalize(text)
-    if "现在" not in norm:
+    if not has_current_info_time_word(norm):
         return False
     if contains_any(norm, CURRENT_MARKET_HARD_SURFACE_KEYWORDS):
         return False
@@ -537,7 +545,7 @@ def is_current_world_info_request(text: str) -> bool:
 
 def is_current_general_info_request(text: str) -> bool:
     norm = normalize(text)
-    if "现在" not in norm:
+    if not has_current_info_time_word(norm):
         return False
     if contains_any(norm, CURRENT_MARKET_HARD_SURFACE_KEYWORDS):
         return False

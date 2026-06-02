@@ -509,6 +509,16 @@ class VelaVoiceContractTests(unittest.TestCase):
         self.assertIn("render_dialogue_quality_gate", text)
         self.assertIn("audit_latest_cc_connect_reply", text)
 
+    def test_project_assistant_contract_is_not_tied_to_legacy_project_names(self):
+        spec = importlib.util.spec_from_file_location("update_vela_dialogue_contracts", SYNC_SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        self.assertIsNotNone(spec.loader)
+        spec.loader.exec_module(module)
+
+        self.assertIn("project_assistant", module.PUBLIC_MODES)
+        self.assertNotIn("AugSun / ROLLQIIA project discussion", module.PUBLIC_MODES)
+        self.assertNotIn("AugSun / ROLLQIIA project discussion", PERSONALITY.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -229,6 +229,24 @@ class VelaIntentRouterTests(unittest.TestCase):
                 self.assertFalse(intent.market_allowed)
                 self.assertFalse(intent.codex_allowed)
 
+    def test_current_general_information_synonyms_route_to_daily_info_not_freshness(self):
+        router = load_module(ROUTER, "vela_router")
+
+        for text in [
+            "最新小米汽车有什么公告",
+            "目前小米汽车有什么公告",
+            "当前小米汽车有什么公告",
+            "实时小米汽车有什么公告",
+            "最新政策有没有新公告",
+        ]:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, "daily_info", text)
+                self.assertIn("current_info", intent.focus_tags)
+                self.assertFalse(intent.market_allowed)
+                self.assertFalse(intent.codex_allowed)
+
     def test_now_world_event_information_routes_to_world_brief_not_market(self):
         router = load_module(ROUTER, "vela_router")
 
@@ -237,6 +255,17 @@ class VelaIntentRouterTests(unittest.TestCase):
                 intent = router.classify_intent(text)
 
                 self.assertEqual(intent.name, "world_brief", text)
+                self.assertFalse(intent.market_allowed)
+
+    def test_current_world_event_synonyms_route_to_world_brief_not_market(self):
+        router = load_module(ROUTER, "vela_router")
+
+        for text in ["最新日本地震新闻", "目前中东冲突有什么新消息"]:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, "world_brief", text)
+                self.assertIn("current_info", intent.focus_tags)
                 self.assertFalse(intent.market_allowed)
 
     def test_natural_market_time_phrases_route_to_market_brief(self):
