@@ -361,6 +361,52 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("判断：", result.text)
         self.assertIn("下一步：", result.text)
 
+    def test_now_a_share_object_query_calls_deepseek_before_local_fallback(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+        captured = {}
+
+        class CurrentInfoDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                captured["context"] = context
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "实时性：DeepSeek API 已接管现在类A股问题。\n"
+                        "判断：先看实时源边界，不把本地缓存冒充现在盘面。\n"
+                        "下一步：需要细分板块时再展开。"
+                    ),
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        supporting_context = "\n".join(
+            [
+                "实时源：暂不可用；缓存降级。",
+                "最近缓存：2026-06-02 09:00 北京时间，只做方向判断。",
+                "判断：实时源没回来前，不下新的盘中结论。",
+                "下一步：先等实时源恢复。",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "现在A股怎么样",
+                intent="market_brief",
+                log_dir=Path(tmp),
+                supporting_context=supporting_context,
+                reply_adapter=CurrentInfoDeepSeekAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "deepseek_chat")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertTrue(result.used_retrieval)
+        self.assertTrue(captured["context"].tool_policy.allow_retrieval)
+        self.assertIn("DeepSeek API 已接管", result.text)
+        self.assertNotEqual(result.text, supporting_context)
+
     def test_now_market_information_discards_bad_deepseek_frontstage(self):
         product = load_product_module()
         reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")

@@ -326,6 +326,14 @@ SINGLE_TURN_CASES = [
         "max_reply_chars": 620,
     },
     {
+        "id": "market_current_a_share_object_now_uses_deepseek_chain",
+        "message": "现在A股怎么样",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["实时源", "A股", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["以下基于最近缓存", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
+        "max_reply_chars": 620,
+    },
+    {
         "id": "market_current_news_realtime_compact",
         "message": "当前市场新闻",
         "expected_intent": "market_brief",

@@ -141,6 +141,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         }
         now_info_ids = {
             "market_current_now_info_realtime_compact",
+            "market_current_a_share_object_now_uses_deepseek_chain",
             "market_current_news_realtime_compact",
             "market_current_us_info_not_a_share",
             "market_current_global_not_a_share",

@@ -55,6 +55,25 @@ CURRENT_INFO_SURFACE_MARKERS = (
     "查询",
     "查一下",
 )
+CURRENT_MARKET_OBJECT_SURFACE_MARKERS = (
+    "A股",
+    "A 股",
+    "上证",
+    "沪深300",
+    "深成指",
+    "创业板",
+    "美股",
+    "NASDAQ",
+    "S&P",
+    "SP500",
+    "韩国",
+    "KOSPI",
+    "日本",
+    "NIKKEI",
+    "全球",
+    "外盘",
+    "盘面",
+)
 
 CONFIRMED_CACHE_SLOTS = ["09:00", "12:30", "17:00"]
 
@@ -1085,6 +1104,8 @@ def is_current_information_request(message: str, intent: str) -> bool:
         return False
     if intent not in CURRENT_INFO_INTENTS:
         return False
+    if intent == "market_brief" and _has_any(text, CURRENT_MARKET_OBJECT_SURFACE_MARKERS):
+        return True
     return _has_any(text, CURRENT_INFO_SURFACE_MARKERS)
 
 
