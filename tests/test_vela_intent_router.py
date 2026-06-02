@@ -592,6 +592,40 @@ class VelaIntentRouterTests(unittest.TestCase):
                 self.assertFalse(intent.codex_allowed)
                 self.assertFalse(intent.market_allowed)
 
+    def test_tool_surface_opt_out_chat_does_not_route_to_market_codex_or_current_info(self):
+        router = load_module(ROUTER, "vela_router")
+
+        cases = [
+            "先别看市场，我只是想普通聊一下",
+            "不要市场线，先陪我说会儿话",
+            "不要 CODEX 线，普通聊一下",
+            "先别用 Codex，我只是打个招呼",
+            "现在别查资料，先听我说",
+            "现在不用检索，普通聊一下",
+        ]
+
+        for text in cases:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, "normal_chat")
+                self.assertFalse(intent.codex_allowed)
+                self.assertFalse(intent.market_allowed)
+
+    def test_tool_surface_opt_out_does_not_weaken_explicit_tool_requests(self):
+        router = load_module(ROUTER, "vela_router")
+
+        codex = router.classify_intent("CODEX/")
+        current = router.classify_intent("现在帮我查一下英伟达最新消息")
+        market = router.classify_intent("今天的市场资讯")
+
+        self.assertEqual(codex.name, "codex_task")
+        self.assertTrue(codex.codex_allowed)
+        self.assertEqual(current.name, "daily_info")
+        self.assertIn("current_info", current.focus_tags)
+        self.assertEqual(market.name, "market_brief")
+        self.assertTrue(market.market_allowed)
+
     def test_project_opt_out_chat_reply_stays_in_companion_lane(self):
         router = load_module(ROUTER, "vela_router")
 

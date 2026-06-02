@@ -289,6 +289,34 @@ PROJECT_OPT_OUT_KEYWORDS = [
     "不是让你推进项目",
     "不要项目",
 ]
+TOOL_SURFACE_OPT_OUT_KEYWORDS = [
+    "先别看市场",
+    "别看市场",
+    "不要看市场",
+    "不用看市场",
+    "不要市场线",
+    "不要市场",
+    "先别用 codex",
+    "别用 codex",
+    "不用 codex",
+    "不要 codex",
+    "先别用codex",
+    "别用codex",
+    "不用codex",
+    "不要codex",
+    "先别查",
+    "别查",
+    "不用查",
+    "不要查",
+    "先别检索",
+    "别检索",
+    "不用检索",
+    "不要检索",
+    "先别搜",
+    "别搜",
+    "不用搜",
+    "不要搜",
+]
 PLAIN_CHAT_RESET_KEYWORDS = [
     "普通聊",
     "打个招呼",
@@ -297,6 +325,8 @@ PLAIN_CHAT_RESET_KEYWORDS = [
     "聊一下",
     "陪我说",
     "说会儿话",
+    "听我说",
+    "先听我说",
     "把话说完",
 ]
 DEEP_KEYWORDS = ["深入分析", "深度分析", "地狱验尸", "验尸", "架构判断", "架构", "推演", "复盘", "根因", "策略验尸"]
@@ -500,6 +530,8 @@ def classify_intent(text: str) -> Intent:
         return Intent("codex_task", 0.8, ["slash_command"], codex_allowed=True)
     if norm == "vela" or norm in GREETING_SET or norm in {"你好", "在吗", "在么", "hello", "hi"}:
         return Intent("normal_chat", 1.0, [])
+    if is_tool_surface_opt_out_chat(norm):
+        return Intent("normal_chat", 0.87, ["conversation_boundary"])
     if is_weather_query(raw):
         return Intent("weather_query", 0.9, weather_focus_tags(raw))
     if is_market_refresh_request(norm):
@@ -555,6 +587,10 @@ def is_context_leakage_feedback(text: str) -> bool:
 
 def is_project_opt_out_chat(text: str) -> bool:
     return contains_any(text, PROJECT_OPT_OUT_KEYWORDS) and contains_any(text, PLAIN_CHAT_RESET_KEYWORDS)
+
+
+def is_tool_surface_opt_out_chat(text: str) -> bool:
+    return contains_any(text, TOOL_SURFACE_OPT_OUT_KEYWORDS) and contains_any(text, PLAIN_CHAT_RESET_KEYWORDS)
 
 
 def contains_any(text: str, words: list[str]) -> bool:
