@@ -185,6 +185,16 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertEqual(now_daily.model_adapter, "deepseek_chat")
         self.assertTrue(now_daily.allow_retrieval)
 
+        now_searchable = product.select_model_and_tools("daily_info", env=env, message="现在帮我查这个政策")
+        self.assertEqual(now_searchable.model_adapter, "deepseek_chat")
+        self.assertTrue(now_searchable.allow_retrieval)
+
+        for message in ["现在这个政策怎么样", "现在帮我搜一下OpenAI"]:
+            with self.subTest(message=message):
+                selection = product.select_model_and_tools("daily_info", env=env, message=message)
+                self.assertEqual(selection.model_adapter, "deepseek_chat")
+                self.assertTrue(selection.allow_retrieval)
+
         now_world = product.select_model_and_tools("world_brief", env=env, message="现在日本地震新闻")
         self.assertEqual(now_world.model_adapter, "deepseek_chat")
         self.assertTrue(now_world.allow_retrieval)

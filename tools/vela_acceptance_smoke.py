@@ -172,6 +172,30 @@ SINGLE_TURN_CASES = [
         "max_reply_chars": 260,
     },
     {
+        "id": "daily_info_now_search_policy_uses_deepseek_chain",
+        "message": "现在帮我查这个政策",
+        "expected_intent": "daily_info",
+        "required_reply_tokens": ["DeepSeek API", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
+        "max_reply_chars": 260,
+    },
+    {
+        "id": "daily_info_now_policy_question_uses_deepseek_chain",
+        "message": "现在这个政策怎么样",
+        "expected_intent": "daily_info",
+        "required_reply_tokens": ["DeepSeek API", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
+        "max_reply_chars": 260,
+    },
+    {
+        "id": "daily_info_now_search_openai_uses_deepseek_chain",
+        "message": "现在帮我搜一下OpenAI",
+        "expected_intent": "daily_info",
+        "required_reply_tokens": ["DeepSeek API", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
+        "max_reply_chars": 260,
+    },
+    {
         "id": "world_info_now_event_not_market",
         "message": "现在日本地震新闻",
         "expected_intent": "world_brief",
@@ -590,7 +614,7 @@ def runtime_next_action(failed: list[str]) -> dict[str, Any]:
     if "weixin_inbound_seen" in failed or "latest_session_reply" in failed:
         return {
             "kind": "send_weixin_prompt",
-            "prompts": ["你好 VELA", "现在DeepSeek有什么新消息", "今天的A股市场如何", "这是实时的吗？", "CODEX/"],
+            "prompts": ["你好 VELA", "现在DeepSeek有什么新消息", "现在帮我查这个政策", "今天的A股市场如何", "这是实时的吗？", "CODEX/"],
             "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
             "wait_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90",
         }

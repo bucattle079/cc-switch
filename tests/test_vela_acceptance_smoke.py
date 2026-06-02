@@ -751,6 +751,7 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
         self.assertTrue(report["checks"]["inbound_to_reply"]["ok"])
         self.assertEqual(report["next_action"]["kind"], "send_weixin_prompt")
         self.assertIn("现在DeepSeek有什么新消息", report["next_action"]["prompts"])
+        self.assertIn("现在帮我查这个政策", report["next_action"]["prompts"])
         self.assertEqual(report["latest_inbound"]["timestamp"], "2026-06-01T12:47:38+00:00")
         self.assertEqual(report["latest_inbound"]["current_window_timestamp"], "")
         self.assertEqual(report["latest_inbound"]["service_started_at"], "2026-06-01T13:08:40+00:00")
@@ -933,12 +934,14 @@ token = "test-token"
         self.assertEqual(report["next_action"]["kind"], "send_weixin_prompt")
         self.assertIn("你好 VELA", report["next_action"]["prompts"])
         self.assertIn("现在DeepSeek有什么新消息", report["next_action"]["prompts"])
+        self.assertIn("现在帮我查这个政策", report["next_action"]["prompts"])
         self.assertIn("--runtime-audit --json", report["next_action"]["verify_command"])
         self.assertIn("--wait-live-seconds 90", report["next_action"]["wait_command"])
         rendered = smoke.render_runtime_report(report)
         self.assertIn("next_action: send_weixin_prompt", rendered)
         self.assertIn("你好 VELA", rendered)
         self.assertIn("现在DeepSeek有什么新消息", rendered)
+        self.assertIn("现在帮我查这个政策", rendered)
         self.assertIn("wait_verify:", rendered)
 
     def test_runtime_audit_dry_runs_configured_router_command(self):

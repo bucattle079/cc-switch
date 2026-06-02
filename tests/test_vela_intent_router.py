@@ -195,7 +195,15 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_now_general_information_routes_to_daily_info_not_market(self):
         router = load_module(ROUTER, "vela_router")
 
-        for text in ["现在特斯拉有什么新闻", "现在DeepSeek有什么新消息", "现在这个政策发生了什么"]:
+        for text in [
+            "现在特斯拉有什么新闻",
+            "现在DeepSeek有什么新消息",
+            "现在这个政策发生了什么",
+            "现在这个政策怎么样",
+            "现在帮我查这个政策",
+            "现在帮我搜一下OpenAI",
+            "现在帮我搜一下OpenAI消息",
+        ]:
             with self.subTest(text):
                 intent = router.classify_intent(text)
 
