@@ -1970,9 +1970,36 @@ def current_info_reply_has_frontstage_hazards(text: str) -> bool:
     )
     if any(token.lower() in raw.lower() for token in hazards):
         return True
+    if has_raw_english_frontstage_sentence(raw):
+        return True
     has_judgment = "判断：" in raw or "结论：" in raw
     has_next = "下一步：" in raw or "下一观察" in raw
     return not (has_judgment and has_next)
+
+
+def has_raw_english_frontstage_sentence(text: str) -> bool:
+    allowed_terms = {
+        "api",
+        "app",
+        "codex",
+        "deepseek",
+        "chatgpt",
+        "openai",
+        "vela",
+        "gpt",
+        "ai",
+        "etf",
+        "usd",
+        "wti",
+        "s&p",
+        "nasdaq",
+    }
+    for line in str(text or "").replace("\r", "\n").split("\n"):
+        words = re.findall(r"\b[A-Za-z][A-Za-z0-9&+.-]{1,}\b", line)
+        raw_words = [word for word in words if word.lower().strip(".") not in allowed_terms]
+        if len(raw_words) >= 5:
+            return True
+    return False
 
 
 def current_info_fallback_text(context: ReplyContext, adapter_name: str) -> str:

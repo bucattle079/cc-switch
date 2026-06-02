@@ -771,6 +771,7 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
         self.assertIn("现在DeepSeek有什么新消息", report["next_action"]["prompts"])
         self.assertIn("现在小米汽车有什么公告", report["next_action"]["prompts"])
         self.assertIn("现在ChatGPT有什么更新", report["next_action"]["prompts"])
+        self.assertIn("现在纽约冷吗", report["next_action"]["prompts"])
         self.assertIn("现在帮我查这个政策", report["next_action"]["prompts"])
         self.assertEqual(report["latest_inbound"]["timestamp"], "2026-06-01T12:47:38+00:00")
         self.assertEqual(report["latest_inbound"]["current_window_timestamp"], "")
@@ -956,6 +957,7 @@ token = "test-token"
         self.assertIn("现在DeepSeek有什么新消息", report["next_action"]["prompts"])
         self.assertIn("现在小米汽车有什么公告", report["next_action"]["prompts"])
         self.assertIn("现在ChatGPT有什么更新", report["next_action"]["prompts"])
+        self.assertIn("现在纽约冷吗", report["next_action"]["prompts"])
         self.assertIn("现在帮我查这个政策", report["next_action"]["prompts"])
         self.assertIn("--runtime-audit --json", report["next_action"]["verify_command"])
         self.assertIn("--wait-live-seconds 90", report["next_action"]["wait_command"])
@@ -965,6 +967,7 @@ token = "test-token"
         self.assertIn("现在DeepSeek有什么新消息", rendered)
         self.assertIn("现在小米汽车有什么公告", rendered)
         self.assertIn("现在ChatGPT有什么更新", rendered)
+        self.assertIn("现在纽约冷吗", rendered)
         self.assertIn("现在帮我查这个政策", rendered)
         self.assertIn("wait_verify:", rendered)
 

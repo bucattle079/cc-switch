@@ -376,6 +376,38 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("以下基于最近缓存", result.text)
         self.assertNotIn("状态边界", result.text)
 
+    def test_now_info_discards_raw_english_deepseek_frontstage(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+
+        class EnglishRawDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "Judgment: Nvidia shares rise after earnings while traders await Fed signal.\n"
+                        "判断：这句看似有结论，但夹了英文生肉。\n"
+                        "下一步：改成中文短判断再给用户。"
+                    ),
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "现在DeepSeek有什么新消息",
+                intent="daily_info",
+                log_dir=Path(tmp),
+                reply_adapter=EnglishRawDeepSeekAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "deepseek_chat_current_info_fallback")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertNotIn("Nvidia shares rise", result.text)
+        self.assertIn("DeepSeek 已被调用", result.text)
+
     def test_now_market_information_without_deepseek_declares_local_degrade(self):
         product = load_product_module()
         supporting_context = "\n".join(

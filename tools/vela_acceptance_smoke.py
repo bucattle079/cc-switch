@@ -654,6 +654,7 @@ def runtime_next_action(failed: list[str]) -> dict[str, Any]:
                 "现在DeepSeek有什么新消息",
                 "现在小米汽车有什么公告",
                 "现在ChatGPT有什么更新",
+                "现在纽约冷吗",
                 "现在帮我查这个政策",
                 "今天的A股市场如何",
                 "这是实时的吗？",
