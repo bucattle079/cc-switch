@@ -145,6 +145,15 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "market_current_us_info_not_a_share",
             "market_current_global_not_a_share",
         }
+        current_daily_info_ids = {
+            "daily_info_now_general_news_uses_deepseek_chain",
+            "daily_info_now_search_policy_uses_deepseek_chain",
+            "daily_info_now_policy_question_uses_deepseek_chain",
+            "daily_info_now_search_openai_uses_deepseek_chain",
+            "daily_info_now_company_notice_uses_deepseek_chain",
+            "daily_info_now_app_update_uses_deepseek_chain",
+            "world_info_now_event_not_market",
+        }
         for case in report["cases"]:
             if case["id"] in hard_lane_ids:
                 with self.subTest(case["id"]):
@@ -164,6 +173,14 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
                     self.assertIn(adapter_flag, {"adapter:deepseek_chat", "adapter:fallback_current_info_fallback"})
                     self.assertNotEqual(adapter_flag, "adapter:local_market")
                     self.assertIn("实时源", case["reply_preview"])
+                    self.assertFalse(case["leaks"], case)
+            if case["id"] in current_daily_info_ids:
+                with self.subTest(case["id"]):
+                    adapter_flag = case["latest_quality_log"]["quality_flags"][1]
+                    self.assertIn(adapter_flag, {"adapter:deepseek_chat", "adapter:fallback_current_info_fallback"})
+                    self.assertNotIn(adapter_flag, {"adapter:local_market", "adapter:local_status"})
+                    self.assertIn("DeepSeek API", case["reply_preview"])
+                    self.assertNotIn("状态边界", case["reply_preview"])
                     self.assertFalse(case["leaks"], case)
 
         refresh = next(case for case in report["cases"] if case["id"] == "market_refresh_entry")
@@ -751,6 +768,8 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
         self.assertTrue(report["checks"]["inbound_to_reply"]["ok"])
         self.assertEqual(report["next_action"]["kind"], "send_weixin_prompt")
         self.assertIn("现在DeepSeek有什么新消息", report["next_action"]["prompts"])
+        self.assertIn("现在小米汽车有什么公告", report["next_action"]["prompts"])
+        self.assertIn("现在ChatGPT有什么更新", report["next_action"]["prompts"])
         self.assertIn("现在帮我查这个政策", report["next_action"]["prompts"])
         self.assertEqual(report["latest_inbound"]["timestamp"], "2026-06-01T12:47:38+00:00")
         self.assertEqual(report["latest_inbound"]["current_window_timestamp"], "")
@@ -934,6 +953,8 @@ token = "test-token"
         self.assertEqual(report["next_action"]["kind"], "send_weixin_prompt")
         self.assertIn("你好 VELA", report["next_action"]["prompts"])
         self.assertIn("现在DeepSeek有什么新消息", report["next_action"]["prompts"])
+        self.assertIn("现在小米汽车有什么公告", report["next_action"]["prompts"])
+        self.assertIn("现在ChatGPT有什么更新", report["next_action"]["prompts"])
         self.assertIn("现在帮我查这个政策", report["next_action"]["prompts"])
         self.assertIn("--runtime-audit --json", report["next_action"]["verify_command"])
         self.assertIn("--wait-live-seconds 90", report["next_action"]["wait_command"])
@@ -941,6 +962,8 @@ token = "test-token"
         self.assertIn("next_action: send_weixin_prompt", rendered)
         self.assertIn("你好 VELA", rendered)
         self.assertIn("现在DeepSeek有什么新消息", rendered)
+        self.assertIn("现在小米汽车有什么公告", rendered)
+        self.assertIn("现在ChatGPT有什么更新", rendered)
         self.assertIn("现在帮我查这个政策", rendered)
         self.assertIn("wait_verify:", rendered)
 

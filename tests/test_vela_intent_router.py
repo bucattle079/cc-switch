@@ -203,6 +203,10 @@ class VelaIntentRouterTests(unittest.TestCase):
             "现在帮我查这个政策",
             "现在帮我搜一下OpenAI",
             "现在帮我搜一下OpenAI消息",
+            "现在小米汽车有什么公告",
+            "现在ChatGPT有什么更新",
+            "现在政策有没有新公告",
+            "现在查一下DeepSeek动态",
         ]:
             with self.subTest(text):
                 intent = router.classify_intent(text)
