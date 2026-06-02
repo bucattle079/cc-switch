@@ -292,6 +292,12 @@ def build_dialogue_brief(context: ReplyContext) -> str:
             f"允许外部资料：{'是' if tool_policy.allow_retrieval else '否'}"
         )
     extra_requirements: list[str] = []
+    if "现在" in context.message and context.intent in {"daily_info", "market_brief", "world_brief", "weather_query"}:
+        extra_requirements.append(
+            "现在类资讯约束：必须先处理实时性和来源边界；如果可用背景没有明确实时源，不要声称实时检索完成。"
+            "输出控制在微信短回复，不要新闻列表、英文生肉、状态边界字段、schema 或工程日志。"
+            "建议结构：实时性 / 判断 / 下一步，最多五行。"
+        )
     if context.intent == "deep_analysis":
         extra_requirements.append(
             "深度验尸约束：不要把系统问题简单归咎于用户；不要声称长期记忆为空；"

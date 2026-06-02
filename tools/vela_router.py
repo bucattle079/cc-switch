@@ -26,6 +26,7 @@ from vela_product_layers import (
     RouteDecision,
     guard_wechat_output,
     interpret_user_need,
+    is_current_information_request,
     record_interaction,
     record_reply_quality,
     record_session_note,
@@ -822,19 +823,21 @@ def reply_for(text: str) -> str:
         ).text
     if intent.name == "market_brief":
         supporting_context = render_cached_market_reply(text)
+        reply_adapter = None if is_current_information_request(text, intent.name) else FallbackReplyAdapter()
         return run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
-            reply_adapter=FallbackReplyAdapter(),
+            reply_adapter=reply_adapter,
         ).text
     if intent.name == "weather_query":
         supporting_context = render_weather_reply(text)
+        reply_adapter = None if is_current_information_request(text, intent.name) else FallbackReplyAdapter()
         return run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
-            reply_adapter=FallbackReplyAdapter(),
+            reply_adapter=reply_adapter,
         ).text
     if intent.name == "style_feedback":
         return run_layered_response(

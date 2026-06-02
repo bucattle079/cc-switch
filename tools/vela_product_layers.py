@@ -23,6 +23,24 @@ VELA_DIR = ROOT / "VELA"
 LEARNING_LOOP_DIR = VELA_DIR / "learning-loop"
 VOICE_CONTRACT = VELA_DIR / "voice-contract.json"
 
+CURRENT_INFO_TRIGGERS = ("现在",)
+CURRENT_INFO_INTENTS = {"daily_info", "market_brief", "world_brief", "weather_query"}
+CURRENT_INFO_SURFACE_MARKERS = (
+    "资讯",
+    "新闻",
+    "市场",
+    "行情",
+    "天气",
+    "温度",
+    "冷吗",
+    "热吗",
+    "发生",
+    "检索",
+    "搜索",
+    "查询",
+    "查一下",
+)
+
 CONFIRMED_CACHE_SLOTS = ["09:00", "12:30", "17:00"]
 
 MARKET_WEIGHTS = {
@@ -868,6 +886,15 @@ def _has_any(text: str, markers: Iterable[str]) -> bool:
     return any(str(marker).lower() in lowered for marker in markers)
 
 
+def is_current_information_request(message: str, intent: str) -> bool:
+    text = " ".join(str(message or "").split())
+    if not _has_any(text, CURRENT_INFO_TRIGGERS):
+        return False
+    if intent not in CURRENT_INFO_INTENTS:
+        return False
+    return _has_any(text, CURRENT_INFO_SURFACE_MARKERS)
+
+
 def _is_identity_core_question(text: str) -> bool:
     lowered = str(text or "").lower()
     return ("vela" in lowered or "本体" in lowered) and _has_any(lowered, IDENTITY_CORE_MARKERS)
@@ -1226,8 +1253,13 @@ def _dialogue_adapter_for_env(env: dict[str, str]) -> str:
     return "fallback"
 
 
-def select_model_and_tools(intent: str, env: dict[str, str] | None = None) -> ToolSelection:
+def select_model_and_tools(
+    intent: str,
+    env: dict[str, str] | None = None,
+    message: str = "",
+) -> ToolSelection:
     env = os.environ if env is None else env
+    current_info = is_current_information_request(message, intent)
     if intent == "codex_task":
         return ToolSelection(
             model_adapter="codex_bridge",
@@ -1248,22 +1280,34 @@ def select_model_and_tools(intent: str, env: dict[str, str] | None = None) -> To
             model_adapter=_dialogue_adapter_for_env(env),
             foreground_lane="cached",
             allow_market=True,
-            allow_retrieval=False,
-            reason="Market context can use local cache/status, but final wording goes through the dialogue model.",
+            allow_retrieval=current_info,
+            reason=(
+                "Current information wording contains '现在'; route through DeepSeek/API before local fallback."
+                if current_info
+                else "Market context can use local cache/status with structured frontstage output."
+            ),
         )
     if intent == "weather_query":
         return ToolSelection(
             model_adapter=_dialogue_adapter_for_env(env),
             foreground_lane="fast",
-            allow_retrieval=False,
-            reason="Weather uses no external weather API; the dialogue model gives risk framing without fake realtime data.",
+            allow_retrieval=current_info,
+            reason=(
+                "Current weather/info wording contains '现在'; call the dialogue API, but do not invent realtime weather."
+                if current_info
+                else "Weather uses no external weather API; the dialogue model gives risk framing without fake realtime data."
+            ),
         )
     if intent == "world_brief":
         return ToolSelection(
             model_adapter=_dialogue_adapter_for_env(env),
             foreground_lane="cached",
-            allow_retrieval=False,
-            reason="World brief final wording goes through the dialogue model unless it is a Codex task.",
+            allow_retrieval=current_info,
+            reason=(
+                "Current world/info wording contains '现在'; route through DeepSeek/API before any fallback."
+                if current_info
+                else "World brief final wording goes through the dialogue model unless it is a Codex task."
+            ),
         )
     if intent in {"project_assistant", "deep_analysis"}:
         return ToolSelection(
@@ -1274,6 +1318,7 @@ def select_model_and_tools(intent: str, env: dict[str, str] | None = None) -> To
     return ToolSelection(
         model_adapter=_dialogue_adapter_for_env(env),
         foreground_lane="fast",
+        allow_retrieval=current_info,
         reason="Daily dialogue is model-backed when configured and tool-free by default.",
     )
 
@@ -1321,7 +1366,7 @@ def build_reply_context(
         } and summary:
             preferences.append(f"候选偏好（未确认，{classification}）：{summary}")
     preferences.extend(iteration_preference_summaries(log_dir=log_dir, limit=3))
-    selection = select_model_and_tools(intent)
+    selection = select_model_and_tools(intent, message=normalized_message)
     interpretation = interpret_need(normalized_message, intent)
     return ReplyContext(
         message=normalized_message,
@@ -1889,6 +1934,57 @@ def model_reply_has_frontstage_hazards(text: str, *, intent: str = "") -> bool:
     return any(token.lower() in raw.lower() for token in hazards)
 
 
+def current_info_reply_has_frontstage_hazards(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return True
+    if len(raw) > 700:
+        return True
+    hazards = (
+        "以下基于最近缓存",
+        "状态边界",
+        "模型仅生成",
+        "schema",
+        "jsonl",
+        "raw payload",
+        "endpoint",
+        "token",
+        "response_quality_signals",
+        "active_persona_capabilities",
+        "Market & World Briefing",
+        "关键风险\n1.",
+    )
+    if any(token.lower() in raw.lower() for token in hazards):
+        return True
+    has_judgment = "判断：" in raw or "结论：" in raw
+    has_next = "下一步：" in raw or "下一观察" in raw
+    return not (has_judgment and has_next)
+
+
+def current_info_fallback_text(context: ReplyContext, adapter_name: str) -> str:
+    if context.supporting_context.strip():
+        if adapter_name == "fallback":
+            supporting = context.supporting_context.strip()
+            boundary = "实时信息链：DeepSeek API 未接上；以下只按本地源/缓存降级。"
+            if supporting.startswith(("K，", "K,")):
+                prefix = "K，" if supporting.startswith("K，") else "K,"
+                return supporting.replace(prefix, f"{prefix}{boundary}\n", 1)
+            return boundary + "\n" + supporting
+        return context.supporting_context.strip()
+    if adapter_name == "fallback":
+        return (
+            "K，这条是现在类信息请求，但 DeepSeek API 没接上。"
+            "我不把旧常识伪装成实时资讯。\n"
+            "判断：先不下实时结论。\n"
+            "下一步：接通 DEEPSEEK_API_KEY 或给我可验证来源，再查。"
+        )
+    return (
+        "K，DeepSeek 已被调用，但这轮没有拿到可前台使用的实时结论。\n"
+        "判断：不把不可靠输出端给你。\n"
+        "下一步：换实时源或重试查询。"
+    )
+
+
 def normalize_model_frontstage_reply(text: str) -> str:
     cleaned = normalize_supporting_context(text)
     cleaned = re.sub(r"(?im)^\s*(system|assistant|user)\s*[:：].*$", "", cleaned)
@@ -1911,8 +2007,17 @@ def engine_text_for_intent(
     adapter = adapter or default_reply_adapter(foreground_lane=foreground_lane)
     if context.intent == "codex_task":
         return render_codex_product_judgment(codex_summary), "codex_bridge", False
+    current_info = is_current_information_request(context.message, context.intent)
     if context.intent in {"freshness_status", "market_refresh"} and context.supporting_context.strip():
         return context.supporting_context.strip(), "local_status", False
+    if context.intent == "market_brief" and context.supporting_context.strip() and not current_info:
+        return context.supporting_context.strip(), "local_market", False
+    if current_info:
+        result = adapter.generate(context)
+        if result.used_api and not current_info_reply_has_frontstage_hazards(result.text):
+            return normalize_supporting_context(result.text), result.adapter, result.used_api
+        adapter_name = f"{result.adapter}_current_info_fallback" if result.adapter else "current_info_fallback"
+        return current_info_fallback_text(context, result.adapter), adapter_name, result.used_api
     if context.intent == "memory_related" and _is_explicit_memory_instruction(context.message):
         return render_memory_reply(context.message), "local_memory_guard", False
     if should_use_local_feedback_control(context):
@@ -1987,9 +2092,9 @@ def run_layered_response(
 ) -> LayeredResponse:
     started_at = time.perf_counter()
     used_codex = intent == "codex_task"
-    used_retrieval = False
+    selection = select_model_and_tools(intent, message=message)
+    used_retrieval = selection.allow_retrieval
     used_cache = intent in {"market_brief", "market_refresh", "freshness_status"}
-    selection = select_model_and_tools(intent)
     learning = evaluate_learning(message, intent)
     memory_candidate = learning.should_record_candidate
 

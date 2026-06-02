@@ -218,6 +218,168 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("天气不接外部 API", result.text)
         self.assertNotIn("weather_query", result.text)
 
+    def test_market_brief_uses_structured_frontstage_without_model_rewrite(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+        called = {"value": False}
+
+        class RamblyDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                called["value"] = True
+                return reply_engine.ReplyEngineResult(
+                    text="以下基于最近缓存，状态边界：模型仅生成。这里开始写一大段报告腔。",
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        supporting_context = "\n".join(
+            [
+                "实时源：已接入（新浪财经行情快照，2026-06-02 09:56 北京时间）",
+                "A股快照：",
+                "- 上证指数 3090.12，+0.31%",
+                "判断：先按盘面快照处理，成交没放大前只做试探。",
+                "下一步：盯成交额、人民币/美债、强弱板块扩散。",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "今天的A股市场如何",
+                intent="market_brief",
+                log_dir=Path(tmp),
+                supporting_context=supporting_context,
+                reply_adapter=RamblyDeepSeekAdapter(),
+            )
+
+        self.assertFalse(called["value"])
+        self.assertEqual(result.reply_adapter, "local_market")
+        self.assertFalse(result.real_gpt_enabled)
+        self.assertEqual(result.text, supporting_context)
+        self.assertIn("实时源：已接入", result.text)
+        self.assertIn("判断：", result.text)
+        self.assertIn("下一步：", result.text)
+        self.assertNotIn("以下基于最近缓存", result.text)
+        self.assertNotIn("状态边界", result.text)
+
+    def test_now_market_information_calls_deepseek_before_local_fallback(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+        captured = {}
+
+        class CurrentInfoDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                captured["context"] = context
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "实时性：DeepSeek API 已接管现在类资讯，按可用背景校准。\n"
+                        "判断：先看实时源边界，再给市场方向，不把缓存冒充直播。\n"
+                        "下一步：需要更细来源时再展开。"
+                    ),
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        supporting_context = "\n".join(
+            [
+                "实时源：暂不可用；缓存降级。",
+                "最近缓存：2026-06-02 09:00 北京时间，只做方向判断。",
+                "判断：实时源没回来前，不下新的盘中结论。",
+                "下一步：先等实时源恢复。",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "现在的市场资讯",
+                intent="market_brief",
+                log_dir=Path(tmp),
+                supporting_context=supporting_context,
+                reply_adapter=CurrentInfoDeepSeekAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "deepseek_chat")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertTrue(result.used_retrieval)
+        self.assertTrue(captured["context"].tool_policy.allow_retrieval)
+        self.assertIn("DeepSeek API 已接管", result.text)
+        self.assertIn("判断：", result.text)
+        self.assertIn("下一步：", result.text)
+
+    def test_now_market_information_discards_bad_deepseek_frontstage(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+        called = {"value": False}
+
+        class BadCurrentInfoDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                called["value"] = True
+                return reply_engine.ReplyEngineResult(
+                    text="以下基于最近缓存，状态边界：模型仅生成。然后开始长篇报告。",
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        supporting_context = "\n".join(
+            [
+                "实时源：暂不可用；缓存降级。",
+                "最近缓存：2026-06-02 09:00 北京时间，只做方向判断。",
+                "判断：实时源没回来前，不下新的盘中结论。",
+                "下一步：先等实时源恢复。",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "现在的市场资讯",
+                intent="market_brief",
+                log_dir=Path(tmp),
+                supporting_context=supporting_context,
+                reply_adapter=BadCurrentInfoDeepSeekAdapter(),
+            )
+
+        self.assertTrue(called["value"])
+        self.assertEqual(result.reply_adapter, "deepseek_chat_current_info_fallback")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertEqual(result.text, supporting_context)
+        self.assertNotIn("以下基于最近缓存", result.text)
+        self.assertNotIn("状态边界", result.text)
+
+    def test_now_market_information_without_deepseek_declares_local_degrade(self):
+        product = load_product_module()
+        supporting_context = "\n".join(
+            [
+                "实时源：暂不可用；缓存降级。",
+                "判断：实时源没回来前，不下新的盘中结论。",
+                "下一步：先等实时源恢复。",
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "现在的市场资讯",
+                intent="market_brief",
+                log_dir=Path(tmp),
+                supporting_context=supporting_context,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "fallback_current_info_fallback")
+        self.assertFalse(result.real_gpt_enabled)
+        self.assertTrue(result.used_retrieval)
+        self.assertIn("DeepSeek API 未接上", result.text)
+        self.assertIn("本地源/缓存降级", result.text)
+        self.assertIn("判断：", result.text)
+        self.assertIn("下一步：", result.text)
+
     def test_normal_chat_uses_reply_engine_not_static_market_codex_menu(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
@@ -1507,7 +1669,13 @@ class VelaProductLayerTests(unittest.TestCase):
             for message, expected_intent, expected_mode, expected_caps in cases:
                 with self.subTest(message):
                     intent = router.classify_intent(message)
-                    supporting_context = "以下基于最近缓存，先给可用判断；这不是实时直播。" if expected_intent == "market_brief" else ""
+                    supporting_context = (
+                        "不是实时直播；最近缓存：2026-06-02 09:00 北京时间。\n"
+                        "判断：只按缓存做方向判断，仓位保持试探。\n"
+                        "下一步：等实时源或展开缓存报告。"
+                        if expected_intent == "market_brief"
+                        else ""
+                    )
                     context = product.build_reply_context(
                         message,
                         intent=intent.name,

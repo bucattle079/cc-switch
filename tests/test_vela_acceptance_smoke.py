@@ -137,24 +137,33 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "weather_jinjiang",
             "market_add_position",
             "market_current_a_share_realtime_compact",
-            "market_current_now_info_realtime_compact",
             "market_current_news_realtime_compact",
+            "freshness_status",
+        }
+        now_info_ids = {
+            "market_current_now_info_realtime_compact",
             "market_current_us_info_not_a_share",
             "market_current_global_not_a_share",
-            "freshness_status",
         }
         for case in report["cases"]:
             if case["id"] in hard_lane_ids:
                 with self.subTest(case["id"]):
                     self.assertIn(
                         case["latest_quality_log"]["quality_flags"][1],
-                        {"adapter:fallback", "adapter:local_status"},
+                        {"adapter:fallback", "adapter:local_status", "adapter:local_market"},
                     )
                     self.assertNotEqual(case["latest_quality_log"]["quality_flags"][1], "adapter:deepseek_chat")
                     if case["id"].startswith("market_"):
                         self.assertIn("实时源", case["reply_preview"])
                     else:
                         self.assertIn("实时源：未接入", case["reply_preview"])
+                    self.assertFalse(case["leaks"], case)
+            if case["id"] in now_info_ids:
+                with self.subTest(case["id"]):
+                    adapter_flag = case["latest_quality_log"]["quality_flags"][1]
+                    self.assertIn(adapter_flag, {"adapter:deepseek_chat", "adapter:fallback_current_info_fallback"})
+                    self.assertNotEqual(adapter_flag, "adapter:local_market")
+                    self.assertIn("实时源", case["reply_preview"])
                     self.assertFalse(case["leaks"], case)
 
         refresh = next(case for case in report["cases"] if case["id"] == "market_refresh_entry")
