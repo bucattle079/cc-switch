@@ -125,7 +125,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
 
         self.assertIn("mojibake", leaks)
 
-    def test_entrypoint_smoke_keeps_hard_lanes_local_when_deepseek_env_exists(self):
+    def test_entrypoint_smoke_keeps_status_local_and_routes_fact_lanes_through_model_or_fact_fallback(self):
         smoke = load_smoke_module()
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -134,10 +134,13 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         self.assertTrue(report["ok"], report)
         self.assertTrue(report["entrypoint"])
         hard_lane_ids = {
-            "weather_jinjiang",
             "market_add_position",
             "market_current_a_share_realtime_compact",
             "freshness_status",
+        }
+        weather_fact_ids = {
+            "weather_jinjiang",
+            "weather_now_new_york_uses_weather_api_chain",
         }
         now_info_ids = {
             "market_current_now_info_realtime_compact",
@@ -153,9 +156,10 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "daily_info_now_search_openai_uses_deepseek_chain",
             "daily_info_now_company_notice_uses_deepseek_chain",
             "daily_info_now_app_update_uses_deepseek_chain",
-            "daily_info_now_new_york_time_uses_deepseek_chain",
             "world_info_now_event_not_market",
-            "weather_now_new_york_uses_deepseek_chain",
+        }
+        time_fact_ids = {
+            "daily_info_now_new_york_time_uses_deepseek_chain",
         }
         for case in report["cases"]:
             if case["id"] in hard_lane_ids:
@@ -169,6 +173,13 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
                         self.assertIn("实时源", case["reply_preview"])
                     else:
                         self.assertIn("实时源：未接入", case["reply_preview"])
+                    self.assertFalse(case["leaks"], case)
+            if case["id"] in weather_fact_ids:
+                with self.subTest(case["id"]):
+                    adapter_flag = case["latest_quality_log"]["quality_flags"][1]
+                    self.assertIn(adapter_flag, {"adapter:deepseek_chat", "adapter:local_weather_fallback"})
+                    self.assertIn("实时天气源", case["reply_preview"])
+                    self.assertNotIn("天气实时数据不可用", case["reply_preview"])
                     self.assertFalse(case["leaks"], case)
             if case["id"] in now_info_ids:
                 with self.subTest(case["id"]):
@@ -184,6 +195,14 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
                     self.assertNotIn(adapter_flag, {"adapter:local_market", "adapter:local_status"})
                     self.assertIn("DeepSeek API", case["reply_preview"])
                     self.assertNotIn("状态边界", case["reply_preview"])
+                    self.assertFalse(case["leaks"], case)
+            if case["id"] in time_fact_ids:
+                with self.subTest(case["id"]):
+                    adapter_flag = case["latest_quality_log"]["quality_flags"][1]
+                    self.assertIn(adapter_flag, {"adapter:deepseek_chat", "adapter:local_time_fallback"})
+                    self.assertIn("现在约", case["reply_preview"])
+                    self.assertIn("UTC", case["reply_preview"])
+                    self.assertNotIn("信息不用铺满", case["reply_preview"])
                     self.assertFalse(case["leaks"], case)
 
         refresh = next(case for case in report["cases"] if case["id"] == "market_refresh_entry")

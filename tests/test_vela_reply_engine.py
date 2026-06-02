@@ -232,7 +232,20 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         self.assertIn("K", result.text)
         self.assertTrue(any(token in result.text for token in ["在", "听着", "醒着"]))
-        for token in ["开刀", "刀先", "硌手", "混乱递过来", "雾端", "市场", "Codex", "菜单"]:
+        for token in [
+            "开刀",
+            "刀先",
+            "硌手",
+            "混乱递过来",
+            "雾端",
+            "市场",
+            "Codex",
+            "菜单",
+            "你慢慢说",
+            "先不推你",
+            "信息不用铺满",
+            "最烦的点",
+        ]:
             self.assertNotIn(token, result.text)
 
     def test_normal_fallback_variants_do_not_overperform_persona(self):
@@ -254,8 +267,19 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         result = adapter.generate(context)
 
-        self.assertTrue(any(token in result.text for token in ["我在", "听着", "慢慢说", "先不推你"]))
-        for token in ["硌手", "目标", "卡点", "开刀", "菜单", "已校准"]:
+        self.assertTrue(any(token in result.text for token in ["我在", "听着", "先听", "接住", "话放"]))
+        for token in [
+            "硌手",
+            "目标",
+            "卡点",
+            "开刀",
+            "菜单",
+            "已校准",
+            "你慢慢说",
+            "先不推你",
+            "信息不用铺满",
+            "最烦的点",
+        ]:
             self.assertNotIn(token, result.text)
 
     def test_pure_style_feedback_uses_style_feedback_not_misread_repair(self):

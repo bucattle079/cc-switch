@@ -102,32 +102,36 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         decision = router.route_decision("明天晋江天气")
         self.assertEqual(decision.intent, "weather_query")
-        self.assertFalse(decision.needs_retrieval)
+        self.assertTrue(decision.needs_retrieval)
         self.assertFalse(decision.needs_codex)
 
-    def test_weather_reply_uses_local_boundary_adapter_without_weather_api(self):
+    def test_weather_reply_uses_realtime_weather_supporting_context(self):
         router = load_module(ROUTER, "vela_router")
 
-        with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model weather")) as run:
-            reply = router.reply_for("明天晋江天气")
+        api_reply = "K，晋江明天实时天气源：已接入；小雨，24-30°C。\n判断：带伞。\n下一步：出门前再看一次临近预报。"
+        with patch.object(router, "render_weather_query_reply", return_value=api_reply):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text=api_reply)) as run:
+                reply = router.reply_for("明天晋江天气")
 
-        self.assertEqual(reply, "K model weather")
+        self.assertEqual(reply, api_reply)
         self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
-        self.assertIn("实时源：未接入", run.call_args.kwargs["supporting_context"])
-        self.assertIn("不编实时温度", run.call_args.kwargs["supporting_context"])
-        self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
+        self.assertIn("实时天气源：已接入", run.call_args.kwargs["supporting_context"])
+        self.assertIn("24-30°C", run.call_args.kwargs["supporting_context"])
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
-    def test_now_weather_can_use_deepseek_current_info_lane(self):
+    def test_now_weather_uses_weather_api_lane_not_deepseek_template(self):
         router = load_module(ROUTER, "vela_router")
 
+        api_reply = "K，纽约今天实时天气源：已接入；多云，18-24°C。\n判断：外套带薄的。\n下一步：出门前再看风和降雨。"
         with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
-            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model current weather")) as run:
-                reply = router.reply_for("现在纽约冷吗")
+            with patch.object(router, "render_weather_query_reply", return_value=api_reply):
+                with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text=api_reply)) as run:
+                    reply = router.reply_for("现在纽约冷吗")
 
-        self.assertEqual(reply, "K model current weather")
+        self.assertEqual(reply, api_reply)
         self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
-        self.assertIn("实时源：未接入", run.call_args.kwargs["supporting_context"])
-        self.assertIsNone(run.call_args.kwargs["reply_adapter"])
+        self.assertIn("实时天气源：已接入", run.call_args.kwargs["supporting_context"])
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
     def test_market_reply_uses_local_boundary_adapter_with_cache_context(self):
         router = load_module(ROUTER, "vela_router")
@@ -145,7 +149,6 @@ class VelaIntentRouterTests(unittest.TestCase):
         router = load_module(ROUTER, "vela_router")
 
         cases = [
-            ("明天晋江天气", "weather_query"),
             ("今天的资讯", "market_brief"),
             ("这是实时的吗", "freshness_status"),
             ("刷新最新市场资讯", "market_refresh"),
@@ -178,11 +181,17 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_weather_reply_is_weather_surface_not_menu(self):
         router = load_module(ROUTER, "vela_router")
 
-        reply = router.reply_for("明天晋江天气")
+        with patch.object(
+            router,
+            "render_weather_query_reply",
+            return_value="K，晋江明天实时天气源：已接入；小雨，24-30°C。\n判断：带伞。\n下一步：出门前再看一次临近预报。",
+        ):
+            reply = router.reply_for("明天晋江天气")
 
         self.assertIn("晋江", reply)
         self.assertIn("天气", reply)
-        self.assertIn("实时源：未接入", reply)
+        self.assertIn("实时天气源：已接入", reply)
+        self.assertIn("24-30°C", reply)
         self.assertNotIn("DeepSeek", reply)
         self.assertNotIn("real_time_source_available", reply)
         self.assertNotIn("Market & World Briefing", reply)
@@ -193,11 +202,16 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_weather_reply_uses_natural_boundary_for_real_trip_question(self):
         router = load_module(ROUTER, "vela_router")
 
-        reply = router.render_weather_reply("明天晋江会不会下雨，能不能出门")
+        with patch.object(
+            router,
+            "render_weather_query_reply",
+            return_value="K，晋江明天实时天气源：已接入；小雨，24-30°C。\n判断：带伞。\n下一步：出门前再看一次临近预报。",
+        ):
+            reply = router.render_weather_reply("明天晋江会不会下雨，能不能出门")
 
         self.assertIn("K，晋江", reply)
-        self.assertIn("实时源：未接入", reply)
-        self.assertIn("不编实时温度", reply)
+        self.assertIn("实时天气源：已接入", reply)
+        self.assertIn("24-30°C", reply)
         self.assertIn("下一步：", reply)
         self.assertNotIn("天气线", reply)
         self.assertNotIn("模型仅生成", reply)
@@ -645,10 +659,75 @@ class VelaIntentRouterTests(unittest.TestCase):
                 self.assertIn("current_info", intent.focus_tags)
                 self.assertEqual(decision.intent, "daily_info")
                 self.assertTrue(decision.needs_retrieval)
-                self.assertIn("DeepSeek API", reply)
+                self.assertIn("现在约", reply)
+                self.assertIn("UTC", reply)
                 self.assertIn("判断：", reply)
+                self.assertNotIn("DeepSeek API", reply)
                 self.assertNotIn("先说最烦的点", reply)
                 self.assertNotIn("你慢慢说", reply)
+                self.assertNotIn("信息不用铺满", reply)
+
+    def test_current_time_question_uses_local_time_reply_not_dialogue_template(self):
+        router = load_module(ROUTER, "vela_router")
+        expected = "K，纽约现在约 06:30（UTC-04:00）。"
+
+        with patch.object(router, "render_time_query_reply", return_value=expected) as render:
+            reply = router.reply_for("现在美国时间纽约约是几点")
+
+        self.assertEqual(reply, expected)
+        render.assert_called_once_with("现在美国时间纽约约是几点")
+
+    def test_current_time_question_passes_fact_context_to_deepseek_layer(self):
+        router = load_module(ROUTER, "vela_router")
+        fact = "K，纽约现在约 06:30（2026-06-02，UTC-04:00）。\n判断：按本地时区计算。"
+
+        with patch.object(router, "render_time_query_reply", return_value=fact):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，纽约现在约 06:30。")) as run:
+                reply = router.reply_for("现在美国时间纽约约是几点")
+
+        self.assertEqual(reply, "K，纽约现在约 06:30。")
+        self.assertEqual(run.call_args.kwargs["intent"], "daily_info")
+        self.assertEqual(run.call_args.kwargs["supporting_context"], fact)
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
+
+    def test_current_time_query_family_uses_real_time_lane(self):
+        router = load_module(ROUTER, "vela_router")
+
+        cases = [
+            ("现在美国时间纽约约是几点", "纽约"),
+            ("现在纽约几点", "纽约"),
+            ("美国时间现在几点", "纽约"),
+            ("现在东京当地时间", "东京"),
+            ("伦敦此刻当地几点", "伦敦"),
+        ]
+
+        for text, label in cases:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+                reply = router.reply_for(text)
+
+                self.assertEqual(intent.name, "daily_info")
+                self.assertIn(label, reply)
+                self.assertIn("现在约", reply)
+                self.assertIn("UTC", reply)
+                for token in ["DeepSeek API", "信息不用铺满", "你慢慢说", "先说最烦的点", "天气实时数据不可用"]:
+                    self.assertNotIn(token, reply)
+
+    def test_current_time_query_markers_are_shared_across_router_and_product_layer(self):
+        product = load_module(PRODUCT, "vela_product_layers")
+        router = load_module(ROUTER, "vela_router")
+
+        self.assertIs(router.CURRENT_TIME_QUERY_KEYWORDS, product.CURRENT_TIME_QUERY_MARKERS)
+
+        cases = [
+            "现在美国时间纽约约是几点",
+            "现在纽约几点",
+            "美国时间现在几点",
+        ]
+        for text in cases:
+            with self.subTest(text):
+                self.assertTrue(router.is_current_time_query(text))
+                self.assertTrue(product.is_current_information_request(text, "daily_info"))
 
     def test_project_opt_out_chat_reply_stays_in_companion_lane(self):
         router = load_module(ROUTER, "vela_router")

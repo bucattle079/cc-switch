@@ -415,21 +415,21 @@ class FallbackReplyAdapter(ReplyAdapter):
     )
 
     GREETING_VARIANTS = (
-        "K，在。今天先慢一点，你说。",
-        "K，在，我听着。",
-        "K，醒着。别急，你慢慢说。",
+        "K，在。你说。",
+        "K，我在。听着。",
+        "K，醒着。直接说。",
     )
 
     CALIBRATED_NORMAL_VARIANTS = (
-        "K，在。先说一件事，我直接判断。",
-        "K，在。信息不用铺满，先说最烦的点。",
-        "K，在。你给一句现状，我接着往下拆。",
+        "K，我接住。先抓真实意思，再判断。",
+        "K，先听你这句，别让模板抢话。",
+        "K，在。把真正的问题放前面。",
     )
 
     WARM_CALIBRATED_GREETING_VARIANTS = (
-        "K，我在。你慢慢说，我听着。",
-        "K，在。先不推你，话从哪里开始都行。",
-        "K，我在。今天先轻一点，你说。",
+        "K，我在。先听你这句。",
+        "K，在。话放过来，我接住。",
+        "K，我听着。先不急着拆。",
     )
 
     CALIBRATED_CONTINUE_VARIANTS = (

@@ -9,6 +9,7 @@ import re
 import time
 from typing import Iterable
 
+from vela_intent_signals import CURRENT_TIME_QUERY_MARKERS
 from vela_reply_engine import (
     FallbackReplyAdapter,
     ReplyAdapter,
@@ -54,17 +55,6 @@ CURRENT_INFO_SURFACE_MARKERS = (
     "搜索",
     "查询",
     "查一下",
-)
-CURRENT_TIME_QUERY_MARKERS = (
-    "几点",
-    "几 点",
-    "当地时间",
-    "本地时间",
-    "当地几点",
-    "现在几点",
-    "约是几点",
-    "大概几点",
-    "时差",
 )
 CURRENT_MARKET_OBJECT_SURFACE_MARKERS = (
     "A股",
@@ -211,7 +201,9 @@ CODEX_GIT_OUTPUT_LINE_RE = re.compile(
     r"^\s*(?:commit\s+[0-9a-f]{7,}|author:|date:|diff --git|index\s+[0-9a-f.]+|---\s+a/|\+\+\+\s+b/|@@|\+\s|\-\s)",
     re.IGNORECASE,
 )
-STAGE_DIRECTION_RE = re.compile(r"[（(][^）)\n]{1,40}[）)]")
+STAGE_DIRECTION_RE = re.compile(
+    r"[（(](?=[^）)\n]{1,40}[）)])(?=[^）)\n]*(?:轻轻|冷冷|淡淡|扫一眼|一笑|微笑|笑|叹气|沉默|停顿|抬眼|皱眉|低声|语气|旁白|内心|转身|点头|摇头|看着))[^）)\n]{1,40}[）)]"
+)
 EXTRA_FORBIDDEN_DIALOGUE_PHRASES = (
     "作为 VELA",
     "作为VELA",
@@ -1594,13 +1586,9 @@ def select_model_and_tools(
     if intent == "weather_query":
         return ToolSelection(
             model_adapter=_dialogue_adapter_for_env(env),
-            foreground_lane="fast",
-            allow_retrieval=current_info,
-            reason=(
-                "Current weather/info wording contains '现在'; call the dialogue API, but do not invent realtime weather."
-                if current_info
-                else "Weather uses no external weather API; the dialogue model gives risk framing without fake realtime data."
-            ),
+            foreground_lane="cached",
+            allow_retrieval=True,
+            reason="Weather queries use realtime weather API evidence first, then DeepSeek/adapter renders VELA's answer.",
         )
     if intent == "world_brief":
         return ToolSelection(
@@ -2349,6 +2337,36 @@ def current_info_reply_has_frontstage_hazards(text: str) -> bool:
     return not (has_judgment and has_next)
 
 
+def factual_context_reply_has_frontstage_hazards(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return True
+    if len(raw) > 700:
+        return True
+    hazards = (
+        "以下基于最近缓存",
+        "状态边界",
+        "模型仅生成",
+        "schema",
+        "jsonl",
+        "raw payload",
+        "endpoint",
+        "token",
+        "response_quality_signals",
+        "active_persona_capabilities",
+        "Market & World Briefing",
+        "天气实时数据不可用",
+        "不编实时天气",
+        "信息不用铺满",
+        "先说最烦的点",
+    )
+    if any(token.lower() in raw.lower() for token in hazards):
+        return True
+    if has_raw_english_frontstage_sentence(raw):
+        return True
+    return not ("判断：" in raw or "结论：" in raw)
+
+
 def has_raw_english_frontstage_sentence(text: str) -> bool:
     allowed_terms = {
         "api",
@@ -2423,6 +2441,16 @@ def engine_text_for_intent(
     current_info = is_current_information_request(context.message, context.intent)
     if context.intent in {"freshness_status", "market_refresh"} and context.supporting_context.strip():
         return context.supporting_context.strip(), "local_status", False
+    if context.intent == "weather_query" and context.supporting_context.strip():
+        result = adapter.generate(context)
+        if result.used_api and not factual_context_reply_has_frontstage_hazards(result.text):
+            return normalize_supporting_context(result.text), result.adapter, True
+        return context.supporting_context.strip(), "local_weather_fallback", result.used_api
+    if current_info and context.supporting_context.strip() and _has_any(context.message, CURRENT_TIME_QUERY_MARKERS):
+        result = adapter.generate(context)
+        if result.used_api and not factual_context_reply_has_frontstage_hazards(result.text):
+            return normalize_supporting_context(result.text), result.adapter, True
+        return context.supporting_context.strip(), "local_time_fallback", result.used_api
     if context.intent == "market_brief" and context.supporting_context.strip() and not current_info:
         return context.supporting_context.strip(), "local_market", False
     if current_info:

@@ -175,7 +175,7 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("模型没有", result.text)
         self.assertNotIn("TimeoutError", result.text)
 
-    def test_non_codex_lanes_select_deepseek_without_weather_api(self):
+    def test_non_codex_lanes_select_deepseek_with_weather_api_lane(self):
         product = load_product_module()
         env = {"DEEPSEEK_API_KEY": "sk-test-secret"}
 
@@ -196,13 +196,14 @@ class VelaProductLayerTests(unittest.TestCase):
                 self.assertFalse(selection.allow_codex)
 
         weather = product.select_model_and_tools("weather_query", env=env)
-        self.assertFalse(weather.allow_retrieval)
-        self.assertIn("no external weather API", weather.reason)
+        self.assertEqual(weather.model_adapter, "deepseek_chat")
+        self.assertTrue(weather.allow_retrieval)
+        self.assertIn("realtime weather API evidence", weather.reason)
 
         now_weather = product.select_model_and_tools("weather_query", env=env, message="现在纽约冷吗")
         self.assertEqual(now_weather.model_adapter, "deepseek_chat")
         self.assertTrue(now_weather.allow_retrieval)
-        self.assertIn("Current weather/info", now_weather.reason)
+        self.assertIn("DeepSeek", now_weather.reason)
 
         now_daily = product.select_model_and_tools("daily_info", env=env, message="现在DeepSeek有什么新消息")
         self.assertEqual(now_daily.model_adapter, "deepseek_chat")
@@ -235,7 +236,26 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertEqual(codex.model_adapter, "codex_bridge")
         self.assertTrue(codex.allow_codex)
 
-    def test_weather_uses_reply_engine_context_not_weather_api(self):
+    def test_weather_uses_api_supporting_context_only_when_model_unavailable(self):
+        product = load_product_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "明天晋江天气",
+                intent="weather_query",
+                log_dir=Path(tmp),
+                supporting_context="K，晋江明天实时天气源：已接入；小雨，24-30°C。\n判断：带伞。\n下一步：出门前再看一次临近预报。",
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "local_weather_fallback")
+        self.assertFalse(result.real_gpt_enabled)
+        self.assertTrue(result.used_retrieval)
+        self.assertIn("实时天气源：已接入", result.text)
+        self.assertIn("24-30°C", result.text)
+        self.assertNotIn("weather_query", result.text)
+
+    def test_weather_api_context_goes_through_deepseek_when_available(self):
         product = load_product_module()
         reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
         captured = {}
@@ -246,7 +266,7 @@ class VelaProductLayerTests(unittest.TestCase):
             def generate(self, context):
                 captured["context"] = context
                 return reply_engine.ReplyEngineResult(
-                    text="K，天气不接外部 API。我按风险判断：带伞，给行程留余量。",
+                    text="K，晋江明天小雨，24-30°C。判断：带伞，行程别压死。下一步：出门前再看一次临近预报。",
                     source="fake",
                     used_api=True,
                     adapter=self.name,
@@ -257,16 +277,79 @@ class VelaProductLayerTests(unittest.TestCase):
                 "明天晋江天气",
                 intent="weather_query",
                 log_dir=Path(tmp),
-                supporting_context="天气不调用外部 API；不要编实时温度。",
+                supporting_context="K，晋江明天实时天气源：已接入；小雨，24-30°C。\n判断：带伞。\n下一步：出门前再看一次临近预报。",
                 reply_adapter=FakeDeepSeekAdapter(),
             )
 
         self.assertEqual(result.reply_adapter, "deepseek_chat")
         self.assertTrue(result.real_gpt_enabled)
-        self.assertFalse(result.used_retrieval)
-        self.assertIn("外部 API", captured["context"].supporting_context)
-        self.assertIn("天气不接外部 API", result.text)
-        self.assertNotIn("weather_query", result.text)
+        self.assertTrue(result.used_retrieval)
+        self.assertIn("实时天气源：已接入", captured["context"].supporting_context)
+        self.assertIn("24-30°C", result.text)
+        self.assertNotIn("天气实时数据不可用", result.text)
+
+    def test_time_fact_context_goes_through_deepseek_when_available(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+        captured = {}
+
+        class FakeDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                captured["context"] = context
+                return reply_engine.ReplyEngineResult(
+                    text="K，纽约现在约 06:30（UTC-04:00）。判断：按纽约本地时区计算，不拿闲聊挡答案。",
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "现在美国时间纽约约是几点",
+                intent="daily_info",
+                log_dir=Path(tmp),
+                supporting_context="K，纽约现在约 06:30（2026-06-02，UTC-04:00）。\n判断：这是按本地时区直接计算的当前时间，不拿闲聊模板冒充答案。",
+                reply_adapter=FakeDeepSeekAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "deepseek_chat")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertTrue(result.used_retrieval)
+        self.assertIn("UTC-04:00", captured["context"].supporting_context)
+        self.assertIn("06:30", result.text)
+        self.assertNotIn("信息不用铺满", result.text)
+
+    def test_normal_chat_uses_deepseek_when_available(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+        captured = {}
+
+        class FakeDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                captured["context"] = context
+                return reply_engine.ReplyEngineResult(
+                    text="K，我在。你直接说，我听完再判断。",
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "你好 VELA",
+                intent="normal_chat",
+                log_dir=Path(tmp),
+                reply_adapter=FakeDeepSeekAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "deepseek_chat")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertEqual(captured["context"].message, "你好 VELA")
+        self.assertIn("我在", result.text)
 
     def test_market_brief_uses_structured_frontstage_without_model_rewrite(self):
         product = load_product_module()
@@ -622,10 +705,10 @@ class VelaProductLayerTests(unittest.TestCase):
         product = load_product_module()
 
         cases = [
-            ("我需要你更智能", "你好", ["我在", "在。", "听着", "慢慢说", "先不推你", "轻一点"]),
-            ("我需要你更像真正的智能伙伴", "你好", ["我在", "听着", "慢慢说", "先不推你", "轻一点"]),
-            ("你没懂我", "你好", ["我在", "在。", "听着", "慢慢说", "先不推你", "轻一点"]),
-            ("你没懂我的意思", "你好", ["我在", "听着", "慢慢说", "先不推你", "轻一点"]),
+            ("我需要你更智能", "你好", ["我在", "在。", "听着", "先听", "接住", "话放"]),
+            ("我需要你更像真正的智能伙伴", "你好", ["我在", "听着", "先听", "接住", "话放"]),
+            ("你没懂我", "你好", ["我在", "在。", "听着", "先听", "接住", "话放"]),
+            ("你没懂我的意思", "你好", ["我在", "听着", "先听", "接住", "话放"]),
             ("继续推进，不要拖", "继续", ["继续", "上一轮", "阻塞", "一个动作", "接着来"]),
         ]
 
@@ -659,7 +742,7 @@ class VelaProductLayerTests(unittest.TestCase):
                 self.assertNotIn("response_quality_signals", next_reply.text)
                 self.assertNotIn("要看盘，说 A股、美股或韩国", next_reply.text)
                 if followup == "你好":
-                    for tasky in ["目标", "卡点", "现状", "最烦的点", "递过来", "接着往下拆"]:
+                    for tasky in ["目标", "卡点", "现状", "最烦的点", "递过来", "接着往下拆", "你慢慢说", "先不推你", "信息不用铺满"]:
                         self.assertNotIn(tasky, next_reply.text)
 
     def test_too_cold_feedback_warms_next_greeting_without_task_intake(self):
@@ -681,10 +764,10 @@ class VelaProductLayerTests(unittest.TestCase):
             )
 
         self.assertIn("K", next_reply.text)
-        self.assertTrue(any(token in next_reply.text for token in ["我在", "听着", "慢一点", "慢慢说", "先不推你"]))
+        self.assertTrue(any(token in next_reply.text for token in ["我在", "听着", "先听", "接住", "话放"]))
         for self_label in ["少菜单", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准"]:
             self.assertNotIn(self_label, next_reply.text)
-        for tasky in ["目标", "卡点", "切开", "开刀", "任务单"]:
+        for tasky in ["目标", "卡点", "切开", "开刀", "任务单", "你慢慢说", "先不推你", "信息不用铺满", "最烦的点"]:
             self.assertNotIn(tasky, next_reply.text)
 
     def test_continue_uses_recent_context_instead_of_menu(self):
@@ -772,6 +855,14 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("AugSun", cleaned)
         self.assertNotIn("ROLLQIIA", cleaned)
         self.assertIn("外部项目", cleaned)
+
+    def test_guard_wechat_output_keeps_timezone_fact_parentheses(self):
+        product = load_product_module()
+
+        cleaned = product.guard_wechat_output("K，纽约现在约 06:30（2026-06-02，UTC-04:00）。")
+
+        self.assertIn("UTC-04:00", cleaned)
+        self.assertIn("2026-06-02", cleaned)
 
     def test_default_context_ignores_smoke_and_unclaimed_interactions(self):
         product = load_product_module()

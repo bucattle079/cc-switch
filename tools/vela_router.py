@@ -22,6 +22,12 @@ from vela_market_briefing import (
     format_status_boundary,
     market_freshness_status,
 )
+from vela_intent_signals import CURRENT_TIME_QUERY_MARKERS as CURRENT_TIME_QUERY_KEYWORDS
+from vela_realtime_info import (
+    location_for_weather,
+    render_time_query_reply,
+    render_weather_query_reply,
+)
 from vela_product_layers import (
     RouteDecision,
     contains_legacy_external_project,
@@ -248,17 +254,6 @@ CURRENT_INFO_ACTION_KEYWORDS = [
     "查询",
     "检索",
     "搜索",
-]
-CURRENT_TIME_QUERY_KEYWORDS = [
-    "几点",
-    "几 点",
-    "当地时间",
-    "本地时间",
-    "当地几点",
-    "现在几点",
-    "约是几点",
-    "大概几点",
-    "时差",
 ]
 CURRENT_WORLD_EVENT_KEYWORDS = [
     "地震",
@@ -763,7 +758,7 @@ def route_decision(text: str) -> RouteDecision:
     markets = priority_markets(intent.focus_tags)
     return RouteDecision(
         intent=intent.name,
-        needs_retrieval=intent.name in {"market_refresh"} or (
+        needs_retrieval=intent.name in {"market_refresh", "weather_query"} or (
             "current_info" in intent.focus_tags and intent.name in {"daily_info", "world_brief"}
         ),
         needs_codex=intent.codex_allowed,
@@ -850,22 +845,11 @@ def render_market_refresh_reply(text: str) -> str:
 
 
 def weather_location_from_text(text: str) -> str:
-    location = str(text or "").strip()
-    for token in [*WEATHER_TIME_WORDS, *WEATHER_QUESTION_WORDS, "?", "？", "。", "，", ","]:
-        location = location.replace(token, "")
-    location = " ".join(location.split()).strip()
-    return location or "这个位置"
+    return location_for_weather(text).label
 
 
 def render_weather_reply(text: str) -> str:
-    location = weather_location_from_text(text)
-    reply = (
-        f"K，{location}这条按出行风险处理，不编实时天气。\n"
-        "边界：实时源：未接入；缓存摘要：不可用；可用性：天气实时数据不可用。\n"
-        "判断：不编实时温度、降雨概率或精确预报；按出行风险给保守方案。\n"
-        "下一步：带伞，看温差，给行程留余量；要精确预报请看本机天气源。"
-    )
-    return guard_wechat_output(reply)
+    return guard_wechat_output(render_weather_query_reply(text))
 
 
 def render_local_tool_reply(
@@ -1048,12 +1032,17 @@ def reply_for(text: str) -> str:
         ).text
     if intent.name == "weather_query":
         supporting_context = render_weather_reply(text)
-        reply_adapter = None if is_current_information_request(text, intent.name) else FallbackReplyAdapter()
         return run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
-            reply_adapter=reply_adapter,
+        ).text
+    if intent.name == "daily_info" and is_current_time_query(text):
+        supporting_context = guard_wechat_output(render_time_query_reply(text))
+        return run_layered_response(
+            text,
+            intent=intent.name,
+            supporting_context=supporting_context,
         ).text
     if intent.name == "style_feedback":
         return run_layered_response(

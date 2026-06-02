@@ -123,7 +123,7 @@ SINGLE_TURN_CASES = [
         "message": "你好 VELA",
         "expected_intent": "normal_chat",
         "required_reply_tokens": ["在", "听着", "醒着"],
-        "forbidden_reply_tokens": ["目标", "卡点", "开刀", "硌手", "混乱", "雾端", "菜单", "市场", "Codex"],
+        "forbidden_reply_tokens": ["目标", "卡点", "开刀", "硌手", "混乱", "雾端", "菜单", "市场", "Codex", "你慢慢说", "先不推你", "信息不用铺满", "最烦的点"],
         "max_reply_chars": 40,
     },
     {
@@ -131,7 +131,7 @@ SINGLE_TURN_CASES = [
         "message": "你好",
         "expected_intent": "normal_chat",
         "required_reply_tokens": ["在", "听着", "醒着"],
-        "forbidden_reply_tokens": ["目标", "卡点", "开刀", "硌手", "混乱", "雾端", "菜单", "市场", "Codex"],
+        "forbidden_reply_tokens": ["目标", "卡点", "开刀", "硌手", "混乱", "雾端", "菜单", "市场", "Codex", "你慢慢说", "先不推你", "信息不用铺满", "最烦的点"],
         "max_reply_chars": 40,
     },
     {
@@ -281,32 +281,40 @@ SINGLE_TURN_CASES = [
         "id": "weather_jinjiang",
         "message": "明天晋江会不会下雨，能不能出门",
         "expected_intent": "weather_query",
-        "required_reply_tokens": ["实时源：未接入", "天气"],
+        "required_reply_tokens": ["实时天气源", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["不编实时天气", "天气实时数据不可用", "要精确预报请看本机天气源", "DeepSeek API", "DEEPSEEK_API_KEY"],
+        "max_reply_chars": 420,
     },
     {
         "id": "weather_new_york_cold",
         "message": "今天纽约冷吗，出门要不要加外套",
         "expected_intent": "weather_query",
-        "required_reply_tokens": ["实时源：未接入", "天气"],
+        "required_reply_tokens": ["实时天气源", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["不编实时天气", "天气实时数据不可用", "要精确预报请看本机天气源", "DeepSeek API", "DEEPSEEK_API_KEY"],
+        "max_reply_chars": 420,
     },
     {
         "id": "weather_schedule_boundary",
         "message": "明天晋江要见客户，天气不准也给我出门风险",
         "expected_intent": "weather_query",
-        "required_reply_tokens": ["实时源：未接入", "天气"],
+        "required_reply_tokens": ["实时天气源", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["不编实时天气", "天气实时数据不可用", "要精确预报请看本机天气源", "DeepSeek API", "DEEPSEEK_API_KEY"],
+        "max_reply_chars": 420,
     },
     {
         "id": "weather_trip_customer_plan",
         "message": "明天晋江出差，上午见客户，天气会不会影响行程？",
         "expected_intent": "weather_query",
-        "required_reply_tokens": ["实时源：未接入", "天气"],
+        "required_reply_tokens": ["实时天气源", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["不编实时天气", "天气实时数据不可用", "要精确预报请看本机天气源", "DeepSeek API", "DEEPSEEK_API_KEY"],
+        "max_reply_chars": 420,
     },
     {
-        "id": "weather_now_new_york_uses_deepseek_chain",
+        "id": "weather_now_new_york_uses_weather_api_chain",
         "message": "现在纽约冷吗",
         "expected_intent": "weather_query",
-        "required_reply_tokens": ["DeepSeek API", "实时源：未接入", "判断：", "下一步："],
-        "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
+        "required_reply_tokens": ["实时天气源", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["不编实时天气", "天气实时数据不可用", "要精确预报请看本机天气源", "DeepSeek API", "DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
         "max_reply_chars": 360,
     },
     {
@@ -569,16 +577,16 @@ TWO_TURN_CASES = [
         "feedback": "我需要你更像真正的智能伙伴",
         "followup": "你好",
         "expected_intent": "normal_chat",
-        "required_reply_tokens": ["我在", "听着", "慢慢说", "先不推你", "轻一点"],
-        "forbidden_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准", "目标", "卡点", "现状", "递过来"],
+        "required_reply_tokens": ["我在", "听着", "先听", "接住", "话放"],
+        "forbidden_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准", "目标", "卡点", "现状", "递过来", "你慢慢说", "先不推你", "信息不用铺满", "最烦的点"],
     },
     {
         "id": "feedback_misread_then_hello",
         "feedback": "你没懂我的意思",
         "followup": "你好",
         "expected_intent": "normal_chat",
-        "required_reply_tokens": ["我在", "听着", "慢慢说", "先不推你", "轻一点"],
-        "forbidden_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准", "目标", "卡点", "现状", "递过来"],
+        "required_reply_tokens": ["我在", "听着", "先听", "接住", "话放"],
+        "forbidden_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准", "目标", "卡点", "现状", "递过来", "你慢慢说", "先不推你", "信息不用铺满", "最烦的点"],
     },
     {
         "id": "feedback_push_then_continue",
@@ -601,8 +609,8 @@ TWO_TURN_CASES = [
         "feedback": "你刚才太冷了，像把我当任务单",
         "followup": "你好",
         "expected_intent": "normal_chat",
-        "required_reply_tokens": ["我在", "听着", "慢慢说", "先不推你"],
-        "forbidden_reply_tokens": ["目标", "卡点", "切开", "开刀", "任务单", "少菜单", "不解释身份", "废话收短", "机械味", "已校准"],
+        "required_reply_tokens": ["我在", "听着", "先听", "接住", "话放"],
+        "forbidden_reply_tokens": ["目标", "卡点", "切开", "开刀", "任务单", "少菜单", "不解释身份", "废话收短", "机械味", "已校准", "你慢慢说", "先不推你", "信息不用铺满", "最烦的点"],
         "max_reply_chars": 80,
     },
     {
@@ -1610,9 +1618,9 @@ def route_case(message: str) -> Any:
 
 
 def case_latency_budget_ms(intent: str) -> int | None:
-    if intent in {"normal_chat", "daily_info", "weather_query", "freshness_status", "memory_related", "style_feedback"}:
+    if intent in {"normal_chat", "daily_info", "freshness_status", "memory_related", "style_feedback"}:
         return 2000
-    if intent in {"market_brief", "market_refresh", "world_brief"}:
+    if intent in {"market_brief", "market_refresh", "world_brief", "weather_query"}:
         return 8000
     return None
 
