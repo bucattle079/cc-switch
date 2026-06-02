@@ -683,6 +683,50 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertFalse(context.tool_policy.allow_market)
         self.assertFalse(context.tool_policy.allow_codex)
 
+    def test_learning_writes_scrub_legacy_external_project_names(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.record_interaction(
+                message="继续 AugSun 项目",
+                intent="style_feedback",
+                response_text="旧项目 AugSun 不进入 VELA 项目线。",
+                used_codex=False,
+                used_retrieval=False,
+                log_dir=log_dir,
+            )
+            product.record_session_note(
+                "继续 ROLLQIIA 项目",
+                "style_feedback",
+                "旧项目 ROLLQIIA 已隔离。",
+                log_dir=log_dir,
+            )
+            product.record_memory_candidate("把 AugSun 项目从 VELA 剔除", log_dir=log_dir)
+            product.record_strategic_memory(
+                "VELA Companion Core 长期方向：不要再继承 AugSun / ROLLQIIA 项目上下文。",
+                memory_type="companion_core_direction",
+                confirmed_by_user=True,
+                log_dir=log_dir,
+            )
+            joined = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in log_dir.glob("*.jsonl")
+            )
+
+        self.assertNotIn("AugSun", joined)
+        self.assertNotIn("ROLLQIIA", joined)
+        self.assertIn("外部项目", joined)
+        self.assertIn("VELA", joined)
+
+    def test_guard_wechat_output_scrubs_legacy_external_project_names(self):
+        product = load_product_module()
+
+        cleaned = product.guard_wechat_output("继续 AugSun / ROLLQIIA 项目。")
+
+        self.assertNotIn("AugSun", cleaned)
+        self.assertNotIn("ROLLQIIA", cleaned)
+        self.assertIn("外部项目", cleaned)
+
     def test_default_context_ignores_smoke_and_unclaimed_interactions(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:

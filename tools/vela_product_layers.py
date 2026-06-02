@@ -416,11 +416,21 @@ def interaction_has_matching_claim(row: dict, claims: list[dict]) -> bool:
 
 
 LEGACY_EXTERNAL_PROJECT_NAMES = ("AugSun", "ROLLQIIA")
+LEGACY_EXTERNAL_PROJECT_PLACEHOLDER = "外部项目"
 
 
 def contains_legacy_external_project(value: object) -> bool:
     text = str(value or "")
     return any(name.lower() in text.lower() for name in LEGACY_EXTERNAL_PROJECT_NAMES)
+
+
+def scrub_legacy_external_project_text(value: object) -> str:
+    text = str(value or "")
+    for name in LEGACY_EXTERNAL_PROJECT_NAMES:
+        text = re.sub(re.escape(name), LEGACY_EXTERNAL_PROJECT_PLACEHOLDER, text, flags=re.IGNORECASE)
+    text = re.sub(rf"(?:\s*/\s*{LEGACY_EXTERNAL_PROJECT_PLACEHOLDER})+", "", text)
+    text = re.sub(rf"{LEGACY_EXTERNAL_PROJECT_PLACEHOLDER}(?:\s*/\s*{LEGACY_EXTERNAL_PROJECT_PLACEHOLDER})+", LEGACY_EXTERNAL_PROJECT_PLACEHOLDER, text)
+    return text
 
 
 def row_contains_legacy_external_project(row: dict) -> bool:
@@ -508,7 +518,7 @@ def guard_wechat_output(text: str, max_chars: int = 3600) -> str:
     """Keep engineering internals out of VELA's WeChat foreground."""
     lines: list[str] = []
     noise_seen = False
-    for line in str(text or "").splitlines():
+    for line in scrub_legacy_external_project_text(text).splitlines():
         lower = line.lower()
         if any(token in lower for token in ENGINEERING_NOISE_TOKENS):
             noise_seen = True
@@ -605,7 +615,7 @@ def record_reply_quality(
     row = {
         "created_at": utc_now().isoformat(),
         "conversation_type": conversation_type,
-        "user_goal": user_goal,
+        "user_goal": scrub_legacy_external_project_text(user_goal),
         "intent": intent or conversation_type,
         "used_cache": used_cache,
         "used_codex": used_codex,
@@ -650,10 +660,10 @@ def record_interaction(
     row = {
         "created_at": utc_now().isoformat(),
         "level": "Interaction Log",
-        "message_summary": " ".join(str(message or "").split())[:240],
+        "message_summary": " ".join(scrub_legacy_external_project_text(message).split())[:240],
         "intent": intent,
         "response_length": response_length(response_text),
-        "response_preview": str(response_text or "").strip()[:800],
+        "response_preview": scrub_legacy_external_project_text(response_text).strip()[:800],
         "used_codex": used_codex,
         "used_retrieval": used_retrieval,
         "storage_policy": "local_interaction_diagnostic_no_foreground_exposure",
@@ -697,9 +707,9 @@ def record_session_note(
     row = {
         "created_at": utc_now().isoformat(),
         "level": "Session Notes",
-        "message_summary": " ".join(str(message or "").split())[:240],
+        "message_summary": " ".join(scrub_legacy_external_project_text(message).split())[:240],
         "intent": intent,
-        "response_summary": " ".join(str(response_summary or "").split())[:240],
+        "response_summary": " ".join(scrub_legacy_external_project_text(response_summary).split())[:240],
         "persistent": False,
         "storage_policy": "short_term_local_context",
     }
@@ -1530,7 +1540,7 @@ def build_reply_context(
     confirmed_preference_summaries = [
         normalize_memory_summary(str(row.get("summary") or ""))
         for row in latest_learning_rows("confirmed-preferences-*.jsonl", log_dir=log_dir, limit=8)
-        if row.get("summary")
+        if row.get("summary") and not contains_legacy_external_project(row.get("summary"))
     ]
     confirmed_preference_set = set(confirmed_preference_summaries)
     preferences = [summary for summary in confirmed_preference_summaries if summary]
@@ -1539,6 +1549,8 @@ def build_reply_context(
             continue
         classification = str(row.get("classification") or "").strip()
         summary = normalize_memory_summary(str(row.get("summary") or ""))
+        if contains_legacy_external_project(summary):
+            continue
         if summary in confirmed_preference_set:
             continue
         if classification in {
@@ -1597,6 +1609,7 @@ def build_memory_candidate(message: str) -> dict:
     text = " ".join(str(message or "").split())
     lower = text.lower()
     classification = "preference"
+    contains_legacy_project = contains_legacy_external_project(text)
     style_markers = [
         "新闻列表",
         "太模板",
@@ -1645,6 +1658,8 @@ def build_memory_candidate(message: str) -> dict:
     ]
     if any(key in text for key in RELATIONSHIP_REPAIR_MARKERS):
         classification = "relationship_repair"
+    elif contains_legacy_project:
+        classification = "behavior_preference"
     elif any(key in text for key in strategic_markers):
         classification = "strategic_goal"
     elif any(key in text for key in BEHAVIOR_PREFERENCE_MARKERS):
@@ -1665,6 +1680,8 @@ def build_memory_candidate(message: str) -> dict:
             summary = summary.removeprefix(prefix).strip()
     if classification == "relationship_repair":
         summary = "用户反馈 VELA 没抓住真实意思；下轮先承认偏差，再用一个问题重切核心。"
+    elif contains_legacy_project:
+        summary = "行为边界候选：外部项目上下文不进入 VELA Companion Core；下一轮只围绕当前 VELA 任务判断。"
     elif classification == "behavior_preference":
         summary = "行为偏好候选：更快理解真实意思，减少拖延和自证，下一轮直接给判断和推进路径。"
     elif classification == "style_feedback":
@@ -1766,7 +1783,7 @@ def record_confirmed_preference(
     row = {
         "created_at": utc_now().isoformat(),
         "level": "Confirmed User Preference",
-        "summary": " ".join(str(summary or "").split()),
+        "summary": " ".join(scrub_legacy_external_project_text(summary).split()),
         "confirmed": True,
         "storage_policy": "explicit_confirmation_only",
     }
@@ -1793,7 +1810,7 @@ def record_strategic_memory(
         "created_at": utc_now().isoformat(),
         "level": "Strategic Memory",
         "memory_type": str(memory_type).strip(),
-        "summary": " ".join(str(summary or "").split()),
+        "summary": " ".join(scrub_legacy_external_project_text(summary).split()),
         "confirmed": True,
         "storage_policy": "long_term_high_value_only",
     }
@@ -1808,6 +1825,8 @@ def latest_promotable_memory_candidate(log_dir: Path | None = None) -> dict | No
             continue
         summary = normalize_memory_summary(str(row.get("summary") or ""))
         if not summary:
+            continue
+        if contains_legacy_external_project(summary):
             continue
         classification = str(row.get("classification") or "").strip()
         level = str(row.get("level") or "").strip()

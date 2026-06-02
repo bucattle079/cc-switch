@@ -513,12 +513,32 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         self.assertEqual(intent.name, "project_assistant")
 
-    def test_legacy_external_project_name_alone_does_not_enter_vela_project_lane(self):
+    def test_legacy_external_project_references_do_not_enter_vela_project_lane(self):
         router = load_module(ROUTER, "vela_router")
 
-        intent = router.classify_intent("继续 AugSun，先别开大工程，给最小推进动作")
+        cases = [
+            "继续 AugSun，先别开大工程，给最小推进动作",
+            "继续 AugSun 项目",
+            "继续 AugSun 项目，下一步怎么走",
+            "继续 ROLLQIIA 项目",
+        ]
 
-        self.assertEqual(intent.name, "normal_chat")
+        for text in cases:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, "style_feedback")
+                self.assertIn("context_quarantine", intent.focus_tags)
+                self.assertFalse(intent.codex_allowed)
+                self.assertFalse(intent.market_allowed)
+
+    def test_legacy_external_project_cleanup_request_routes_to_feedback(self):
+        router = load_module(ROUTER, "vela_router")
+
+        intent = router.classify_intent("把 AugSun 项目从 VELA 剔除")
+
+        self.assertEqual(intent.name, "style_feedback")
+        self.assertIn("context_quarantine", intent.focus_tags)
         self.assertFalse(intent.codex_allowed)
         self.assertFalse(intent.market_allowed)
 

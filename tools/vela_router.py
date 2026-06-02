@@ -24,6 +24,7 @@ from vela_market_briefing import (
 )
 from vela_product_layers import (
     RouteDecision,
+    contains_legacy_external_project,
     guard_wechat_output,
     interpret_user_need,
     is_current_information_request,
@@ -511,6 +512,8 @@ def classify_intent(text: str) -> Intent:
         return Intent("normal_chat", 0.86, ["conversation_boundary"])
     if is_context_leakage_feedback(norm):
         return Intent("style_feedback", 0.92, ["memory", "style_feedback", "relationship_repair"])
+    if contains_legacy_external_project(norm):
+        return Intent("style_feedback", 0.91, ["memory", "style_feedback", "context_quarantine"])
     if contains_any(norm, CODEX_KEYWORDS):
         return Intent("codex_task", 0.86, ["codex"], codex_allowed=True)
     if contains_any(norm, PROJECT_KEYWORDS) and not is_explicit_market_judgment_request(norm):
