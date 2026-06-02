@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from email.utils import format_datetime
 import importlib.util
 import json
 from pathlib import Path
@@ -35,6 +36,23 @@ class FakeHttpResponse:
 
     def read(self):
         return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
+
+
+def rss_payload(*titles: str) -> bytes:
+    items = []
+    for index, title in enumerate(titles):
+        published = datetime(2026, 6, 2, 8 + index, 30, tzinfo=timezone.utc)
+        items.append(
+            f"""
+            <item>
+              <title>{title}</title>
+              <link>https://example.com/{index}</link>
+              <source>财联社</source>
+              <pubDate>{format_datetime(published)}</pubDate>
+            </item>
+            """
+        )
+    return ("<rss><channel>" + "\n".join(items) + "</channel></rss>").encode("utf-8")
 
 
 class VelaRealtimeInfoTests(unittest.TestCase):
@@ -109,6 +127,21 @@ class VelaRealtimeInfoTests(unittest.TestCase):
                     self.assertIn("判断：", reply)
                     for token in ["不编实时天气", "天气实时数据不可用", "客套", "DeepSeek API"]:
                         self.assertNotIn(token, reply)
+
+    def test_current_info_query_builds_realtime_news_evidence_context(self):
+        info = load_module(REALTIME_INFO, "vela_realtime_info_current_info")
+
+        with patch.object(info, "fetch_rss", return_value=rss_payload("DeepSeek 发布新模型 API 升级", "DeepSeek 开放新的开发者能力")) as fetch:
+            reply = info.render_current_info_query_reply("现在DeepSeek有什么新消息")
+
+        self.assertIn("实时资讯源：已接入", reply)
+        self.assertIn("DeepSeek 发布新模型 API 升级", reply)
+        self.assertIn("来源：财联社", reply)
+        self.assertIn("判断：", reply)
+        self.assertIn("下一步：", reply)
+        self.assertTrue(fetch.called)
+        for token in ["raw payload", "schema", "DEEPSEEK_API_KEY", "英文生肉"]:
+            self.assertNotIn(token, reply)
 
 
 if __name__ == "__main__":

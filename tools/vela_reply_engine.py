@@ -305,6 +305,7 @@ def build_dialogue_brief(context: ReplyContext) -> str:
         extra_requirements.append(
             "现在类资讯约束：必须先处理实时性和来源边界；如果可用背景没有明确实时源，不要声称实时检索完成。"
             "输出控制在微信短回复，不要新闻列表、英文生肉、状态边界字段、schema 或工程日志。"
+            "不要照抄可用背景里的证据编号列表；只压成实时性、判断、下一步三行，最多引用两个来源名。"
             "建议结构：实时性 / 判断 / 下一步，最多五行。"
         )
     if context.intent == "deep_analysis":
@@ -481,9 +482,9 @@ class FallbackReplyAdapter(ReplyAdapter):
     )
 
     BEHAVIOR_FEEDBACK_VARIANTS = (
-        "K，收到。少拖、少自证，下一轮直接推进。",
+        "K，收到。少拖、少自证；现在直接推进。",
         "K，明白。这里不是道歉题，是执行节奏题。下一句先给判断，再给动作。",
-        "K，收到。更智能不是多说，是更快抓住真实意思；下一轮从结论开始。",
+        "K，收到。更智能不是多说，是更快抓住真实意思；结论先落地。",
     )
 
     RELATIONSHIP_REPAIR_VARIANTS = (

@@ -4,12 +4,16 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import re
 from urllib.parse import urlencode
 import urllib.request
 from zoneinfo import ZoneInfo
 
+from vela_daily_briefing import CHINA_TZ, dedupe_items, fetch_rss, google_news_rss_url, parse_rss
+
 
 WEATHER_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+CURRENT_INFO_MAX_ITEMS = 4
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,92 @@ def _now_utc(now_utc: datetime | None = None) -> datetime:
 
 def _compact(text: str) -> str:
     return " ".join(str(text or "").strip().split()).lower()
+
+
+def current_info_search_query(text: str) -> str:
+    raw = " ".join(str(text or "").strip().split())
+    for token in (
+        "现在",
+        "目前",
+        "当前",
+        "此刻",
+        "最新",
+        "帮我查一下",
+        "帮我查",
+        "查一下",
+        "查一查",
+        "检索一下",
+        "搜索一下",
+        "有什么新消息",
+        "有什么新闻",
+        "有什么公告",
+        "有什么更新",
+        "有什么新动态",
+        "发生了什么",
+    ):
+        raw = raw.replace(token, " ")
+    raw = re.sub(r"[？?！!，,。；;：:]+", " ", raw)
+    raw = " ".join(raw.split()).strip()
+    return raw or "实时资讯"
+
+
+def _raw_english_word_count(text: str) -> int:
+    allowed = {"api", "app", "ai", "deepseek", "chatgpt", "openai", "gpt"}
+    words = re.findall(r"\b[A-Za-z][A-Za-z0-9&+.-]{1,}\b", str(text or ""))
+    return len([word for word in words if word.lower().strip(".") not in allowed])
+
+
+def _safe_news_title(title: str) -> bool:
+    raw = str(title or "").strip()
+    if not raw:
+        return False
+    has_chinese = bool(re.search(r"[\u4e00-\u9fff]", raw))
+    return has_chinese or _raw_english_word_count(raw) < 5
+
+
+def fetch_current_info_items(text: str, *, max_items: int = CURRENT_INFO_MAX_ITEMS) -> list:
+    query = current_info_search_query(text)
+    queries = [f"{query} when:1d", query]
+    collected = []
+    for query_text in queries:
+        try:
+            collected.extend(parse_rss(fetch_rss(google_news_rss_url(query_text, zh=True)), "current_info"))
+        except Exception:
+            continue
+        if len(collected) >= max_items:
+            break
+    items = [item for item in dedupe_items(collected) if _safe_news_title(item.title)]
+    return items[:max_items]
+
+
+def render_current_info_query_reply(text: str, *, now_utc: datetime | None = None) -> str:
+    now = _now_utc(now_utc).astimezone(CHINA_TZ)
+    query = current_info_search_query(text)
+    try:
+        items = fetch_current_info_items(text)
+    except Exception:
+        items = []
+    if not items:
+        return (
+            f"K，{query}实时资讯源：暂未抓到高置信条目。\n"
+            "判断：这轮不把旧常识或模型猜测伪装成现在发生的事。\n"
+            "下一步：换更明确的关键词，或给我指定来源；我再让 DeepSeek 做判断。"
+        )
+    lines = [
+        f"K，{query}实时资讯源：已接入；抓取时间：{now:%Y-%m-%d %H:%M}（中国时间）。",
+        "证据：",
+    ]
+    for index, item in enumerate(items, start=1):
+        source = str(item.source or "未标明来源").replace("\n", " ").strip()
+        published = item.published.astimezone(CHINA_TZ)
+        lines.append(f"{index}. {item.title}。来源：{source}；时间：{published:%Y-%m-%d %H:%M}。")
+    lines.extend(
+        [
+            "判断：这是实时证据层，交给 DeepSeek 综合，不把标题列表当最终结论。",
+            "下一步：输出中文判断，说明实时性和不确定性。",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def location_for_weather(text: str) -> Location:

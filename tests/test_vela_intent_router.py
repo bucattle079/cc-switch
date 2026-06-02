@@ -167,7 +167,7 @@ class VelaIntentRouterTests(unittest.TestCase):
                                     self.assertEqual(run.call_args.kwargs["intent"], expected_intent)
                                     self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
 
-    def test_deepseek_env_does_not_take_over_style_feedback_lane(self):
+    def test_deepseek_env_routes_style_feedback_through_model_lane(self):
         router = load_module(ROUTER, "vela_router")
 
         with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
@@ -176,7 +176,7 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         self.assertEqual(reply, "K，少菜单，多判断。")
         self.assertEqual(run.call_args.kwargs["intent"], "style_feedback")
-        self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
     def test_weather_reply_is_weather_surface_not_menu(self):
         router = load_module(ROUTER, "vela_router")
@@ -586,7 +586,7 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         self.assertEqual(reply, "K，抓到了，是上下文串线。")
         self.assertEqual(run.call_args.kwargs["intent"], "style_feedback")
-        self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
     def test_project_opt_out_chat_does_not_route_to_project_assistant(self):
         router = load_module(ROUTER, "vela_router")
@@ -1017,6 +1017,29 @@ class VelaIntentRouterTests(unittest.TestCase):
                 reply = router.reply_for("VELA")
 
         self.assertEqual(reply, "K real")
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
+
+    def test_current_daily_info_builds_realtime_evidence_before_model_reply(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.object(router, "render_current_info_query_reply", return_value="K，实时资讯源：已接入。\n证据：DeepSeek 发布新消息。"):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model")) as run:
+                reply = router.reply_for("现在DeepSeek有什么新消息")
+
+        self.assertEqual(reply, "K model")
+        self.assertEqual(run.call_args.kwargs["intent"], "daily_info")
+        self.assertIn("实时资讯源：已接入", run.call_args.kwargs["supporting_context"])
+        self.assertNotIn("reply_adapter", run.call_args.kwargs)
+
+    def test_style_feedback_uses_deepseek_layer_when_available(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
+                reply = router.reply_for("你太像机器人了")
+
+        self.assertEqual(reply, "K real")
+        self.assertEqual(run.call_args.kwargs["intent"], "style_feedback")
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
     def test_structured_project_model_reply_is_not_wrapped_with_duplicate_sections(self):

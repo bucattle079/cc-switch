@@ -208,10 +208,12 @@ class VelaProductLayerTests(unittest.TestCase):
         now_daily = product.select_model_and_tools("daily_info", env=env, message="现在DeepSeek有什么新消息")
         self.assertEqual(now_daily.model_adapter, "deepseek_chat")
         self.assertTrue(now_daily.allow_retrieval)
+        self.assertEqual(now_daily.foreground_lane, "cached")
 
         now_searchable = product.select_model_and_tools("daily_info", env=env, message="现在帮我查这个政策")
         self.assertEqual(now_searchable.model_adapter, "deepseek_chat")
         self.assertTrue(now_searchable.allow_retrieval)
+        self.assertEqual(now_searchable.foreground_lane, "cached")
 
         for message in [
             "现在这个政策怎么样",
@@ -564,6 +566,86 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("Nvidia shares rise", result.text)
         self.assertIn("DeepSeek 已被调用", result.text)
 
+    def test_current_info_model_false_api_disconnect_claim_uses_realtime_evidence_context(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_false_current_disconnect")
+
+        class FalseDisconnectAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K，DeepSeek API 没接上，我不拿旧闻当新闻。\n判断：先不编。\n下一步：给我链接。",
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        supporting_context = "\n".join(
+            [
+                "K，实时资讯源：已接入。",
+                "证据：DeepSeek 发布新模型 API 升级。来源：财联社。",
+                "判断：证据可用。",
+                "下一步：用中文给结论。",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "现在DeepSeek有什么新消息",
+                intent="daily_info",
+                log_dir=Path(tmp),
+                supporting_context=supporting_context,
+                reply_adapter=FalseDisconnectAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "deepseek_chat_current_info_fallback")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertIn("实时资讯源：已接入", result.text)
+        self.assertIn("DeepSeek 发布新模型", result.text)
+        self.assertNotIn("API 没接上", result.text)
+
+    def test_current_info_model_repeated_evidence_list_is_compacted_for_frontstage(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_repeated_current_evidence")
+
+        supporting_context = "\n".join(
+            [
+                "K，DeepSeek实时资讯源：已接入；抓取时间：2026-06-02 22:34（中国时间）。",
+                "证据：",
+                "1. 腾讯云宣布降价，最高降97.5% - 新浪财经。来源：新浪财经；时间：2026-06-02 22:30。",
+                "2. 腾讯云下调DeepSeek-V4系列模型价格，全面对齐DeepSeek官方定价 - 新浪财经。来源：新浪财经；时间：2026-06-02 21:05。",
+                "判断：这是实时证据层，交给 DeepSeek 综合，不把标题列表当最终结论。",
+                "下一步：输出中文判断，说明实时性和不确定性。",
+            ]
+        )
+
+        class RepeatEvidenceAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text=supporting_context,
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "现在DeepSeek有什么新消息",
+                intent="daily_info",
+                log_dir=Path(tmp),
+                supporting_context=supporting_context,
+                reply_adapter=RepeatEvidenceAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "deepseek_chat_current_info_fallback")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertIn("实时源已接入", result.text)
+        self.assertIn("腾讯云宣布降价", result.text)
+        self.assertNotIn("\n1.", result.text)
+        self.assertNotIn("证据：", result.text)
+
     def test_now_market_information_without_deepseek_declares_local_degrade(self):
         product = load_product_module()
         supporting_context = "\n".join(
@@ -665,21 +747,26 @@ class VelaProductLayerTests(unittest.TestCase):
             self.assertNotIn(self_label, next_reply.text)
         self.assertNotIn("要看盘，说 A股、美股或韩国", next_reply.text)
 
-    def test_recent_style_feedback_overrides_deepseek_for_next_normal_reply(self):
+    def test_recent_style_feedback_does_not_bypass_deepseek_for_next_normal_reply(self):
         product = load_product_module()
         reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_feedback_control")
 
         class FakeDeepSeekAdapter(reply_engine.ReplyAdapter):
             name = "deepseek_chat"
 
+            def __init__(self):
+                self.calls = 0
+
             def generate(self, context):
+                self.calls += 1
                 return reply_engine.ReplyEngineResult(
-                    text="K。刚忙完？",
+                    text="K，我在。先听真实意思，不列菜单。",
                     source="fake_deepseek",
                     used_api=True,
                     adapter=self.name,
                 )
 
+        adapter = FakeDeepSeekAdapter()
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
             product.run_layered_response(
@@ -692,14 +779,14 @@ class VelaProductLayerTests(unittest.TestCase):
                 "你好",
                 intent="normal_chat",
                 log_dir=log_dir,
-                reply_adapter=FakeDeepSeekAdapter(),
+                reply_adapter=adapter,
             )
 
-        self.assertEqual(next_reply.reply_adapter, "fallback")
-        self.assertTrue(any(token in next_reply.text for token in ["我在", "在。", "听着", "慢慢说", "递过来"]))
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(next_reply.reply_adapter, "deepseek_chat")
+        self.assertTrue(any(token in next_reply.text for token in ["我在", "在。", "听着", "真实意思", "先听"]))
         for self_label in ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准"]:
             self.assertNotIn(self_label, next_reply.text)
-        self.assertNotIn("刚忙完", next_reply.text)
 
     def test_two_turn_feedback_replay_proves_behavior_change(self):
         product = load_product_module()
@@ -1464,20 +1551,90 @@ class VelaProductLayerTests(unittest.TestCase):
             self.assertNotIn("我已", text)
             self.assertNotIn("你可以再试", text)
             self.assertNotIn("下一轮我", text)
+            self.assertNotIn("下一轮", text)
             self.assertNotIn("已校准", text)
             self.assertNotIn("下一轮开始", text)
             self.assertNotIn("机械味已压下去", text)
 
-    def test_style_feedback_intent_uses_local_repair_without_model_promises(self):
+    def test_style_feedback_intent_uses_deepseek_when_available(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_style_feedback_model")
+
+        class GoodDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, context):
+                self.calls += 1
+                return reply_engine.ReplyEngineResult(
+                    text="K，判断：你说得对，刚才像提示牌。下一步：这句开始先抓真实意思，不列菜单。",
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        adapter = GoodDeepSeekAdapter()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "你太像机器人了",
+                intent="style_feedback",
+                log_dir=Path(tmp),
+                reply_adapter=adapter,
+            )
+
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(result.reply_adapter, "deepseek_chat")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertIn("先抓真实意思", result.text)
+        self.assertNotIn("你可以再试", result.text)
+
+    def test_style_feedback_bad_model_reply_uses_local_repair_after_calling_model(self):
         product = load_product_module()
         reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_style_feedback_local")
 
         class PromiseAdapter(reply_engine.ReplyAdapter):
             name = "deepseek_chat"
 
+            def __init__(self):
+                self.calls = 0
+
             def generate(self, context):
+                self.calls += 1
                 return reply_engine.ReplyEngineResult(
                     text="K，下一轮我会调整，你可以再试一次。",
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        adapter = PromiseAdapter()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "你太像机器人了",
+                intent="style_feedback",
+                log_dir=Path(tmp),
+                reply_adapter=adapter,
+            )
+
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(result.reply_adapter, "deepseek_chat_guarded_feedback_fallback")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertTrue(any(token in result.text for token in ["说人话", "先听懂", "结论", "重切"]))
+        for self_label in ["下一轮", "我会", "你可以再试", "长期记忆", "候选"]:
+            self.assertNotIn(self_label, result.text)
+
+    def test_style_feedback_model_reply_with_unrelated_recent_fact_is_guarded(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_style_feedback_unrelated_fact")
+
+        class UnrelatedFactAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K，纽约现在比北京慢12小时。但这不是你现在想问的，对吧。你说我像机器人，我换个切法。",
                     source="fake_deepseek",
                     used_api=True,
                     adapter=self.name,
@@ -1488,13 +1645,83 @@ class VelaProductLayerTests(unittest.TestCase):
                 "你太像机器人了",
                 intent="style_feedback",
                 log_dir=Path(tmp),
-                reply_adapter=PromiseAdapter(),
+                reply_adapter=UnrelatedFactAdapter(),
             )
 
-        self.assertEqual(result.reply_adapter, "fallback")
-        self.assertTrue(any(token in result.text for token in ["说人话", "先听懂", "结论", "重切"]))
-        for self_label in ["下一轮", "我会", "你可以再试", "长期记忆", "候选"]:
-            self.assertNotIn(self_label, result.text)
+        self.assertEqual(result.reply_adapter, "deepseek_chat_guarded_feedback_fallback")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertNotIn("纽约", result.text)
+        self.assertTrue(any(token in result.text for token in ["说人话", "真实意思", "结论", "重切"]))
+
+    def test_style_feedback_model_reply_shifting_burden_to_user_is_guarded(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_style_feedback_burden_shift")
+
+        class BurdenShiftAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K，知道了。这句确实硬了。下次你直接说“别绕”，我直接切。",
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "你太像机器人了",
+                intent="style_feedback",
+                log_dir=Path(tmp),
+                reply_adapter=BurdenShiftAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "deepseek_chat_guarded_feedback_fallback")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertNotIn("下次你", result.text)
+        self.assertTrue(any(token in result.text for token in ["说人话", "真实意思", "结论", "重切"]))
+
+    def test_feedback_adjusted_normal_chat_still_uses_deepseek_when_available(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_feedback_followup_model")
+
+        class FollowupDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, context):
+                self.calls += 1
+                return reply_engine.ReplyEngineResult(
+                    text="K，我在。先听真实意思，不列菜单。",
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        adapter = FollowupDeepSeekAdapter()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.run_layered_response(
+                "你太像机器人了",
+                intent="style_feedback",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            result = product.run_layered_response(
+                "你好",
+                intent="normal_chat",
+                log_dir=log_dir,
+                reply_adapter=adapter,
+            )
+
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(result.reply_adapter, "deepseek_chat")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertIn("真实意思", result.text)
+        for tasky in ["目标", "卡点", "最烦的点", "你慢慢说", "先不推你", "信息不用铺满"]:
+            self.assertNotIn(tasky, result.text)
 
     def test_persona_renderer_keeps_facts_and_applies_vela_voice(self):
         product = load_product_module()

@@ -92,16 +92,33 @@ def audit_reply(reply: str, contract: dict) -> dict:
     gates = contract["dialogue_quality_gates"]
     forbidden = [phrase for phrase in gates["forbidden_phrases"] if phrase.lower() in reply.lower()]
     dimensions: dict[str, bool] = {}
+    compact_info_judgment = (
+        not forbidden
+        and len(reply) <= 220
+        and ("判断：" in reply or "结论：" in reply)
+        and "下一步：" in reply
+    )
+    feedback_repair = (
+        len(reply) <= 90
+        and not forbidden
+        and any(token in reply for token in ["问题不是你挑剔", "真实意思", "重切", "像提示牌", "说人话"])
+    )
     lightweight_connection = (
         len(reply) <= 60
         and not forbidden
-        and any(token in reply for token in ["在", "听着", "你说", "慢慢说", "先不推你", "话从哪里开始都行"])
+        and any(token in reply for token in ["在", "听着", "你说", "先听", "接住", "话放"])
     )
     for label, keywords in gates["dimensions"].items():
         if label == "反机械":
-            dimensions[label] = not forbidden and len(reply) <= gates["max_reply_chars"]
+            dimensions[label] = not forbidden and (len(reply) <= gates["max_reply_chars"] or compact_info_judgment)
+        elif label == "人味质地":
+            dimensions[label] = any(keyword in reply for keyword in keywords) or (
+                compact_info_judgment and any(token in reply for token in ["我帮你", "别", "切", "不是"])
+            ) or feedback_repair
         else:
             dimensions[label] = any(keyword in reply for keyword in keywords)
+    if feedback_repair:
+        dimensions["反馈修复"] = True
     if lightweight_connection:
         dimensions["轻量连接"] = True
     score = sum(1 for passed in dimensions.values() if passed)

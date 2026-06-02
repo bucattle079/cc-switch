@@ -359,7 +359,7 @@ class VelaVoiceContractTests(unittest.TestCase):
                 "utf8",
                 str(SCRIPT),
                 "audit",
-                "K，在。先不推你，话从哪里开始都行。",
+                "K，我在。先听你这句。",
             ],
             text=True,
             encoding="utf-8",
@@ -370,6 +370,44 @@ class VelaVoiceContractTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn("总体：通过", completed.stdout)
         self.assertIn("轻量连接", completed.stdout)
+
+    def test_personality_script_accepts_short_feedback_repair_reply(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-X",
+                "utf8",
+                str(SCRIPT),
+                "audit",
+                "K，收到。问题不是你挑剔，是我刚才像提示牌；我从真实意思重切。",
+            ],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("总体：通过", completed.stdout)
+
+    def test_personality_script_accepts_compact_realtime_judgment_reply(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-X",
+                "utf8",
+                str(SCRIPT),
+                "audit",
+                "K，腾讯云刚把DeepSeek-V4价格打下来，最高降97.5%，对齐官方定价。国产AI价格战正式开打。 判断：这是基础设施侧降价，不是模型本身更新。如果你关心的是V4能力变化，目前还没看到官方新发布。 下一步：想跟进模型能力更新，还是评估降价对你业务的实际影响？我帮你切。",
+            ],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("总体：通过", completed.stdout)
 
     def test_personality_script_audits_latest_cc_connect_reply(self):
         with tempfile.TemporaryDirectory() as tmpdir:

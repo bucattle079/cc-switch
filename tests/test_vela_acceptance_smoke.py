@@ -1016,7 +1016,7 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
                         "level": "Interaction Log",
                         "message_summary": "你好 VELA",
                         "intent": "normal_chat",
-                        "response_preview": "K，在。先不推你，话从哪里开始都行。",
+                        "response_preview": "K，我在。先听你这句。",
                     }
                 ],
                 "human-iteration-2026-06-02.jsonl": [{"response_quality_signals": ["foreground_reply_clean"]}],
@@ -1049,7 +1049,7 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
         self.assertTrue(report["checks"]["weixin_command_dispatch"]["ok"])
         self.assertIn("send-once", report["checks"]["weixin_command_dispatch"]["detail"])
         self.assertTrue(report["checks"]["inbound_to_reply"]["ok"])
-        self.assertEqual(report["latest_reply"]["preview"], "K，在。先不推你，话从哪里开始都行。")
+        self.assertEqual(report["latest_reply"]["preview"], "K，我在。先听你这句。")
         self.assertEqual(report["latest_inbound"]["source"], "local_foreground_proof")
         self.assertNotIn("weixin_inbound_seen", report["failed"])
 

@@ -1601,6 +1601,13 @@ def select_model_and_tools(
                 else "World brief final wording goes through the dialogue model unless it is a Codex task."
             ),
         )
+    if intent == "daily_info" and current_info and not _has_any(message, CURRENT_TIME_QUERY_MARKERS):
+        return ToolSelection(
+            model_adapter=_dialogue_adapter_for_env(env),
+            foreground_lane="cached",
+            allow_retrieval=True,
+            reason="Current searchable daily information uses realtime evidence and DeepSeek with cached-lane latency.",
+        )
     if intent in {"project_assistant", "deep_analysis"}:
         return ToolSelection(
             model_adapter=_dialogue_adapter_for_env(env),
@@ -2326,9 +2333,16 @@ def current_info_reply_has_frontstage_hazards(text: str) -> bool:
         "response_quality_signals",
         "active_persona_capabilities",
         "Market & World Briefing",
+        "API 没接上",
+        "API没接上",
+        "没有实时可验证来源",
+        "给我链接",
+        "证据：\n1.",
         "关键风险\n1.",
     )
     if any(token.lower() in raw.lower() for token in hazards):
+        return True
+    if re.search(r"(?m)^\s*[1-9]\d*\.\s+.+?来源：", raw):
         return True
     if has_raw_english_frontstage_sentence(raw):
         return True
@@ -2394,6 +2408,9 @@ def has_raw_english_frontstage_sentence(text: str) -> bool:
 
 def current_info_fallback_text(context: ReplyContext, adapter_name: str) -> str:
     if context.supporting_context.strip():
+        compacted = compact_current_info_evidence_context(context.supporting_context, adapter_name)
+        if compacted:
+            return compacted
         if adapter_name == "fallback":
             supporting = context.supporting_context.strip()
             boundary = "实时信息链：DeepSeek API 未接上；以下只按本地源/缓存降级。"
@@ -2414,6 +2431,35 @@ def current_info_fallback_text(context: ReplyContext, adapter_name: str) -> str:
         "判断：不把不可靠输出端给你。\n"
         "下一步：换实时源或重试查询。"
     )
+
+
+def compact_current_info_evidence_context(supporting_context: str, adapter_name: str) -> str:
+    raw = str(supporting_context or "").strip()
+    if "实时资讯源：已接入" not in raw:
+        return ""
+    subject_match = re.search(r"K\s*[,，]\s*(.+?)实时资讯源：已接入", raw)
+    subject = subject_match.group(1).strip() if subject_match else "这条"
+    time_match = re.search(r"抓取时间：([^。\n]+)", raw)
+    time_text = time_match.group(1).strip() if time_match else ""
+    evidence = re.findall(
+        r"(?m)^\s*\d+\.\s*(.+?)。来源：([^；。\n]+)(?:；时间：([^。\n]+))?",
+        raw,
+    )
+    if not evidence:
+        return ""
+    first_title, first_source, first_time = evidence[0]
+    first_title = re.sub(r"\s+-\s+[^-。]{2,80}$", "", first_title).strip()
+    first_source = first_source.strip() or "未标明来源"
+    count = len(evidence)
+    api_boundary = "" if adapter_name != "fallback" else "DeepSeek API 未完成生成；"
+    fetched = f"抓取时间：{time_text}。" if time_text else ""
+    return "\n".join(
+        [
+            f"K，{subject}实时源已接入；{api_boundary}{fetched}抓到 {count} 条可用线索。",
+            f"判断：主线先看“{first_title}”（{first_source}）。这说明当前信息方向已经有证据，但还不能只凭标题下最终结论。",
+            "下一步：先核官方公告或原始来源，再决定要不要调整判断；标题只是路标，不是圣旨。",
+        ]
+    ).strip()
 
 
 def normalize_model_frontstage_reply(text: str) -> str:
@@ -2465,9 +2511,14 @@ def engine_text_for_intent(
         return render_memory_reply(context.message), "local_memory_guard", False
     if context.intent == "memory_related" and _is_explicit_memory_instruction(context.message):
         return render_memory_reply(context.message), "local_memory_guard", False
-    if should_use_local_feedback_control(context):
-        result = FallbackReplyAdapter().generate(context)
-        return result.text, result.adapter, result.used_api
+    if should_use_feedback_repair_lane(context):
+        result = adapter.generate(context)
+        if result.used_api and not feedback_reply_has_frontstage_hazards(result.text, context):
+            return normalize_model_frontstage_reply(result.text), result.adapter, True
+        fallback = FallbackReplyAdapter().generate(context)
+        if result.used_api and result.adapter:
+            return fallback.text, f"{result.adapter}_guarded_feedback_fallback", True
+        return fallback.text, fallback.adapter, False
     if context.intent in {"project_assistant", "deep_analysis"}:
         result = adapter.generate(context)
         base = analysis_layer(context.message, context.intent, codex_summary=codex_summary)
@@ -2501,7 +2552,7 @@ def engine_text_for_intent(
     return result.text, result.adapter, result.used_api
 
 
-def should_use_local_feedback_control(context: ReplyContext) -> bool:
+def should_use_feedback_repair_lane(context: ReplyContext) -> bool:
     if context.intent == "style_feedback":
         return True
     if context.intent != "normal_chat":
@@ -2520,6 +2571,53 @@ def should_use_local_feedback_control(context: ReplyContext) -> bool:
             "behavior_preference",
         )
     )
+
+
+def feedback_reply_has_frontstage_hazards(text: str, context: ReplyContext | None = None) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return True
+    if len(raw) > 520:
+        return True
+    if dialogue_quality_issues(raw):
+        return True
+    hazards = (
+        "我会调整",
+        "下一轮我会",
+        "你可以再试",
+        "已校准",
+        "机械味",
+        "候选",
+        "长期记忆",
+        "写进",
+        "记录到",
+        "下次你",
+        "你下次",
+        "你直接说",
+        "作为 VELA",
+        "作为VELA",
+    )
+    if any(token.lower() in raw.lower() for token in hazards):
+        return True
+    if context is not None and context.intent == "style_feedback":
+        message = str(context.message or "")
+        unrelated_fact_markers = (
+            "纽约",
+            "北京慢",
+            "美国时间",
+            "天气",
+            "降雨",
+            "A股",
+            "美股",
+            "市场",
+            "腾讯云",
+            "价格战",
+            "降价",
+            "DeepSeek-V4",
+            "ChatGPT更新",
+        )
+        return any(marker in raw and marker not in message for marker in unrelated_fact_markers)
+    return False
 
 
 def avoid_repeated_reply(text: str, context: ReplyContext) -> str:

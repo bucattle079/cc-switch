@@ -25,6 +25,7 @@ from vela_market_briefing import (
 from vela_intent_signals import CURRENT_TIME_QUERY_MARKERS as CURRENT_TIME_QUERY_KEYWORDS
 from vela_realtime_info import (
     location_for_weather,
+    render_current_info_query_reply,
     render_time_query_reply,
     render_weather_query_reply,
 )
@@ -1044,11 +1045,17 @@ def reply_for(text: str) -> str:
             intent=intent.name,
             supporting_context=supporting_context,
         ).text
+    if intent.name in {"daily_info", "world_brief"} and is_current_information_request(text, intent.name):
+        supporting_context = guard_wechat_output(render_current_info_query_reply(text))
+        return run_layered_response(
+            text,
+            intent=intent.name,
+            supporting_context=supporting_context,
+        ).text
     if intent.name == "style_feedback":
         return run_layered_response(
             text,
             intent=intent.name,
-            reply_adapter=FallbackReplyAdapter(),
         ).text
     if intent.name == "codex_task":
         return guard_wechat_output(render_codex_bridge(text))
