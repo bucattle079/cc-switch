@@ -2034,6 +2034,7 @@ def render_vela_persona(packet: AnalysisPacket) -> str:
         lines.extend(f"- {fact}" for fact in packet.facts)
     if packet.judgment:
         judgment = re.sub(r"^\s*K\s*[,，:：]\s*", "", packet.judgment).strip()
+        judgment = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", judgment)
         lines.append(f"判断：{judgment}")
     if packet.risks:
         lines.append("风险：")
@@ -2309,9 +2310,21 @@ def model_reply_has_frontstage_hazards(text: str, *, intent: str = "") -> bool:
         "你下次",
         "加一句指向",
     )
+    project_hazards = (
+        "重复发",
+        "反复发",
+        "重复发送",
+        "发四次",
+        "发了四次",
+        "风险提醒：",
+    )
     if intent == "deep_analysis" and raw.rstrip().endswith(("，", "、", "：", ":", "；", ";", "-")):
         return True
-    hazards = common_hazards + (deep_hazards if intent == "deep_analysis" else ())
+    hazards = (
+        common_hazards
+        + (deep_hazards if intent == "deep_analysis" else ())
+        + (project_hazards if intent == "project_assistant" else ())
+    )
     return any(token.lower() in raw.lower() for token in hazards)
 
 
@@ -2530,13 +2543,16 @@ def engine_text_for_intent(
         )
         if model_frontstage_ready:
             return normalize_model_frontstage_reply(result.text), result.adapter, result.used_api
-        if context.intent == "deep_analysis":
+        deep_lane_failure = should_surface_deep_lane_status(result)
+        if context.intent == "project_assistant" and deep_lane_failure:
+            judgment = base.judgment
+        elif context.intent == "deep_analysis":
             judgment = base.judgment
         elif context.intent == "project_assistant" and not result.used_api and _has_any(context.message, PROJECT_MINIMUM_LOOP_MARKERS):
             judgment = base.judgment
         else:
             judgment = base.judgment if has_hazards else result.text or base.judgment
-        if should_surface_deep_lane_status(result):
+        if deep_lane_failure and context.intent != "project_assistant":
             judgment = render_deep_lane_status_judgment(context, result, base)
         packet = AnalysisPacket(
             intent=base.intent,

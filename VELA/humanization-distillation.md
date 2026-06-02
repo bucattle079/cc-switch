@@ -23,7 +23,7 @@ Response modes:
 Routing/output rule:
 
 - Except for Codex-related instructions, ordinary final WeChat dialogue goes through the DeepSeek dialogue adapter when configured.
-- Weather keeps its own intent but does not call a weather API; the model gives risk framing without fake realtime forecast data.
+- Weather keeps its own intent and calls the realtime weather evidence layer first; the model renders VELA's concise answer when configured, and falls back to risk framing only when the source is unavailable.
 - Freshness, market-refresh, and weather source-boundary lines remain local foreground wording; the model must not rephrase non-realtime data into realtime claims.
 
 Persona skeleton:

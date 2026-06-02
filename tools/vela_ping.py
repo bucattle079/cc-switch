@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from vela_router import reply_for
+
 
 def main() -> int:
-    print("在。不是报到，是连接。我听着，你说。")
+    print(reply_for("VELA"))
     return 0
 
 

@@ -23,8 +23,9 @@ class VelaSkillTextTests(unittest.TestCase):
         text = PERSONALITY.read_text(encoding="utf-8")
 
         self.assertIn("## Reply Calibration", text)
-        self.assertIn("在。不是报到，是连接。我听着，你说。", text)
         self.assertIn("Exact `VELA`", text)
+        self.assertIn("No fixed catchphrase", text)
+        self.assertNotIn("在。不是报到，是连接。我听着，你说。", text)
         self.assertIn("growth note", text)
         self.assertIn("## Zhou Xun Texture Vector", text)
         self.assertIn("人物质感", text)
@@ -154,7 +155,13 @@ class VelaSkillTextTests(unittest.TestCase):
         self.assertIn("$env:VELA_DEEPSEEK_MODEL = $env:DEEPSEEK_MODEL", text)
         self.assertIn("$env:VELA_DEEPSEEK_BASE_URL = $env:DEEPSEEK_BASE_URL", text)
 
-    def test_vela_ping_is_fast_plain_text_calibration(self):
+    def test_vela_ping_uses_router_instead_of_stale_hardcoded_line(self):
+        source = VELA_PING.read_text(encoding="utf-8")
+
+        self.assertIn("from vela_router import reply_for", source)
+        self.assertIn('reply_for("VELA")', source)
+        self.assertNotIn("在。不是报到，是连接。我听着，你说。", source)
+
         completed = subprocess.run(
             [sys.executable, "-X", "utf8", str(VELA_PING)],
             text=True,
@@ -164,10 +171,8 @@ class VelaSkillTextTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(
-            completed.stdout.strip(),
-            "在。不是报到，是连接。我听着，你说。",
-        )
+        self.assertIn("K", completed.stdout)
+        self.assertNotIn("不是报到，是连接", completed.stdout)
         self.assertNotIn("你好", completed.stdout)
         self.assertNotIn("有什么可以帮", completed.stdout)
 

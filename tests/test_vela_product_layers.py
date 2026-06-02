@@ -1761,6 +1761,23 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("判断：这不是智商问题，是链路问题。", reply)
         self.assertNotIn("判断：K，", reply)
 
+    def test_persona_renderer_strips_markdown_bold_from_model_judgment(self):
+        product = load_product_module()
+
+        packet = product.AnalysisPacket(
+            intent="project_assistant",
+            facts=["用户要推进 VELA Companion Core 产品化事项。"],
+            judgment="**目标**：前台是伙伴，不是菜单。**最小下一步**：选一个真实场景。",
+            risks=["不要把格式当判断。"],
+            next_actions=["锁一个真实场景。"],
+        )
+
+        reply = product.render_vela_persona(packet)
+
+        self.assertIn("目标：前台是伙伴，不是菜单。", reply)
+        self.assertIn("最小下一步：选一个真实场景。", reply)
+        self.assertNotIn("**", reply)
+
     def test_guardrail_removes_engineering_noise_before_wechat(self):
         product = load_product_module()
 
@@ -2500,6 +2517,68 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("ROLLQIIA", result.text)
         self.assertNotIn("raw payload", result.text.lower())
         self.assertNotIn("diff --git", result.text)
+
+    def test_project_assistant_deepseek_failure_uses_clean_local_judgment(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_project_failure_status")
+
+        class DeepSeekFailureAdapter(reply_engine.ReplyAdapter):
+            name = "fallback"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K，项目线不重开。下一步：锁一个可验证闭环。",
+                    source="deepseek_failure:timeout",
+                    used_api=False,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "继续 VELA 项目",
+                intent="project_assistant",
+                log_dir=Path(tmp),
+                reply_adapter=DeepSeekFailureAdapter(),
+            )
+
+        self.assertIn("判断：", result.text)
+        self.assertIn("风险：", result.text)
+        self.assertIn("下一步：", result.text)
+        self.assertLessEqual(result.text.count("下一步："), 1, result.text)
+        for token in ["项目判断这次没完整返回", "没完整返回", "空等", "DeepSeek API", "adapter"]:
+            self.assertNotIn(token, result.text)
+
+    def test_project_assistant_rejects_model_repetition_context_leak(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_project_repetition_leak")
+
+        class RepetitionLeakAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "K，判断：重复发四次，说明你不想等愿景。"
+                        "风险提醒：把 Codex 输出当产品判断。"
+                        "下一步：选一个真实场景。"
+                    ),
+                    source="fake_deepseek",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "继续 VELA 项目",
+                intent="project_assistant",
+                log_dir=Path(tmp),
+                reply_adapter=RepetitionLeakAdapter(),
+            )
+
+        self.assertIn("判断：", result.text)
+        self.assertIn("下一步：", result.text)
+        self.assertNotIn("重复发", result.text)
+        self.assertNotIn("风险提醒", result.text)
 
     def test_project_minimum_loop_fallback_keeps_specific_judgment(self):
         product = load_product_module()
