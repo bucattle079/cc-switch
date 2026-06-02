@@ -1921,6 +1921,10 @@ def run_smoke_suite(
         base_log_dir = Path(log_dir)
         base_log_dir.mkdir(parents=True, exist_ok=True)
     old_deepseek = os.environ.get("DEEPSEEK_API_KEY")
+    old_learning_loop = os.environ.get("VELA_LEARNING_LOOP_DIR")
+    old_interaction_source = os.environ.get("VELA_INTERACTION_SOURCE")
+    os.environ["VELA_LEARNING_LOOP_DIR"] = str(base_log_dir)
+    os.environ["VELA_INTERACTION_SOURCE"] = "acceptance_smoke"
     if fake_deepseek_env:
         os.environ["DEEPSEEK_API_KEY"] = "smoke-deepseek-key"
     try:
@@ -1951,6 +1955,14 @@ def run_smoke_suite(
                 os.environ.pop("DEEPSEEK_API_KEY", None)
             else:
                 os.environ["DEEPSEEK_API_KEY"] = old_deepseek
+        if old_learning_loop is None:
+            os.environ.pop("VELA_LEARNING_LOOP_DIR", None)
+        else:
+            os.environ["VELA_LEARNING_LOOP_DIR"] = old_learning_loop
+        if old_interaction_source is None:
+            os.environ.pop("VELA_INTERACTION_SOURCE", None)
+        else:
+            os.environ["VELA_INTERACTION_SOURCE"] = old_interaction_source
         if created_tmp is not None:
             created_tmp.cleanup()
 

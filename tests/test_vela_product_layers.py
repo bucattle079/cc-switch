@@ -676,6 +676,97 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertFalse(context.tool_policy.allow_market)
         self.assertFalse(context.tool_policy.allow_codex)
 
+    def test_default_context_ignores_smoke_and_unclaimed_interactions(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            learning_loop = root / "learning-loop"
+            send_once = root / "send-once"
+            learning_loop.mkdir(parents=True)
+            send_once.mkdir(parents=True)
+            interaction_path = learning_loop / "interaction-2026-06-02.jsonl"
+            session_path = learning_loop / "session-notes-2026-06-02.jsonl"
+            rows = [
+                {
+                    "created_at": "2026-06-02T00:00:00+00:00",
+                    "intent": "codex_task",
+                    "message_summary": "SMOKE_CODEX",
+                    "response_preview": "smoke reply",
+                    "source": "acceptance_smoke",
+                },
+                {
+                    "created_at": "2026-06-02T00:00:01+00:00",
+                    "intent": "market_refresh",
+                    "message_summary": "UNCLAIMED_MARKET",
+                    "response_preview": "unclaimed reply",
+                },
+                {
+                    "created_at": "2026-06-02T00:00:03+00:00",
+                    "intent": "normal_chat",
+                    "message_summary": "REAL_HELLO",
+                    "response_preview": "real reply",
+                },
+            ]
+            interaction_path.write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+            session_rows = [
+                {
+                    "created_at": "2026-06-02T00:00:00+00:00",
+                    "intent": "codex_task",
+                    "message_summary": "SMOKE_NOTE",
+                    "response_summary": "smoke note",
+                    "source": "acceptance_smoke",
+                },
+                {
+                    "created_at": "2026-06-02T00:00:01+00:00",
+                    "intent": "market_refresh",
+                    "message_summary": "UNCLAIMED_NOTE",
+                    "response_summary": "unclaimed note",
+                },
+                {
+                    "created_at": "2026-06-02T00:00:03+00:00",
+                    "intent": "normal_chat",
+                    "message_summary": "REAL_HELLO",
+                    "response_summary": "real note",
+                },
+            ]
+            session_path.write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in session_rows) + "\n",
+                encoding="utf-8",
+            )
+            (send_once / "real.claim").write_text(
+                json.dumps(
+                    {
+                        "created_at": "2026-06-02T00:00:02+00:00",
+                        "intent": "normal_chat",
+                        "message_preview": "REAL_HELLO",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            original_loop = product.LEARNING_LOOP_DIR
+            original_send_once = product.SEND_ONCE_DIR
+            product.LEARNING_LOOP_DIR = learning_loop
+            product.SEND_ONCE_DIR = send_once
+            try:
+                with patch.dict("os.environ", {}, clear=True):
+                    context = product.build_reply_context("continue", intent="normal_chat")
+            finally:
+                product.LEARNING_LOOP_DIR = original_loop
+                product.SEND_ONCE_DIR = original_send_once
+
+        self.assertIn("REAL_HELLO", context.recent_summary)
+        self.assertIn("real note", context.recent_summary)
+        self.assertEqual(context.last_response, "real reply")
+        self.assertNotIn("SMOKE_CODEX", context.recent_summary)
+        self.assertNotIn("UNCLAIMED_MARKET", context.recent_summary)
+        self.assertNotIn("SMOKE_NOTE", context.recent_summary)
+        self.assertNotIn("UNCLAIMED_NOTE", context.recent_summary)
+
     def test_reply_context_marks_pressure_scenario_for_fatigue_and_chaos(self):
         product = load_product_module()
 

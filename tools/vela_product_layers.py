@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -21,6 +21,7 @@ from vela_reply_engine import (
 ROOT = Path(__file__).resolve().parents[1]
 VELA_DIR = ROOT / "VELA"
 LEARNING_LOOP_DIR = VELA_DIR / "learning-loop"
+SEND_ONCE_DIR = VELA_DIR / "send-once"
 VOICE_CONTRACT = VELA_DIR / "voice-contract.json"
 
 CURRENT_INFO_TRIGGERS = ("现在", "目前", "当前", "当下", "此刻", "最新", "实时")
@@ -338,6 +339,114 @@ def learning_loop_dir(log_dir: Path | None = None) -> Path:
     return LEARNING_LOOP_DIR
 
 
+INTERNAL_INTERACTION_SOURCES = {"acceptance_smoke", "unit_test", "test"}
+CLAIM_BACKED_CONTEXT_WINDOW_SECONDS = 300
+
+
+def interaction_source() -> str:
+    return " ".join(str(os.environ.get("VELA_INTERACTION_SOURCE") or "").split())[:80]
+
+
+def parse_created_at(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def normalized_context_text(value: str) -> str:
+    return " ".join(str(value or "").split())
+
+
+def should_require_claim_backing(log_dir: Path | None = None) -> bool:
+    active = learning_loop_dir(log_dir)
+    try:
+        return active.resolve() == LEARNING_LOOP_DIR.resolve() and SEND_ONCE_DIR.exists()
+    except OSError:
+        return active == LEARNING_LOOP_DIR and SEND_ONCE_DIR.exists()
+
+
+def send_once_claims(claim_dir: Path | None = None) -> list[dict]:
+    directory = claim_dir or SEND_ONCE_DIR
+    if not directory.exists():
+        return []
+    paths = list(directory.glob("*.claim"))
+    for name in ("last-claim.json", "last-feedback-claim.json"):
+        path = directory / name
+        if path.exists():
+            paths.append(path)
+    claims: list[dict] = []
+    for path in paths:
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(row, dict):
+            claims.append(row)
+    return claims
+
+
+def interaction_has_matching_claim(row: dict, claims: list[dict]) -> bool:
+    message = normalized_context_text(str(row.get("message_summary") or ""))
+    intent = str(row.get("intent") or "").strip()
+    created_at = parse_created_at(str(row.get("created_at") or ""))
+    if not message or created_at is None:
+        return False
+    for claim in claims:
+        claim_message = normalized_context_text(str(claim.get("message_preview") or ""))
+        if claim_message != message:
+            continue
+        claim_intent = str(claim.get("intent") or "").strip()
+        if claim_intent and intent and claim_intent != intent:
+            continue
+        claim_time = parse_created_at(str(claim.get("created_at") or ""))
+        if claim_time is None:
+            continue
+        if abs(created_at - claim_time) <= timedelta(seconds=CLAIM_BACKED_CONTEXT_WINDOW_SECONDS):
+            return True
+    return False
+
+
+def context_interaction_rows(log_dir: Path | None = None, limit: int = 8) -> list[dict]:
+    require_claim = should_require_claim_backing(log_dir)
+    read_limit = max(limit * 40, 200) if require_claim else max(limit * 4, limit)
+    rows = latest_learning_rows("interaction-*.jsonl", log_dir=log_dir, limit=read_limit)
+    if require_claim:
+        rows = [
+            row
+            for row in rows
+            if str(row.get("source") or "").strip() not in INTERNAL_INTERACTION_SOURCES
+        ]
+        claims = send_once_claims()
+        if claims:
+            rows = [row for row in rows if interaction_has_matching_claim(row, claims)]
+    return rows[-limit:]
+
+
+def context_session_note_rows(log_dir: Path | None = None, limit: int = 3) -> list[dict]:
+    require_claim = should_require_claim_backing(log_dir)
+    read_limit = max(limit * 40, 200) if require_claim else max(limit * 4, limit)
+    rows = latest_learning_rows("session-notes-*.jsonl", log_dir=log_dir, limit=read_limit)
+    if require_claim:
+        rows = [
+            row
+            for row in rows
+            if str(row.get("source") or "").strip() not in INTERNAL_INTERACTION_SOURCES
+        ]
+        claims = send_once_claims()
+        if claims:
+            rows = [row for row in rows if interaction_has_matching_claim(row, claims)]
+    return rows[-limit:]
+
+
 def voice_contract_forbidden_phrases() -> tuple[str, ...]:
     phrases = list(EXTRA_FORBIDDEN_DIALOGUE_PHRASES)
     try:
@@ -546,6 +655,9 @@ def record_interaction(
         row["latency_ms"] = max(0, int(latency_ms))
     if foreground_lane:
         row["foreground_lane"] = foreground_lane
+    source = interaction_source()
+    if source:
+        row["source"] = source
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     return path
@@ -570,6 +682,9 @@ def record_session_note(
         "persistent": False,
         "storage_policy": "short_term_local_context",
     }
+    source = interaction_source()
+    if source:
+        row["source"] = source
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     return path
@@ -1193,7 +1308,7 @@ def strategic_candidate_summaries(log_dir: Path | None = None, limit: int = 3) -
 
 def session_note_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
     summaries: list[str] = []
-    for row in latest_learning_rows("session-notes-*.jsonl", log_dir=log_dir, limit=limit):
+    for row in context_session_note_rows(log_dir=log_dir, limit=limit):
         intent = str(row.get("intent") or "unknown").strip()
         message = str(row.get("message_summary") or "").strip()
         response = str(row.get("response_summary") or "").strip()
@@ -1208,7 +1323,7 @@ def session_note_summaries(log_dir: Path | None = None, limit: int = 3) -> list[
 
 def interaction_diagnostic_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
     summaries: list[str] = []
-    for row in latest_learning_rows("interaction-*.jsonl", log_dir=log_dir, limit=limit * 3):
+    for row in context_interaction_rows(log_dir=log_dir, limit=limit * 3):
         signals: list[str] = []
         feedback_type = str(row.get("feedback_type") or "").strip()
         if feedback_type and feedback_type != "none":
@@ -1356,7 +1471,7 @@ def build_reply_context(
     supporting_context: str = "",
 ) -> ReplyContext:
     normalized_message = " ".join(str(message or "").split())
-    interactions = latest_learning_rows("interaction-*.jsonl", log_dir=log_dir, limit=8)
+    interactions = context_interaction_rows(log_dir=log_dir, limit=8)
     last = interactions[-1] if interactions else {}
     last_response = str(last.get("response_preview") or "")
     repeated_message = bool(last) and str(last.get("message_summary") or "") == normalized_message[:240]

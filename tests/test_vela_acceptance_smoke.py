@@ -188,6 +188,20 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
         self.assertEqual(refresh["latest_quality_log"]["quality_flags"][1], "adapter:local_status")
         self.assertFalse(refresh["bridge_executed"])
 
+    def test_entrypoint_smoke_marks_interactions_as_acceptance_smoke(self):
+        smoke = load_smoke_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            report = smoke.run_smoke_suite(log_dir=log_dir, use_entrypoint=True, fake_deepseek_env=True)
+            rows = []
+            for path in [*log_dir.glob("*/interaction-*.jsonl"), *log_dir.glob("*/session-notes-*.jsonl")]:
+                rows.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+        self.assertTrue(report["ok"], report)
+        self.assertTrue(rows)
+        self.assertTrue(all(row.get("source") == "acceptance_smoke" for row in rows))
+
     def test_entrypoint_smoke_reports_speed_lane_budgets(self):
         smoke = load_smoke_module()
 
