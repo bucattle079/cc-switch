@@ -1759,6 +1759,54 @@ class VelaProductLayerTests(unittest.TestCase):
         for internal in ["候选记忆", "候选类型", "schema", "jsonl"]:
             self.assertNotIn(internal, result.text)
 
+    def test_revoking_confirmed_preference_removes_it_from_next_context(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.run_layered_response(
+                "记住：以后市场分析默认先看A股、美股、韩国",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            product.run_layered_response(
+                "确认，把这条偏好固定下来",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            result = product.run_layered_response(
+                "取消刚才那条市场偏好，不要再默认先看A股美股韩国",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            context = product.build_reply_context(
+                "今天市场怎么看",
+                intent="market_brief",
+                log_dir=log_dir,
+            )
+            revocation_rows = [
+                json.loads(line)
+                for line in next(log_dir.glob("preference-revocations-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            candidate_rows = [
+                json.loads(line)
+                for line in next(log_dir.glob("memory-candidates-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertFalse(result.memory_candidate)
+        self.assertEqual(len(candidate_rows), 1)
+        self.assertEqual(revocation_rows[-1]["level"], "Preference Revocation")
+        self.assertIn("A股", revocation_rows[-1]["revoked_summary"])
+        self.assertIn("取消", result.text)
+        self.assertTrue(any(token in result.text for token in ["不再按", "已撤回", "撤回"]))
+        joined = " ".join(context.user_preferences)
+        self.assertNotIn("以后市场分析默认先看A股、美股、韩国", joined)
+        self.assertNotIn("取消刚才那条市场偏好", joined)
+
     def test_confirming_latest_strategic_candidate_promotes_it_without_frontstage_schema(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:

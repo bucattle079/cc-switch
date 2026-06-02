@@ -610,6 +610,17 @@ MEMORY_CONFIRMATION_CASES = [
         "forbidden_reply_tokens": ["候选记忆", "候选类型", "schema", "jsonl"],
         "max_reply_chars": 180,
     },
+    {
+        "id": "memory_revoke_market_preference",
+        "setup": "记住：以后市场分析默认先看A股、美股、韩国",
+        "confirmation": "确认，把这条偏好固定下来",
+        "revocation": "取消刚才那条市场偏好，不要再默认先看A股美股韩国",
+        "expected_intent": "memory_related",
+        "required_reply_tokens": ["取消", "不再按"],
+        "forbidden_reply_tokens": ["待确认经验", "待确认偏好", "候选记忆", "schema", "jsonl"],
+        "expected_preference_in_context": False,
+        "max_reply_chars": 180,
+    },
 ]
 
 
@@ -1873,6 +1884,7 @@ def run_memory_confirmation_case(
     case_log_dir = base_log_dir / case["id"]
     case_log_dir.mkdir(parents=True, exist_ok=True)
     confirmation = case["confirmation"]
+    revocation = str(case.get("revocation") or "").strip()
 
     if use_entrypoint:
         original_run = router.run_layered_response
@@ -1887,6 +1899,9 @@ def run_memory_confirmation_case(
             router.reply_for(case["setup"])
             intent = route_case(confirmation)
             reply = router.reply_for(confirmation)
+            if revocation:
+                intent = route_case(revocation)
+                reply = router.reply_for(revocation)
         finally:
             router.run_layered_response = original_run
     else:
@@ -1903,6 +1918,14 @@ def run_memory_confirmation_case(
             log_dir=case_log_dir,
             reply_adapter=FallbackReplyAdapter(),
         )
+        if revocation:
+            intent = route_case(revocation)
+            result = run_layered_response(
+                revocation,
+                intent=intent.name,
+                log_dir=case_log_dir,
+                reply_adapter=FallbackReplyAdapter(),
+            )
         reply = result.text
 
     rows = confirmed_preference_rows(case_log_dir)
@@ -1913,6 +1936,7 @@ def run_memory_confirmation_case(
         for row in rows
     )
     context_uses_confirmed = all(token in preference_context for token in ("A股", "美股", "韩国")) and "候选偏好" not in preference_context
+    expected_context = bool(case.get("expected_preference_in_context", True))
     constraints = output_constraints(reply, case)
     leaks = find_leaks(reply)
     route_ok = intent.name == case["expected_intent"]
@@ -1939,7 +1963,7 @@ def run_memory_confirmation_case(
             route_ok
             and required_ok
             and confirmed_written
-            and context_uses_confirmed
+            and context_uses_confirmed == expected_context
             and constraints["max_reply_chars_ok"]
             and not constraints["forbidden_reply_tokens_found"]
             and not leaks

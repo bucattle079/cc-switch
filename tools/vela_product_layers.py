@@ -1121,6 +1121,15 @@ def _is_memory_opt_out_instruction(text: str) -> bool:
     return _has_any(lowered, opt_out_markers) and _has_any(lowered, memory_markers)
 
 
+def _is_preference_revocation_instruction(text: str) -> bool:
+    compact = " ".join(str(text or "").split())
+    if _is_memory_opt_out_instruction(compact):
+        return False
+    revocation_markers = ("取消", "撤回", "废除", "不要再", "别再", "不再")
+    preference_markers = ("偏好", "默认", "固定", "市场分析", "A股", "美股", "韩国", "这条", "那条", "刚才")
+    return _has_any(compact, revocation_markers) and _has_any(compact, preference_markers)
+
+
 def _is_memory_confirmation_instruction(text: str) -> bool:
     compact = " ".join(str(text or "").split())
     if not _has_any(compact, ("确认", "固定", "就这么记", "可以记", "正式记")):
@@ -1561,10 +1570,13 @@ def build_reply_context(
         + interaction_diagnostic_summaries(log_dir=log_dir, limit=3)
         + session_note_summaries(log_dir=log_dir, limit=3)
     )
+    revoked_preference_set = set(preference_revocation_summaries(log_dir=log_dir, limit=12))
     confirmed_preference_summaries = [
         normalize_memory_summary(str(row.get("summary") or ""))
         for row in latest_learning_rows("confirmed-preferences-*.jsonl", log_dir=log_dir, limit=8)
-        if row.get("summary") and not contains_legacy_external_project(row.get("summary"))
+        if row.get("summary")
+        and not contains_legacy_external_project(row.get("summary"))
+        and normalize_memory_summary(str(row.get("summary") or "")) not in revoked_preference_set
     ]
     confirmed_preference_set = set(confirmed_preference_summaries)
     preferences = [summary for summary in confirmed_preference_summaries if summary]
@@ -1574,6 +1586,8 @@ def build_reply_context(
         classification = str(row.get("classification") or "").strip()
         summary = normalize_memory_summary(str(row.get("summary") or ""))
         if contains_legacy_external_project(summary):
+            continue
+        if summary in revoked_preference_set:
             continue
         if summary in confirmed_preference_set:
             continue
@@ -1757,6 +1771,14 @@ def evaluate_learning(message: str, intent: str) -> LearningEvaluation:
             promote_to_strategic_memory=False,
             reason="User explicitly declined local memory persistence.",
         )
+    if intent == "memory_related" and _is_preference_revocation_instruction(message):
+        return LearningEvaluation(
+            should_record_candidate=False,
+            classification="preference_revocation",
+            should_affect_next_reply=True,
+            promote_to_strategic_memory=False,
+            reason="User explicitly revoked a previously confirmed or default preference.",
+        )
     if intent == "memory_related" and _is_memory_confirmation_instruction(message):
         return LearningEvaluation(
             should_record_candidate=False,
@@ -1818,6 +1840,41 @@ def record_confirmed_preference(
         "summary": " ".join(scrub_legacy_external_project_text(summary).split()),
         "confirmed": True,
         "storage_policy": "explicit_confirmation_only",
+    }
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return path
+
+
+def preference_revocation_summaries(log_dir: Path | None = None, limit: int = 8) -> list[str]:
+    summaries: list[str] = []
+    for row in latest_learning_rows("preference-revocations-*.jsonl", log_dir=log_dir, limit=limit):
+        summary = normalize_memory_summary(str(row.get("revoked_summary") or ""))
+        if summary:
+            summaries.append(summary)
+    return summaries[-limit:]
+
+
+def latest_confirmed_preference_summary(log_dir: Path | None = None) -> str:
+    revoked = set(preference_revocation_summaries(log_dir=log_dir, limit=16))
+    for row in reversed(latest_learning_rows("confirmed-preferences-*.jsonl", log_dir=log_dir, limit=16)):
+        summary = normalize_memory_summary(str(row.get("summary") or ""))
+        if summary and summary not in revoked:
+            return summary
+    return ""
+
+
+def record_preference_revocation(message: str, log_dir: Path | None = None) -> Path:
+    log_dir = learning_loop_dir(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    target = latest_confirmed_preference_summary(log_dir=log_dir) or normalize_memory_summary(str(message or ""))
+    path = log_dir / f"preference-revocations-{utc_now():%Y-%m-%d}.jsonl"
+    row = {
+        "created_at": utc_now().isoformat(),
+        "level": "Preference Revocation",
+        "message_summary": " ".join(str(message or "").split())[:240],
+        "revoked_summary": target,
+        "storage_policy": "append_only_preference_retraction",
     }
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -2015,6 +2072,8 @@ def analysis_layer(message: str, intent: str, codex_summary: str = "") -> Analys
 def render_memory_reply(message: str) -> str:
     if _is_memory_opt_out_instruction(message):
         return "收到，这条不写入记忆，也不沉淀成偏好。我们只在当前对话里处理。"
+    if _is_preference_revocation_instruction(message):
+        return "收到，取消这条偏好；后续不再按它校准。"
     candidate = build_memory_candidate(message)
     if candidate["sensitive"]:
         return "这条涉及敏感信息，我先不写长期记忆。要存，必须你明确确认。"
@@ -2295,6 +2354,8 @@ def engine_text_for_intent(
         return current_info_fallback_text(context, result.adapter), adapter_name, result.used_api
     if context.intent == "memory_related" and _is_memory_opt_out_instruction(context.message):
         return render_memory_reply(context.message), "local_memory_guard", False
+    if context.intent == "memory_related" and _is_preference_revocation_instruction(context.message):
+        return render_memory_reply(context.message), "local_memory_guard", False
     if context.intent == "memory_related" and _is_explicit_memory_instruction(context.message):
         return render_memory_reply(context.message), "local_memory_guard", False
     if should_use_local_feedback_control(context):
@@ -2374,6 +2435,8 @@ def run_layered_response(
     used_cache = intent in {"market_brief", "market_refresh", "freshness_status"}
     learning = evaluate_learning(message, intent)
     memory_candidate = learning.should_record_candidate
+    if learning.classification == "preference_revocation":
+        record_preference_revocation(message, log_dir=log_dir)
 
     context = build_reply_context(message, intent=intent, log_dir=log_dir, supporting_context=supporting_context)
 
