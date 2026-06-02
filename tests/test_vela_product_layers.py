@@ -1808,6 +1808,8 @@ class VelaProductLayerTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(risks), 3, result.text)
         self.assertLess(len(result.text), 700)
+        self.assertNotIn("AugSun", result.text)
+        self.assertNotIn("ROLLQIIA", result.text)
         self.assertNotIn("raw payload", result.text.lower())
         self.assertNotIn("diff --git", result.text)
 

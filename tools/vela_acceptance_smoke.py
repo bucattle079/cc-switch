@@ -98,6 +98,24 @@ MOJIBAKE_TOKENS = (
     "鍊欓",
 )
 
+RUNTIME_LIVE_SMOKE_PROMPTS = [
+    "你好",
+    "你好 VELA",
+    "现在DeepSeek有什么新消息",
+    "现在小米汽车有什么公告",
+    "现在ChatGPT有什么更新",
+    "现在纽约冷吗",
+    "现在帮我查这个政策",
+    "明天晋江天气",
+    "今天的A股市场如何",
+    "这是实时的吗？",
+    "CODEX/",
+    "继续 VELA 项目",
+    "你太像机器人了",
+    "你好",
+    "地狱验尸一下 VELA 为什么不智能",
+]
+
 
 SINGLE_TURN_CASES = [
     {
@@ -649,17 +667,7 @@ def runtime_next_action(failed: list[str]) -> dict[str, Any]:
     if "weixin_inbound_seen" in failed or "latest_session_reply" in failed:
         return {
             "kind": "send_weixin_prompt",
-            "prompts": [
-                "你好 VELA",
-                "现在DeepSeek有什么新消息",
-                "现在小米汽车有什么公告",
-                "现在ChatGPT有什么更新",
-                "现在纽约冷吗",
-                "现在帮我查这个政策",
-                "今天的A股市场如何",
-                "这是实时的吗？",
-                "CODEX/",
-            ],
+            "prompts": list(RUNTIME_LIVE_SMOKE_PROMPTS),
             "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
             "wait_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90",
         }

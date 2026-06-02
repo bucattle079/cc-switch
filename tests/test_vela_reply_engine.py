@@ -180,6 +180,16 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertNotIn("战略候选", result.text)
         self.assertNotIn("未确认", result.text)
 
+    def test_fallback_project_reply_does_not_invent_augsun_for_vela_project(self):
+        engine = load_reply_engine()
+        adapter = engine.FallbackReplyAdapter()
+        context = engine.ReplyContext(message="继续 VELA 项目", intent="project_assistant")
+
+        result = adapter.generate(context)
+
+        self.assertNotIn("AugSun", result.text)
+        self.assertIn("项目", result.text)
+
     def test_fallback_gratitude_stays_warm_not_pushy(self):
         engine = load_reply_engine()
         adapter = engine.FallbackReplyAdapter()

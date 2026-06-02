@@ -1705,12 +1705,26 @@ def render_normal_chat_persona(message: str) -> str:
 PROJECT_MINIMUM_LOOP_MARKERS = ("最小闭环", "最小推进", "最小动作", "不要开新模块", "别开大工程", "不堆叠代码", "别讲愿景")
 
 
+def project_subject_from_message(message: str) -> str:
+    text = str(message or "")
+    subjects: list[str] = []
+    for name in ("AugSun", "ROLLQIIA", "VELA"):
+        if name in text and name not in subjects:
+            subjects.append(name)
+    if not subjects:
+        return "当前项目"
+    if subjects == ["VELA"]:
+        return "VELA Companion Core"
+    return " / ".join(subjects)
+
+
 def project_analysis_packet(message: str, intent: str) -> AnalysisPacket:
     text = " ".join(str(message or "").split())
+    subject = project_subject_from_message(text)
     if _has_any(text, PROJECT_MINIMUM_LOOP_MARKERS):
         return AnalysisPacket(
             intent=intent,
-            facts=["用户要推进 AugSun / ROLLQIIA 或 VELA 产品化事项。", "当前约束：不新开模块，先验证最小闭环。"],
+            facts=[f"用户要推进 {subject} 产品化事项。", "当前约束：不新开模块，先验证最小闭环。"],
             judgment="先锁最小闭环：一个触发、一个回应、一个反馈记录；不新开模块，不让愿景抢方向盘。",
             risks=[
                 "新模块会稀释验收口径，让项目看起来更忙，实际更难证明用户价值。",
@@ -1725,7 +1739,7 @@ def project_analysis_packet(message: str, intent: str) -> AnalysisPacket:
         )
     return AnalysisPacket(
         intent=intent,
-        facts=["用户要推进 AugSun / ROLLQIIA 或 VELA 产品化事项。"],
+        facts=[f"用户要推进 {subject} 产品化事项。"],
         judgment="先把目标、约束、当前卡点和最小下一步拆开，别让愿景压扁执行。",
         risks=[
             "把 Codex 输出当产品判断，会让前台变成工程日志。",
