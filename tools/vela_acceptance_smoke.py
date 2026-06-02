@@ -265,8 +265,21 @@ SINGLE_TURN_CASES = [
         "id": "daily_info_now_new_york_time_uses_deepseek_chain",
         "message": "现在美国时间纽约约是几点",
         "expected_intent": "daily_info",
-        "required_reply_tokens": ["DeepSeek API", "判断：", "下一步："],
-        "forbidden_reply_tokens": ["先说最烦的点", "你慢慢说", "DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
+        "required_reply_tokens": ["纽约", "现在约", "UTC"],
+        "forbidden_reply_tokens": [
+            "判断：",
+            "下一步：",
+            "本地时区直接计算",
+            "闲聊模板",
+            "冒充答案",
+            "先说最烦的点",
+            "你慢慢说",
+            "DeepSeek API 未接上",
+            "DEEPSEEK_API_KEY",
+            "状态边界",
+            "VELA 市场简报",
+            "Market & World Briefing",
+        ],
         "max_reply_chars": 260,
     },
     {
@@ -668,6 +681,8 @@ def supporting_context_for(intent: str, message: str) -> str:
         return router.render_cached_market_reply(message)
     if intent == "freshness_status":
         return router.render_freshness_reply(message)
+    if intent == "daily_info" and router.is_current_time_query(message):
+        return router.guard_wechat_output(router.render_time_query_reply(message))
     return ""
 
 

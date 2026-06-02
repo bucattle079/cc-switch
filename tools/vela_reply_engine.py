@@ -10,6 +10,8 @@ import subprocess
 import urllib.error
 import urllib.request
 
+from vela_intent_signals import CURRENT_TIME_QUERY_MARKERS
+
 
 ROOT = Path(__file__).resolve().parents[1]
 LEARNING_LOOP_DIR = ROOT / "VELA" / "learning-loop"
@@ -253,6 +255,11 @@ def is_plain_greeting_message(text: str) -> bool:
     return normalized in {"你好", "你好 vela", "在吗", "在么", "hello", "hi"}
 
 
+def is_time_query_message(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return any(str(marker).lower() in lowered for marker in CURRENT_TIME_QUERY_MARKERS)
+
+
 def build_dialogue_brief(context: ReplyContext) -> str:
     repeated = "是" if context.repeated_message else "否"
     preferences = "；".join(item for item in context.user_preferences if item.strip()) or "无"
@@ -301,7 +308,13 @@ def build_dialogue_brief(context: ReplyContext) -> str:
             f"允许外部资料：{'是' if tool_policy.allow_retrieval else '否'}"
         )
     extra_requirements: list[str] = []
-    if "现在" in context.message and context.intent in {"daily_info", "market_brief", "world_brief", "weather_query"}:
+    if context.intent == "daily_info" and is_time_query_message(context.message):
+        extra_requirements.append(
+            "时间类约束：可用背景里已有当前时间和时区。只输出一到两句自然微信回复："
+            "先给准确时间，再给一句贴近人的联系/行动建议。不要写“判断：”“下一步：”栏目，"
+            "不要解释本地计算、模板或工具链。"
+        )
+    elif "现在" in context.message and context.intent in {"daily_info", "market_brief", "world_brief", "weather_query"}:
         extra_requirements.append(
             "现在类资讯约束：必须先处理实时性和来源边界；如果可用背景没有明确实时源，不要声称实时检索完成。"
             "输出控制在微信短回复，不要新闻列表、英文生肉、状态边界字段、schema 或工程日志。"

@@ -337,6 +337,6 @@ def render_time_query_reply(text: str, *, now_utc: datetime | None = None) -> st
     time_text = local.strftime("%H:%M")
     offset = _utc_offset_text(local)
     return (
-        f"K，{label}现在约 {time_text}（{date_text}，{offset}）。\n"
-        f"判断：{_time_query_judgment(label, local)}"
+        f"K，{label}现在约 {time_text}（{date_text}，{offset}）。"
+        f"{_time_query_judgment(label, local)}"
     )

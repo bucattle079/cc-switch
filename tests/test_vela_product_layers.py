@@ -301,7 +301,7 @@ class VelaProductLayerTests(unittest.TestCase):
             def generate(self, context):
                 captured["context"] = context
                 return reply_engine.ReplyEngineResult(
-                    text="K，纽约现在约 06:30（UTC-04:00）。判断：纽约那边还是清晨，发消息可以，电话先别打。",
+                    text="K，纽约现在约 06:30（UTC-04:00）。纽约那边还是清晨，发消息可以，电话先别打。",
                     source="fake",
                     used_api=True,
                     adapter=self.name,
@@ -312,7 +312,7 @@ class VelaProductLayerTests(unittest.TestCase):
                 "现在美国时间纽约约是几点",
                 intent="daily_info",
                 log_dir=Path(tmp),
-                supporting_context="K，纽约现在约 06:30（2026-06-02，UTC-04:00）。\n判断：纽约那边还是清晨；发消息可以，电话先别打，别拿时差考验关系。",
+                supporting_context="K，纽约现在约 06:30（2026-06-02，UTC-04:00）。纽约那边还是清晨；发消息可以，电话先别打，别拿时差考验关系。",
                 reply_adapter=FakeDeepSeekAdapter(),
             )
 
@@ -322,8 +322,40 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("UTC-04:00", captured["context"].supporting_context)
         self.assertNotIn("闲聊模板", result.text)
         self.assertNotIn("冒充答案", result.text)
+        self.assertNotIn("判断：", result.text)
         self.assertIn("06:30", result.text)
         self.assertNotIn("信息不用铺满", result.text)
+
+    def test_time_fact_context_rejects_mechanical_model_labels(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_time_mechanical")
+
+        class MechanicalDeepSeekAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K，纽约现在约 06:30（UTC-04:00）。\n判断：这是按本地时区直接计算的当前时间，不拿闲聊模板冒充答案。",
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "现在美国时间纽约约是几点",
+                intent="daily_info",
+                log_dir=Path(tmp),
+                supporting_context="K，纽约现在约 06:30（2026-06-02，UTC-04:00）。纽约那边还是清晨；发消息可以，电话先别打，别拿时差考验关系。",
+                reply_adapter=MechanicalDeepSeekAdapter(),
+            )
+
+        self.assertEqual(result.reply_adapter, "local_time_fallback")
+        self.assertTrue(result.real_gpt_enabled)
+        self.assertIn("06:30", result.text)
+        self.assertNotIn("本地时区直接计算", result.text)
+        self.assertNotIn("闲聊模板", result.text)
+        self.assertNotIn("判断：", result.text)
 
     def test_normal_chat_uses_deepseek_when_available(self):
         product = load_product_module()

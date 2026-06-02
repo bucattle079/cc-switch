@@ -65,6 +65,8 @@ class VelaRealtimeInfoTests(unittest.TestCase):
         self.assertIn("纽约", reply)
         self.assertIn("06:30", reply)
         self.assertIn("UTC-04:00", reply)
+        self.assertNotIn("判断：", reply)
+        self.assertIn("清晨", reply)
         for token in [
             "DeepSeek API",
             "信息不用铺满",

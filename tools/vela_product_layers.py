@@ -2394,6 +2394,35 @@ def factual_context_reply_has_frontstage_hazards(text: str) -> bool:
     return not ("判断：" in raw or "结论：" in raw)
 
 
+def time_context_reply_has_frontstage_hazards(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return True
+    if len(raw) > 360:
+        return True
+    hazards = (
+        "本地时区直接计算",
+        "闲聊模板",
+        "冒充答案",
+        "工具链",
+        "supporting_context",
+        "schema",
+        "raw payload",
+        "endpoint",
+        "token",
+        "判断：",
+        "下一步：",
+        "实时性 / 判断 / 下一步",
+    )
+    if any(token.lower() in raw.lower() for token in hazards):
+        return True
+    if has_raw_english_frontstage_sentence(raw):
+        return True
+    has_clock = bool(re.search(r"\b\d{1,2}:\d{2}\b", raw))
+    has_offset = "UTC" in raw
+    return not (has_clock and has_offset)
+
+
 def has_raw_english_frontstage_sentence(text: str) -> bool:
     allowed_terms = {
         "api",
@@ -2507,7 +2536,7 @@ def engine_text_for_intent(
         return context.supporting_context.strip(), "local_weather_fallback", result.used_api
     if current_info and context.supporting_context.strip() and _has_any(context.message, CURRENT_TIME_QUERY_MARKERS):
         result = adapter.generate(context)
-        if result.used_api and not factual_context_reply_has_frontstage_hazards(result.text):
+        if result.used_api and not time_context_reply_has_frontstage_hazards(result.text):
             return normalize_supporting_context(result.text), result.adapter, True
         return context.supporting_context.strip(), "local_time_fallback", result.used_api
     if context.intent == "market_brief" and context.supporting_context.strip() and not current_info:
