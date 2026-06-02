@@ -590,7 +590,7 @@ def runtime_next_action(failed: list[str]) -> dict[str, Any]:
     if "weixin_inbound_seen" in failed or "latest_session_reply" in failed:
         return {
             "kind": "send_weixin_prompt",
-            "prompts": ["你好 VELA", "今天的A股市场如何", "这是实时的吗？", "CODEX/"],
+            "prompts": ["你好 VELA", "现在DeepSeek有什么新消息", "今天的A股市场如何", "这是实时的吗？", "CODEX/"],
             "verify_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json",
             "wait_command": "python -X utf8 tools/vela_acceptance_smoke.py --runtime-audit --json --wait-live-seconds 90",
         }
