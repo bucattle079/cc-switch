@@ -636,6 +636,7 @@ def latest_session_reply_detail(latest_reply: dict[str, Any], *, max_session_age
     content = str(latest_reply.get("content") or "")
     leaks = list(latest_reply.get("leaks") or [])
     age = latest_reply.get("age_hours")
+    source = str(latest_reply.get("source") or "session")
     if not content:
         return "no VELA assistant reply found; send a fresh WeChat prompt to verify live foreground"
     if leaks:
@@ -647,6 +648,8 @@ def latest_session_reply_detail(latest_reply: dict[str, Any], *, max_session_age
             f"latest VELA assistant reply is stale ({age:.1f}h > {max_session_age_hours}h); "
             "send a fresh WeChat prompt to verify live foreground"
         )
+    if source == "learning-loop":
+        return "recent and clean via learning-loop foreground record"
     return "recent and clean"
 
 
@@ -833,7 +836,7 @@ def router_command_dry_run(intent_router: dict[str, Any]) -> dict[str, Any]:
 def latest_session_reply(sessions_dir: Path) -> dict[str, Any]:
     candidates: list[tuple[datetime, float, Path, str]] = []
     if not sessions_dir.exists():
-        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": []}
+        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": [], "source": "session"}
     for path in sessions_dir.glob("VELA*.json"):
         if ".bak-" in path.name:
             continue
@@ -850,7 +853,7 @@ def latest_session_reply(sessions_dir: Path) -> dict[str, Any]:
                     parsed = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
                 candidates.append((parsed, path.stat().st_mtime, path, str(item["content"])))
     if not candidates:
-        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": []}
+        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": [], "source": "session"}
     timestamp, _mtime, path, content = sorted(candidates, key=lambda item: (item[0], item[1]))[-1]
     age_hours = max(0.0, (datetime.now(timezone.utc) - timestamp).total_seconds() / 3600)
     return {
@@ -859,7 +862,113 @@ def latest_session_reply(sessions_dir: Path) -> dict[str, Any]:
         "path": str(path),
         "age_hours": round(age_hours, 2),
         "leaks": find_leaks(content),
+        "source": "session",
     }
+
+
+def latest_learning_loop_reply(log_dir: Path) -> dict[str, Any]:
+    candidates: list[tuple[datetime, float, Path, str]] = []
+    if not log_dir.exists():
+        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": [], "source": "learning-loop"}
+    for path in log_dir.glob("interaction-*.jsonl"):
+        for row in _jsonl_rows(path):
+            content = str(row.get("response_preview") or "")
+            if not content:
+                continue
+            parsed = parse_timestamp(str(row.get("created_at") or ""))
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            if parsed is None:
+                parsed = datetime.fromtimestamp(mtime, tz=timezone.utc)
+            candidates.append((parsed, mtime, path, content))
+    if not candidates:
+        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": [], "source": "learning-loop"}
+    timestamp, _mtime, path, content = sorted(candidates, key=lambda item: (item[0], item[1]))[-1]
+    age_hours = max(0.0, (datetime.now(timezone.utc) - timestamp).total_seconds() / 3600)
+    return {
+        "content": content,
+        "timestamp": timestamp.isoformat(),
+        "path": str(path),
+        "age_hours": round(age_hours, 2),
+        "leaks": find_leaks(content),
+        "source": "learning-loop",
+    }
+
+
+def _normalized_text(value: str) -> str:
+    return " ".join(str(value or "").split())
+
+
+def learning_loop_reply_for_claim(
+    log_dir: Path,
+    claim: dict[str, Any],
+    *,
+    max_delta_seconds: int = 180,
+) -> dict[str, Any]:
+    claim_time = parse_timestamp(str(claim.get("timestamp") or ""))
+    message_preview = _normalized_text(str(claim.get("message_preview") or ""))
+    if claim_time is None or not message_preview:
+        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": [], "source": "learning-loop"}
+    candidates: list[tuple[datetime, float, Path, str]] = []
+    target_paths = sorted(log_dir.glob("interaction-*.jsonl"))
+    claim_date_path = log_dir / f"interaction-{claim_time.date().isoformat()}.jsonl"
+    if claim_date_path.exists():
+        target_paths = [claim_date_path] + [path for path in target_paths if path != claim_date_path]
+    for path in target_paths:
+        rows: list[dict[str, Any]] = []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+        for row in rows:
+            content = str(row.get("response_preview") or "")
+            if not content:
+                continue
+            row_message = _normalized_text(str(row.get("message_summary") or ""))
+            if row_message != message_preview:
+                continue
+            parsed = parse_timestamp(str(row.get("created_at") or ""))
+            if parsed is None:
+                continue
+            delta = (parsed - claim_time).total_seconds()
+            if delta < 0 or delta > max_delta_seconds:
+                continue
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            candidates.append((parsed, mtime, path, content))
+    if not candidates:
+        return {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": [], "source": "learning-loop"}
+    timestamp, _mtime, path, content = sorted(candidates, key=lambda item: (item[0], item[1]))[0]
+    age_hours = max(0.0, (datetime.now(timezone.utc) - timestamp).total_seconds() / 3600)
+    return {
+        "content": content,
+        "timestamp": timestamp.isoformat(),
+        "path": str(path),
+        "age_hours": round(age_hours, 2),
+        "leaks": find_leaks(content),
+        "source": "learning-loop",
+    }
+
+
+def fresher_reply(primary: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    primary_time = parse_timestamp(str(primary.get("timestamp") or ""))
+    fallback_time = parse_timestamp(str(fallback.get("timestamp") or ""))
+    if fallback_time and (primary_time is None or fallback_time > primary_time):
+        return fallback
+    return primary
 
 
 def latest_inbound_message(log_path: Path) -> dict[str, Any]:
@@ -1003,6 +1112,83 @@ def _jsonl_rows(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def latest_send_once_claim(learning_loop_dir: Path) -> dict[str, Any]:
+    claim_path = learning_loop_dir.parent / "send-once" / "last-claim.json"
+    if not claim_path.exists():
+        return {"timestamp": "", "path": "", "message_preview": "", "intent": ""}
+    try:
+        data = json.loads(claim_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"timestamp": "", "path": str(claim_path), "message_preview": "", "intent": ""}
+    timestamp = str(data.get("created_at") or "")
+    if not parse_timestamp(timestamp):
+        try:
+            timestamp = datetime.fromtimestamp(claim_path.stat().st_mtime, tz=timezone.utc).isoformat()
+        except OSError:
+            timestamp = ""
+    return {
+        "timestamp": timestamp,
+        "path": str(claim_path),
+        "message_preview": str(data.get("message_preview") or ""),
+        "intent": str(data.get("intent") or ""),
+    }
+
+
+def _mtime_near(reference: datetime, observed: datetime | None, *, tolerance_seconds: int = 180) -> bool:
+    if observed is None:
+        return False
+    return abs((observed - reference).total_seconds()) <= tolerance_seconds
+
+
+def _near_inbound_label(mtime: datetime | None, inbound_time: datetime) -> str:
+    if mtime is None:
+        return "missing"
+    if mtime >= inbound_time:
+        return "yes"
+    return "near" if _mtime_near(inbound_time, mtime) else "no"
+
+
+def local_foreground_proof(
+    *,
+    learning_loop_dir: Path,
+    vela_project: dict[str, Any],
+    service_started_at: datetime | None,
+) -> dict[str, Any]:
+    claim = latest_send_once_claim(learning_loop_dir)
+    claim_time = parse_timestamp(str(claim.get("timestamp") or ""))
+    proof_reply = learning_loop_reply_for_claim(learning_loop_dir, claim)
+    reply_time = parse_timestamp(str(proof_reply.get("timestamp") or ""))
+    if claim_time is None or reply_time is None:
+        return runtime_check(False, "local foreground proof missing send-once claim or matching learning-loop reply")
+    if service_started_at and claim_time < service_started_at:
+        return runtime_check(False, "local foreground proof is older than current cc-connect process start")
+    if reply_time < claim_time:
+        return runtime_check(False, "local foreground proof has no reply newer/equal than send-once claim")
+    state_dir = weixin_state_dir(vela_project)
+    context_mtime = latest_path_mtime([state_dir / "context_tokens.json"]) if state_dir else None
+    poll_mtime = latest_path_mtime([state_dir / "get_updates.buf"]) if state_dir else None
+    state_moved = _mtime_near(claim_time, context_mtime) or _mtime_near(claim_time, poll_mtime)
+    if not state_moved:
+        return runtime_check(False, "local foreground proof lacks matching Weixin state movement")
+    detail = (
+        f"local foreground proof at {claim_time.isoformat()}; "
+        "send-once claim + learning-loop reply + Weixin state movement"
+    )
+    proof = runtime_check(True, detail)
+    proof.update(
+        {
+            "timestamp": claim_time.isoformat(),
+            "reply_timestamp": reply_time.isoformat(),
+            "reply": proof_reply,
+            "message_preview": claim.get("message_preview") or "",
+            "claim_path": claim.get("path") or "",
+            "context_tokens_after_claim": _near_inbound_label(context_mtime, claim_time),
+            "poll_buffer_after_claim": _near_inbound_label(poll_mtime, claim_time),
+        }
+    )
+    return proof
+
+
 def learning_loop_state(log_dir: Path | None = None) -> dict[str, Any]:
     log_dir = log_dir or (ROOT / "VELA" / "learning-loop")
     if not log_dir.exists():
@@ -1064,6 +1250,7 @@ def run_runtime_audit(
     learning_loop_dir: Path | None = None,
 ) -> dict[str, Any]:
     cc_home = cc_home or DEFAULT_CC_CONNECT_HOME
+    effective_learning_loop_dir = learning_loop_dir or (ROOT / "VELA" / "learning-loop")
     config_path = cc_home / "config.toml"
     checks: dict[str, dict[str, Any]] = {}
     config: dict[str, Any] = {}
@@ -1090,7 +1277,7 @@ def run_runtime_audit(
         else runtime_check(False, "router config is not valid enough to dry-run")
     )
     checks["deepseek_runtime"] = deepseek_runtime_status()
-    checks["learning_loop_state"] = learning_loop_state(learning_loop_dir)
+    checks["learning_loop_state"] = learning_loop_state(effective_learning_loop_dir)
 
     commands = {item.get("name"): item for item in config.get("commands", []) if isinstance(item, dict)}
     command_names = ("vela-router", "vela-talk")
@@ -1109,7 +1296,26 @@ def run_runtime_audit(
     if service_started_at is None and process_running is None and process_count is None:
         service_started_at = detect_cc_connect_process_started_at()
 
-    latest_reply = latest_session_reply(cc_home / "sessions")
+    session_reply = latest_session_reply(cc_home / "sessions")
+    use_local_foreground = learning_loop_dir is not None or cc_home == DEFAULT_CC_CONNECT_HOME
+    local_proof = (
+        local_foreground_proof(
+            learning_loop_dir=effective_learning_loop_dir,
+            vela_project=vela_project,
+            service_started_at=service_started_at,
+        )
+        if use_local_foreground
+        else runtime_check(False, "local foreground proof disabled for non-default cc_home without explicit learning_loop_dir")
+    )
+    if local_proof["ok"] and isinstance(local_proof.get("reply"), dict):
+        latest_reply = dict(local_proof["reply"])
+    else:
+        local_reply = (
+            latest_learning_loop_reply(effective_learning_loop_dir)
+            if use_local_foreground
+            else {"content": "", "timestamp": "", "path": "", "age_hours": None, "leaks": [], "source": "learning-loop"}
+        )
+        latest_reply = fresher_reply(session_reply, local_reply)
     age = latest_reply.get("age_hours")
     reply_recent = isinstance(age, (int, float)) and age <= max_session_age_hours
     reply_clean = bool(latest_reply.get("content")) and not latest_reply.get("leaks")
@@ -1130,10 +1336,18 @@ def run_runtime_audit(
     )
     if inbound_before_current_service:
         inbound_time = None
+    inbound_source = "cc-connect.log"
+    if not inbound_time and local_proof["ok"]:
+        inbound_time = parse_timestamp(str(local_proof.get("timestamp") or ""))
+        inbound_source = "local_foreground_proof"
     checks["weixin_inbound_seen"] = runtime_check(
         bool(inbound_time),
         (
-            f"Weixin inbound observed at {inbound_time.isoformat()}"
+            (
+                f"Weixin inbound observed at {inbound_time.isoformat()}"
+                if inbound_source == "cc-connect.log"
+                else f"Weixin local foreground proof observed at {inbound_time.isoformat()}"
+            )
             if inbound_time
             else (
                 "latest Weixin inbound is older than current cc-connect process start; "
@@ -1144,7 +1358,13 @@ def run_runtime_audit(
         ),
     )
     reply_time = parse_timestamp(str(latest_reply.get("timestamp") or ""))
-    checks["weixin_command_dispatch"] = weixin_command_dispatch(cc_home / "cc-connect.log", inbound_time)
+    if inbound_source == "local_foreground_proof":
+        checks["weixin_command_dispatch"] = runtime_check(
+            True,
+            "send-once/learning-loop foreground proof observed; cc-connect log may not record direct dispatch",
+        )
+    else:
+        checks["weixin_command_dispatch"] = weixin_command_dispatch(cc_home / "cc-connect.log", inbound_time)
     inbound_ok = True
     inbound_detail = "no inbound message in cc-connect log"
     if inbound_time:
@@ -1155,12 +1375,22 @@ def run_runtime_audit(
             else f"message received at {inbound_time.isoformat()} is newer than latest VELA session reply"
         )
     checks["inbound_to_reply"] = runtime_check(inbound_ok, inbound_detail)
-    checks["weixin_dispatch_trace"] = weixin_dispatch_trace(
-        cc_home=cc_home,
-        vela_project=vela_project,
-        inbound_time=inbound_time,
-        reply_time=reply_time,
-    )
+    if inbound_source == "local_foreground_proof":
+        checks["weixin_dispatch_trace"] = runtime_check(
+            True,
+            (
+                "local foreground proof; "
+                f"context_tokens_after_claim={local_proof.get('context_tokens_after_claim')}; "
+                f"poll_buffer_after_claim={local_proof.get('poll_buffer_after_claim')}"
+            ),
+        )
+    else:
+        checks["weixin_dispatch_trace"] = weixin_dispatch_trace(
+            cc_home=cc_home,
+            vela_project=vela_project,
+            inbound_time=inbound_time,
+            reply_time=reply_time,
+        )
     dispatch_detail = str(checks["weixin_command_dispatch"].get("detail") or "")
     direct_inbound_router_path = (
         bool(inbound_time)
@@ -1190,9 +1420,11 @@ def run_runtime_audit(
             "age_hours": latest_reply.get("age_hours"),
             "preview": preview(str(latest_reply.get("content") or "")),
             "leaks": latest_reply.get("leaks") or [],
+            "source": latest_reply.get("source") or "",
         },
         "latest_inbound": {
             **inbound,
+            "source": inbound_source if inbound_time else inbound.get("source", "cc-connect.log"),
             "current_window_timestamp": inbound_time.isoformat() if inbound_time else "",
             "service_started_at": service_started_at.isoformat() if service_started_at else "",
         },
@@ -1206,6 +1438,7 @@ def wait_for_runtime_audit(
     poll_seconds: float = 2.0,
     process_running: bool | None = None,
     max_session_age_hours: int = 48,
+    learning_loop_dir: Path | None = None,
     audit_fn=run_runtime_audit,
     sleep_fn=time.sleep,
     monotonic_fn=time.monotonic,
@@ -1223,6 +1456,7 @@ def wait_for_runtime_audit(
             cc_home=cc_home,
             process_running=process_running,
             max_session_age_hours=max_session_age_hours,
+            learning_loop_dir=learning_loop_dir,
         )
         now = monotonic_fn()
         if report.get("ok"):
@@ -1790,11 +2024,13 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_seconds=args.wait_live_seconds,
                 poll_seconds=args.wait_poll_seconds,
                 max_session_age_hours=args.max_session_age_hours,
+                learning_loop_dir=args.log_dir,
             )
         else:
             report = run_runtime_audit(
                 cc_home=args.cc_home,
                 max_session_age_hours=args.max_session_age_hours,
+                learning_loop_dir=args.log_dir,
             )
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -351,6 +351,26 @@ class VelaVoiceContractTests(unittest.TestCase):
         self.assertIn("有什么可以帮", completed.stdout)
         self.assertIn("反机械", completed.stdout)
 
+    def test_personality_script_accepts_short_connection_reply(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-X",
+                "utf8",
+                str(SCRIPT),
+                "audit",
+                "K，在。先不推你，话从哪里开始都行。",
+            ],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("总体：通过", completed.stdout)
+        self.assertIn("轻量连接", completed.stdout)
+
     def test_personality_script_audits_latest_cc_connect_reply(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             session = Path(tmpdir) / "VELA_test.json"
@@ -430,6 +450,63 @@ class VelaVoiceContractTests(unittest.TestCase):
         self.assertIn("最近微信回包", completed.stdout)
         self.assertIn("总体：不通过", completed.stdout)
         self.assertIn("有什么可以帮", completed.stdout)
+
+    def test_personality_script_prefers_recent_learning_loop_reply_over_stale_session(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            sessions = root / "sessions"
+            learning_loop = root / "VELA" / "learning-loop"
+            sessions.mkdir(parents=True)
+            learning_loop.mkdir(parents=True)
+            (sessions / "VELA_test.json").write_text(
+                json.dumps(
+                    {
+                        "sessions": {
+                            "s1": {
+                                "history": [
+                                    {
+                                        "role": "assistant",
+                                        "content": "你好，有什么可以帮你？我将首先为你提供几个选项。",
+                                        "timestamp": "2026-05-25T10:00:02+08:00",
+                                    },
+                                ]
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (learning_loop / "interaction-2026-06-02.jsonl").write_text(
+                json.dumps(
+                    {
+                        "created_at": "2026-06-02T03:51:38+00:00",
+                        "level": "Interaction Log",
+                        "message_summary": "你好 VELA",
+                        "response_preview": "别把雾当地图。你要我先判断人、事，还是路线？说一个，我来切。",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["VELA_CC_CONNECT_SESSIONS"] = str(sessions)
+            env["VELA_LEARNING_LOOP_DIR"] = str(learning_loop)
+
+            completed = subprocess.run(
+                [sys.executable, "-X", "utf8", str(SCRIPT), "audit-last"],
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("最近微信回包", completed.stdout)
+        self.assertIn("总体：通过", completed.stdout)
+        self.assertIn("别把雾当地图", completed.stdout)
+        self.assertNotIn("有什么可以帮", completed.stdout)
 
     def test_personality_script_learns_growth_note(self):
         with tempfile.TemporaryDirectory() as tmpdir:

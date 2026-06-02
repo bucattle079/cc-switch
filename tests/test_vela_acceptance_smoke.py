@@ -113,7 +113,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         report = json.loads(completed.stdout)
-        self.assertTrue(report["ok"])
+        self.assertTrue(report["ok"], json.dumps(report, ensure_ascii=False, indent=2))
         self.assertGreaterEqual(report["case_count"], 8)
         self.assertNotIn("DEEPSEEK_API_KEY", completed.stdout)
         self.assertNotIn("raw payload", completed.stdout.lower())
@@ -884,13 +884,139 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
                 max_session_age_hours=1,
             )
 
-        self.assertTrue(report["ok"])
+        self.assertTrue(report["ok"], json.dumps(report, ensure_ascii=False, indent=2))
         self.assertTrue(report["checks"]["latest_session_reply"]["ok"])
         self.assertIn("direct foreground path", report["checks"]["latest_session_reply"]["detail"])
         self.assertTrue(report["checks"]["inbound_to_reply"]["ok"])
         self.assertIn("direct replies may not write", report["checks"]["inbound_to_reply"]["detail"])
         self.assertNotIn("latest_session_reply", report["failed"])
         self.assertNotIn("inbound_to_reply", report["failed"])
+
+    def test_runtime_audit_accepts_local_foreground_proof_when_cc_log_is_stale(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cc_home = root / ".cc-connect"
+            sessions = cc_home / "sessions"
+            sessions.mkdir(parents=True)
+            state_dir = cc_home / "weixin" / "codex-wechat" / "bot"
+            state_dir.mkdir(parents=True)
+            learning_loop = root / "VELA" / "learning-loop"
+            send_once = root / "VELA" / "send-once"
+            learning_loop.mkdir(parents=True)
+            send_once.mkdir(parents=True)
+            (cc_home / "config.toml").write_text(
+                f"""
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args}}}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args:VELA}}}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+
+[[projects.platforms]]
+type = "weixin"
+
+[projects.platforms.options]
+state_dir = "{str(state_dir).replace("\\", "/")}"
+""".strip(),
+                encoding="utf-8",
+            )
+            (sessions / "VELA_test.json").write_text(
+                json.dumps(
+                    {
+                        "sessions": {
+                            "s1": {
+                                "history": [
+                                    {
+                                        "role": "assistant",
+                                        "content": "旧的干净回复。",
+                                        "timestamp": "2026-05-25T03:36:19+00:00",
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            service_started = datetime(2026, 6, 2, 3, 45, 0, tzinfo=timezone.utc)
+            claim_time = datetime(2026, 6, 2, 3, 51, 37, 904581, tzinfo=timezone.utc)
+            reply_time = datetime(2026, 6, 2, 3, 51, 38, 80840, tzinfo=timezone.utc)
+            state_time = claim_time.timestamp()
+            (state_dir / "context_tokens.json").write_text('{"moved":true}', encoding="utf-8")
+            (state_dir / "get_updates.buf").write_text("poll", encoding="utf-8")
+            os.utime(state_dir / "context_tokens.json", (state_time, state_time))
+            fresh_poll = datetime.now(timezone.utc).timestamp()
+            os.utime(state_dir / "get_updates.buf", (fresh_poll, fresh_poll))
+            (cc_home / "cc-connect.log").write_text(
+                'time=2026-06-01T20:47:38+08:00 level=INFO msg="message received" platform=weixin content_len=24',
+                encoding="utf-8",
+            )
+            (send_once / "last-claim.json").write_text(
+                json.dumps(
+                    {
+                        "created_at": claim_time.isoformat(),
+                        "intent": "normal_chat",
+                        "message_preview": "你好 VELA",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            rows_by_file = {
+                "session-notes-2026-06-02.jsonl": [{"level": "Session Notes", "summary": "你好 VELA"}],
+                "interaction-2026-06-02.jsonl": [
+                    {
+                        "created_at": reply_time.isoformat(),
+                        "level": "Interaction Log",
+                        "message_summary": "你好 VELA",
+                        "intent": "normal_chat",
+                        "response_preview": "K，在。先不推你，话从哪里开始都行。",
+                    }
+                ],
+                "human-iteration-2026-06-02.jsonl": [{"response_quality_signals": ["foreground_reply_clean"]}],
+                "memory-candidates-2026-06-02.jsonl": [
+                    {"level": "Preference Candidate", "classification": "style_feedback", "summary": "less robotic"}
+                ],
+                "strategic-memory-2026-06-02.jsonl": [
+                    {"level": "Strategic Memory", "memory_type": "project_goal", "summary": "confirmed VELA direction"}
+                ],
+            }
+            for filename, rows in rows_by_file.items():
+                (learning_loop / filename).write_text(
+                    "\n".join(json.dumps(row, ensure_ascii=False) for row in rows),
+                    encoding="utf-8",
+                )
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=True,
+                process_started_at=service_started,
+                max_session_age_hours=24,
+                learning_loop_dir=learning_loop,
+            )
+
+        self.assertTrue(report["ok"], json.dumps(report, ensure_ascii=False, indent=2))
+        self.assertTrue(report["checks"]["latest_session_reply"]["ok"])
+        self.assertIn("learning-loop", report["checks"]["latest_session_reply"]["detail"])
+        self.assertTrue(report["checks"]["weixin_inbound_seen"]["ok"])
+        self.assertIn("local foreground proof", report["checks"]["weixin_inbound_seen"]["detail"])
+        self.assertTrue(report["checks"]["weixin_command_dispatch"]["ok"])
+        self.assertIn("send-once", report["checks"]["weixin_command_dispatch"]["detail"])
+        self.assertTrue(report["checks"]["inbound_to_reply"]["ok"])
+        self.assertEqual(report["latest_reply"]["preview"], "K，在。先不推你，话从哪里开始都行。")
+        self.assertEqual(report["latest_inbound"]["source"], "local_foreground_proof")
+        self.assertNotIn("weixin_inbound_seen", report["failed"])
 
     def test_runtime_audit_requires_weixin_inbound_not_only_internal_session_send(self):
         smoke = load_smoke_module()

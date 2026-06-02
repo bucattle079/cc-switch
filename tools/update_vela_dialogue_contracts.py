@@ -203,7 +203,7 @@ AGENTS_TEXT = """# VELA WeChat Codex Instructions
 - 金融市场重点盯美股、A股、韩国市场、日本市场：S&P 500、Nasdaq、Dow、美债、美元、上证、深成指、创业板、沪深300、人民币、KOSPI、三星、SK海力士、Nikkei、TOPIX、日元、BOJ。
 - 晨报优先用 Google/Google News 式广域发现，再用 Reuters/AP/官方声明、Bloomberg/WSJ/FT/CNBC/MarketWatch、公司公告和科技媒体交叉确认。付费墙只用可见标题/摘要并找可访问来源佐证；网络不可用时直接说明，不编造。
 - 普通 `VELA`：人格助理模式，聊天、分析、判断，也用于通过交互持续打磨她的智能体能力；不默认动电脑，不吐 Codex 状态。
-- `语气` / `压测` / `真人压测` / `素材` / `质检` / `最近质检`：查看 VELA 当前语气规则、典型对话压力场景、真人对话样本、人物素材吸收协议、回复质检和最近微信回包质检，用来继续校准她是否还像机器。
+- `语气` / `压测` / `真人压测` / `素材` / `质检` / `最近质检`：查看 VELA 当前语气规则、典型对话压力场景、真人对话样本、人物素材吸收协议、回复质检和最近前台/本体回包质检，用来继续校准她是否还像机器。
 - `/CODEX`：查看 Codex 当前各项目中最近一个执行完毕任务的情况，提取最后结论段，并尽量生成截图回传微信。
 
 微信启动规则：
@@ -422,7 +422,7 @@ def render_dialogue_quality_gate(contract: dict | None = None) -> str:
 
 
 def audit_latest_cc_connect_reply() -> str:
-    return "Use `python -X utf8 C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_personality.py audit-last` to inspect the latest cc-connect assistant reply."
+    return "Use `python -X utf8 C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_personality.py audit-last` to inspect the latest VELA foreground/body reply, preferring send-once plus learning-loop proof before cc-connect session fallback."
 
 
 def render_skill_contract_vectors(contract: dict | None = None) -> str:
