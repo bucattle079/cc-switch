@@ -157,6 +157,15 @@ ENGINEERING_NOISE_TOKENS = (
     "<oai-mem-citation>",
 )
 
+MENU_LIKE_FRONTSTAGE_MARKERS = (
+    "以下菜单",
+    "功能列表",
+    "请选择",
+    "列个菜单",
+)
+MENU_LIKE_FRONTSTAGE_RE = re.compile(
+    r"(?im)^\s*\d+\s*[\).、]\s*(?:市场|资讯|新闻|Codex|CODEX|项目|天气|A股|美股|韩股|日股)\b"
+)
 WINDOWS_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|\\\\)[^\s，。；,;)]+")
 CODEX_RUNTIME_PATTERNS = (
     re.compile(r"用量\s*`?[\d,.\s]+tokens?`?[，,。；;\s]*", re.IGNORECASE),
@@ -515,13 +524,34 @@ def voice_contract_forbidden_phrases() -> tuple[str, ...]:
 def dialogue_quality_issues(text: str) -> list[str]:
     raw = str(text or "")
     issues: list[str] = []
+    seen: set[str] = set()
+
+    def add(issue: str) -> None:
+        if issue not in seen:
+            seen.add(issue)
+            issues.append(issue)
+
     if STAGE_DIRECTION_RE.search(raw):
-        issues.append("stage_direction")
+        add("stage_direction")
+    if has_menu_like_frontstage(raw):
+        add("menu_like")
     lower = raw.lower()
+    for token in ENGINEERING_NOISE_TOKENS:
+        marker = str(token or "").strip()
+        if marker and marker.lower() in lower:
+            add(f"engineering_noise:{marker}")
     for phrase in voice_contract_forbidden_phrases():
         if phrase.lower() in lower:
-            issues.append(f"forbidden_phrase:{phrase}")
+            add(f"forbidden_phrase:{phrase}")
     return issues
+
+
+def has_menu_like_frontstage(text: str) -> bool:
+    raw = str(text or "")
+    lower = raw.lower()
+    if any(marker.lower() in lower for marker in MENU_LIKE_FRONTSTAGE_MARKERS):
+        return True
+    return bool(MENU_LIKE_FRONTSTAGE_RE.search(raw))
 
 
 def strip_dialogue_performance_markers(text: str) -> str:
@@ -590,6 +620,8 @@ def guard_layered_output(
         token in str(text or "") for token in ("要看盘，说 A股、美股或韩国", "要动 Codex，用 /CODEX")
     ):
         return guard_wechat_output(ensure_k_address("在线。先不拉资讯或工程状态；你说当下这件事，我给判断。"), max_chars=max_chars)
+    if intent == "normal_chat" and has_menu_like_frontstage(text):
+        return guard_wechat_output(ensure_k_address("先收住。你说当下这件事，我给判断。"), max_chars=max_chars)
     if intent == "normal_chat" and any(marker in lowered for marker in codex_status_leak_markers):
         return guard_wechat_output(ensure_k_address("在线。先不拉工程状态；你说目标，我给判断。"), max_chars=max_chars)
     if intent != "codex_task" and used_codex:
@@ -806,7 +838,13 @@ def response_quality_signals_for(
         signals.append("preference_or_feedback_adapted")
     if "Identity Core" in context.persona_skeleton:
         signals.append("identity_continuity")
-    if not any(str(issue).startswith("forbidden_phrase") or str(issue) == "stage_direction" for issue in issue_list):
+    if issue_list:
+        signals.append("self_quality_issue_detected")
+    if not any(
+        str(issue).startswith(("forbidden_phrase", "engineering_noise"))
+        or str(issue) in {"stage_direction", "menu_like"}
+        for issue in issue_list
+    ):
         signals.append("no_roleplay_or_quote_pollution")
     return signals
 
@@ -823,6 +861,8 @@ def next_turn_improvement_for(
         return "下一轮减少模板、冷感、冗长和机械自证，直接给判断。"
     if feedback_type == "behavior_preference":
         return "下一轮更快理解真实意思，减少拖延，直接推进最小下一步。"
+    if feedback_type == "self_quality_repair":
+        return "下一轮不要菜单化、不要露工程字段或外部项目残留；只按当前问题给判断。"
     if context.should_use_evidence_gate:
         return "下一轮继续先区分事实、推断和不确定，再给判断。"
     if context.response_behavior_mode == "quiet_support":
@@ -840,13 +880,17 @@ def build_iteration_signal(
     issues: Iterable[str],
 ) -> HumanIterationSignal:
     interpretation = interpret_need(message, intent)
+    issue_list = list(issues)
     feedback_type = user_feedback_type_for(message, intent, learning)
-    quality_signals = response_quality_signals_for(context=context, response_text=response_text, learning=learning, issues=issues)
+    if feedback_type == "none" and issue_list:
+        feedback_type = "self_quality_repair"
+    quality_signals = response_quality_signals_for(context=context, response_text=response_text, learning=learning, issues=issue_list)
     correction_needed = learning.should_affect_next_reply or feedback_type in {
         "meaning_misread",
         "style_expression",
         "behavior_preference",
-    }
+        "self_quality_repair",
+    } or bool(issue_list)
     return HumanIterationSignal(
         user_message_type=user_message_type_for(message, intent, interpretation, learning),
         detected_user_state=context.detected_user_state or interpretation.emotional_state,
@@ -2432,6 +2476,8 @@ def should_use_local_feedback_control(context: ReplyContext) -> bool:
             "behavior_preference",
             "style_expression",
             "meaning_misread",
+            "self_quality_repair",
+            "self_quality_issue",
             "behavior_preference",
         )
     )

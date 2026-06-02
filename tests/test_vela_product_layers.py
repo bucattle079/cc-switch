@@ -2583,6 +2583,69 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("stage_direction", quality_row["issues"])
         self.assertIn("forbidden_phrase:作为 VELA", quality_row["issues"])
 
+    def test_self_detected_menu_and_schema_noise_calibrates_next_turn(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+
+        class NoisyMenuAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "K，以下菜单：\n"
+                        "1. 市场\n"
+                        "2. Codex\n"
+                        "response_quality_signals=[debug]\n"
+                        "schema_version: 1"
+                    ),
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        class PushyAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text="K，刚忙完？要不要我列个菜单？",
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            first = product.run_layered_response(
+                "随便聊一下",
+                intent="normal_chat",
+                log_dir=log_dir,
+                reply_adapter=NoisyMenuAdapter(),
+            )
+            quality_row = json.loads(next(log_dir.glob("reply-quality-*.jsonl")).read_text(encoding="utf-8").splitlines()[0])
+            iteration_row = json.loads(next(log_dir.glob("human-iteration-*.jsonl")).read_text(encoding="utf-8").splitlines()[0])
+            next_context = product.build_reply_context("继续", intent="normal_chat", log_dir=log_dir)
+            second = product.run_layered_response(
+                "继续",
+                intent="normal_chat",
+                log_dir=log_dir,
+                reply_adapter=PushyAdapter(),
+            )
+
+        self.assertNotIn("以下菜单", first.text)
+        self.assertNotIn("schema_version", first.text)
+        self.assertNotIn("response_quality_signals", first.text)
+        self.assertNotIn("Codex", first.text)
+        self.assertIn("menu_like", quality_row["issues"])
+        self.assertIn("engineering_noise:schema_version", quality_row["issues"])
+        self.assertEqual(iteration_row["user_feedback_type"], "self_quality_repair")
+        self.assertTrue(iteration_row["correction_needed"])
+        self.assertIn("菜单", iteration_row["next_turn_improvement"])
+        self.assertTrue(any("self_quality_repair" in item for item in next_context.user_preferences))
+        self.assertNotIn("刚忙完", second.text)
+        self.assertNotIn("菜单", second.text)
+
 
 if __name__ == "__main__":
     unittest.main()
