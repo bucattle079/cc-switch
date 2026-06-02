@@ -1807,6 +1807,53 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertNotIn("以后市场分析默认先看A股、美股、韩国", joined)
         self.assertNotIn("取消刚才那条市场偏好", joined)
 
+    def test_revoked_preference_candidate_cannot_be_reconfirmed(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.run_layered_response(
+                "记住：以后市场分析默认先看A股、美股、韩国",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            product.run_layered_response(
+                "确认，把这条偏好固定下来",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            product.run_layered_response(
+                "取消刚才那条市场偏好，不要再默认先看A股美股韩国",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            result = product.run_layered_response(
+                "确认，把这条偏好固定下来",
+                intent="memory_related",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            confirmed_rows = [
+                json.loads(line)
+                for line in next(log_dir.glob("confirmed-preferences-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            context = product.build_reply_context(
+                "今天市场如何",
+                intent="market_brief",
+                log_dir=log_dir,
+            )
+            promotable_after_revocation = product.latest_promotable_memory_candidate(log_dir=log_dir)
+
+        self.assertIsNone(promotable_after_revocation)
+        self.assertEqual(len(confirmed_rows), 1)
+        self.assertIn("没找到", result.text)
+        self.assertNotIn("以后市场分析默认先看A股、美股、韩国", result.text)
+        joined = " ".join(context.user_preferences)
+        self.assertNotIn("以后市场分析默认先看A股、美股、韩国", joined)
+
     def test_confirming_latest_strategic_candidate_promotes_it_without_frontstage_schema(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:

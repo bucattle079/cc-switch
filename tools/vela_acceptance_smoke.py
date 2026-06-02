@@ -621,6 +621,19 @@ MEMORY_CONFIRMATION_CASES = [
         "expected_preference_in_context": False,
         "max_reply_chars": 180,
     },
+    {
+        "id": "memory_revoke_then_confirm_does_not_resurrect_preference",
+        "setup": "记住：以后市场分析默认先看A股、美股、韩国",
+        "confirmation": "确认，把这条偏好固定下来",
+        "revocation": "取消刚才那条市场偏好，不要再默认先看A股美股韩国",
+        "post_revocation_confirmation": "确认，把这条偏好固定下来",
+        "expected_intent": "memory_related",
+        "required_reply_tokens": ["没找到", "重发"],
+        "forbidden_reply_tokens": ["固定。以后按这条偏好", "以后市场分析默认先看A股", "schema", "jsonl"],
+        "expected_preference_in_context": False,
+        "expected_confirmed_preference_count": 1,
+        "max_reply_chars": 180,
+    },
 ]
 
 
@@ -1885,6 +1898,8 @@ def run_memory_confirmation_case(
     case_log_dir.mkdir(parents=True, exist_ok=True)
     confirmation = case["confirmation"]
     revocation = str(case.get("revocation") or "").strip()
+    post_revocation_confirmation = str(case.get("post_revocation_confirmation") or "").strip()
+    final_message = confirmation
 
     if use_entrypoint:
         original_run = router.run_layered_response
@@ -1902,6 +1917,11 @@ def run_memory_confirmation_case(
             if revocation:
                 intent = route_case(revocation)
                 reply = router.reply_for(revocation)
+                final_message = revocation
+            if post_revocation_confirmation:
+                intent = route_case(post_revocation_confirmation)
+                reply = router.reply_for(post_revocation_confirmation)
+                final_message = post_revocation_confirmation
         finally:
             router.run_layered_response = original_run
     else:
@@ -1926,6 +1946,16 @@ def run_memory_confirmation_case(
                 log_dir=case_log_dir,
                 reply_adapter=FallbackReplyAdapter(),
             )
+            final_message = revocation
+        if post_revocation_confirmation:
+            intent = route_case(post_revocation_confirmation)
+            result = run_layered_response(
+                post_revocation_confirmation,
+                intent=intent.name,
+                log_dir=case_log_dir,
+                reply_adapter=FallbackReplyAdapter(),
+            )
+            final_message = post_revocation_confirmation
         reply = result.text
 
     rows = confirmed_preference_rows(case_log_dir)
@@ -1935,8 +1965,15 @@ def run_memory_confirmation_case(
         row.get("confirmed") and all(token in str(row.get("summary") or "") for token in ("A股", "美股", "韩国"))
         for row in rows
     )
+    matching_confirmed_count = sum(
+        1
+        for row in rows
+        if row.get("confirmed") and all(token in str(row.get("summary") or "") for token in ("A股", "美股", "韩国"))
+    )
     context_uses_confirmed = all(token in preference_context for token in ("A股", "美股", "韩国")) and "候选偏好" not in preference_context
     expected_context = bool(case.get("expected_preference_in_context", True))
+    expected_confirmed_count = case.get("expected_confirmed_preference_count")
+    confirmed_count_ok = expected_confirmed_count is None or matching_confirmed_count == int(expected_confirmed_count)
     constraints = output_constraints(reply, case)
     leaks = find_leaks(reply)
     route_ok = intent.name == case["expected_intent"]
@@ -1944,7 +1981,7 @@ def run_memory_confirmation_case(
     return attach_latency({
         "id": case["id"],
         "kind": "entrypoint_memory_confirmation" if use_entrypoint else "memory_confirmation",
-        "message": confirmation,
+        "message": final_message,
         "setup": case["setup"],
         "intent": intent.name,
         "expected_intent": case["expected_intent"],
@@ -1956,6 +1993,7 @@ def run_memory_confirmation_case(
         "latest_iteration_signal": latest_iteration_signal(case_log_dir),
         "latest_quality_log": latest_quality_log(case_log_dir),
         "confirmed_preference_written": confirmed_written,
+        "matching_confirmed_preference_count": matching_confirmed_count,
         "confirmed_preference_in_context": context_uses_confirmed,
         "leaks": leaks,
         **constraints,
@@ -1963,6 +2001,7 @@ def run_memory_confirmation_case(
             route_ok
             and required_ok
             and confirmed_written
+            and confirmed_count_ok
             and context_uses_confirmed == expected_context
             and constraints["max_reply_chars_ok"]
             and not constraints["forbidden_reply_tokens_found"]

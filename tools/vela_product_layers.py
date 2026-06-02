@@ -1909,6 +1909,7 @@ def record_strategic_memory(
 
 
 def latest_promotable_memory_candidate(log_dir: Path | None = None) -> dict | None:
+    revoked_preferences = set(preference_revocation_summaries(log_dir=log_dir, limit=16))
     for row in reversed(latest_learning_rows("memory-candidates-*.jsonl", log_dir=log_dir, limit=16)):
         if row.get("sensitive"):
             continue
@@ -1929,6 +1930,8 @@ def latest_promotable_memory_candidate(log_dir: Path | None = None) -> dict | No
             "project_state",
             "preference",
         }:
+            if summary in revoked_preferences:
+                continue
             return {**row, "summary": summary}
     return None
 
