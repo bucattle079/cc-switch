@@ -45,7 +45,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "market_no_raw_english",
             "freshness_status",
             "codex_status_route_only",
-            "project_augsun_continue",
+            "project_vela_continue",
             "deep_autopsy_vela",
             "identity_memory_boundary",
             "sensitive_memory_guard",
@@ -261,7 +261,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             report = smoke.run_smoke_suite(log_dir=Path(tmp), use_entrypoint=True, fake_deepseek_env=True)
 
         by_id = {case["id"]: case for case in report["cases"]}
-        project = by_id["project_augsun_continue"]
+        project = by_id["project_vela_continue"]
         self.assertTrue(project["ok"], project)
         self.assertGreaterEqual(project["risk_bullets"], 3)
         self.assertTrue(project["min_risk_bullets_ok"], project)
@@ -364,7 +364,7 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
                 "human-iteration-2026-06-01.jsonl": [{"response_quality_signals": ["preference_or_feedback_adapted"]}],
                 "memory-candidates-2026-06-01.jsonl": [
                     {"level": "Preference Candidate", "classification": "style_feedback", "summary": "less robotic"},
-                    {"level": "Strategic Memory Candidate", "classification": "strategic_goal", "summary": "AugSun minimum loop"},
+                    {"level": "Strategic Memory Candidate", "classification": "strategic_goal", "summary": "VELA minimum loop"},
                 ],
                 "strategic-memory-2026-06-01.jsonl": [
                     {"level": "Strategic Memory", "memory_type": "project_goal", "summary": "confirmed direction"}

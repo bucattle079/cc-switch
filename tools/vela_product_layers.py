@@ -415,10 +415,30 @@ def interaction_has_matching_claim(row: dict, claims: list[dict]) -> bool:
     return False
 
 
+LEGACY_EXTERNAL_PROJECT_NAMES = ("AugSun", "ROLLQIIA")
+
+
+def contains_legacy_external_project(value: object) -> bool:
+    text = str(value or "")
+    return any(name.lower() in text.lower() for name in LEGACY_EXTERNAL_PROJECT_NAMES)
+
+
+def row_contains_legacy_external_project(row: dict) -> bool:
+    fields = (
+        row.get("message_summary"),
+        row.get("message_preview"),
+        row.get("response_summary"),
+        row.get("response_preview"),
+        row.get("summary"),
+    )
+    return any(contains_legacy_external_project(value) for value in fields)
+
+
 def context_interaction_rows(log_dir: Path | None = None, limit: int = 8) -> list[dict]:
     require_claim = should_require_claim_backing(log_dir)
     read_limit = max(limit * 40, 200) if require_claim else max(limit * 4, limit)
     rows = latest_learning_rows("interaction-*.jsonl", log_dir=log_dir, limit=read_limit)
+    rows = [row for row in rows if not row_contains_legacy_external_project(row)]
     if require_claim:
         rows = [
             row
@@ -435,6 +455,7 @@ def context_session_note_rows(log_dir: Path | None = None, limit: int = 3) -> li
     require_claim = should_require_claim_backing(log_dir)
     read_limit = max(limit * 40, 200) if require_claim else max(limit * 4, limit)
     rows = latest_learning_rows("session-notes-*.jsonl", log_dir=log_dir, limit=read_limit)
+    rows = [row for row in rows if not row_contains_legacy_external_project(row)]
     if require_claim:
         rows = [
             row
@@ -868,6 +889,17 @@ RELATIONSHIP_REPAIR_MARKERS = (
     "理解错",
     "重新判断",
     "偏了",
+    "怎么会出现",
+    "为什么出现",
+    "为什么又",
+    "不该出现",
+    "不应该出现",
+    "串线",
+    "串到",
+    "从哪来的",
+    "哪里来的",
+    "不是这个项目",
+    "我们是VELA交互",
 )
 
 QUIET_SUPPORT_MARKERS = (
@@ -1283,6 +1315,8 @@ def strategic_memory_summaries(log_dir: Path | None = None, limit: int = 4) -> l
     for row in latest_learning_rows("strategic-memory-*.jsonl", log_dir=log_dir, limit=limit):
         summary = normalize_memory_summary(str(row.get("summary") or ""))
         memory_type = str(row.get("memory_type") or "").strip()
+        if contains_legacy_external_project(summary):
+            continue
         if summary:
             summaries.append(f"{memory_type}：{summary}" if memory_type else summary)
     return summaries[-limit:]
@@ -1299,7 +1333,7 @@ def strategic_candidate_summaries(log_dir: Path | None = None, limit: int = 3) -
         if row.get("sensitive") or str(row.get("classification") or "") != "strategic_goal":
             continue
         summary = normalize_memory_summary(str(row.get("summary") or ""))
-        if not summary or summary in confirmed:
+        if not summary or summary in confirmed or contains_legacy_external_project(summary):
             continue
         memory_type = str(row.get("strategic_memory_type") or "strategic_goal").strip()
         summaries.append(f"战略候选（未确认，{memory_type}）：{summary}"[:360])
@@ -1605,7 +1639,7 @@ def build_memory_candidate(message: str) -> dict:
         classification = "style_feedback"
     elif any(key in text for key in ["A股", "美股", "韩国", "日本", "市场", "美债", "美元"]):
         classification = "market_focus"
-    elif any(key in lower for key in ["augsun", "rollqiia", "项目"]):
+    elif any(key in text for key in ["项目"]):
         classification = "project_state"
     elif any(key in text for key in ["长期目标", "战略", "重大架构", "人格方向"]):
         classification = "strategic_goal"
@@ -1623,7 +1657,7 @@ def build_memory_candidate(message: str) -> dict:
         summary = "表达反馈候选：减少模板、冷感、冗长、机器人感和反复自证；下一轮更直接地听懂需求并自然回应。"
     strategic_memory_type = ""
     if classification == "strategic_goal":
-        if any(key in lower for key in ["augsun", "rollqiia"]) or any(key in text for key in ["项目", "商业闭环"]):
+        if any(key in text for key in ["项目", "商业闭环"]):
             strategic_memory_type = "project_goal"
         elif any(key in text for key in ["VELA", "人格方向", "伙伴"]):
             strategic_memory_type = "persona_direction"
@@ -1833,15 +1867,9 @@ PROJECT_MINIMUM_LOOP_MARKERS = ("最小闭环", "最小推进", "最小动作", 
 
 def project_subject_from_message(message: str) -> str:
     text = str(message or "")
-    subjects: list[str] = []
-    for name in ("AugSun", "ROLLQIIA", "VELA"):
-        if name in text and name not in subjects:
-            subjects.append(name)
-    if not subjects:
-        return "当前项目"
-    if subjects == ["VELA"]:
+    if "VELA" in text:
         return "VELA Companion Core"
-    return " / ".join(subjects)
+    return "当前项目"
 
 
 def project_analysis_packet(message: str, intent: str) -> AnalysisPacket:
@@ -1965,11 +1993,10 @@ def should_surface_deep_lane_status(result: ReplyEngineResult) -> bool:
 def render_deep_lane_status_judgment(context: ReplyContext, result: ReplyEngineResult, base: AnalysisPacket) -> str:
     fallback_text = re.sub(r"^\s*K\s*[,，:：]\s*", "", str(result.text or "")).strip()
     fallback_text = fallback_text or base.judgment
-    target = "项目推进判断" if context.intent == "project_assistant" else "深度分析"
+    target = "项目判断" if context.intent == "project_assistant" else "深度分析"
     return (
-        "深度线超过前台预算，先给状态：模型没有在前台预算内返回；"
-        f"我先给可执行判断，不把空等包装成完整{target}。"
-        f"当前可用判断：{fallback_text}"
+        f"{target}这次没完整返回；我先给可执行判断，不把空等伪装成结论。"
+        f"当前判断：{fallback_text}"
     )
 
 

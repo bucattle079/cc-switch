@@ -450,9 +450,9 @@ class FallbackReplyAdapter(ReplyAdapter):
     )
 
     CONTINUE_VARIANTS = (
-        "K，继续就别从菜单重开。沿上一刀往下：先把目标、阻塞和下一步摆出来。",
+        "K，继续。沿上一刀往下：先把目标、阻塞和下一步摆出来。",
         "K，继续。上一轮的线还没断，别把自己送回起点。说当前卡点。",
-        "K，继续可以。给我一个对象：市场、项目，还是架构。我直接接上。",
+        "K，继续。先把刚才那条线接住；你给我一句当前卡点，我往下拆。",
     )
 
     CONTINUE_PROJECT_VARIANTS = (
@@ -573,6 +573,8 @@ class FallbackReplyAdapter(ReplyAdapter):
             text = " ".join(str(item or "").split()).strip()
             if not text:
                 continue
+            if any(name.lower() in text.lower() for name in ("AugSun", "ROLLQIIA")):
+                continue
             if "：" in text:
                 text = text.split("：", 1)[1].strip()
             if ":" in text and text.lower().startswith(("strategic", "project", "persona", "decision")):
@@ -609,7 +611,7 @@ class FallbackReplyAdapter(ReplyAdapter):
         if message in {"继续", "继续。", "继续吧", "go on", "continue"}:
             if has_style_feedback:
                 return self.CALIBRATED_CONTINUE_VARIANTS
-            if any(token in context.recent_summary for token in ("AugSun", "项目", "project_assistant")):
+            if any(token in context.recent_summary for token in ("项目", "project_assistant")):
                 return self.CONTINUE_PROJECT_VARIANTS
             return self.CONTINUE_VARIANTS
         if has_style_feedback and self._is_pure_greeting(context) and self._has_warmth_feedback(context):

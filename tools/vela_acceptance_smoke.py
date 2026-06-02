@@ -379,15 +379,15 @@ SINGLE_TURN_CASES = [
         "side_effects_allowed": False,
     },
     {
-        "id": "project_augsun_continue",
-        "message": "继续 AugSun 项目，别讲愿景，给三条风险",
+        "id": "project_vela_continue",
+        "message": "继续 VELA 项目，别讲愿景，给三条风险",
         "expected_intent": "project_assistant",
         "required_reply_tokens": ["风险：", "下一步："],
         "min_risk_bullets": 3,
     },
     {
         "id": "project_followup_minimum_action",
-        "message": "继续 AugSun，先别开大工程，给最小推进动作",
+        "message": "继续 VELA 项目，先别开大工程，给最小推进动作",
         "expected_intent": "project_assistant",
         "required_reply_tokens": ["最小闭环", "新模块", "触发", "反馈"],
         "forbidden_reply_tokens": ["把 Codex 输出当产品判断", "需要代码执行时再交给 /CODEX"],
@@ -395,7 +395,7 @@ SINGLE_TURN_CASES = [
     },
     {
         "id": "project_minimum_loop",
-        "message": "继续 AugSun，但不要开新模块，先查最小闭环",
+        "message": "继续 VELA 项目，但不要开新模块，先查最小闭环",
         "expected_intent": "project_assistant",
         "required_reply_tokens": ["最小闭环", "新模块", "触发", "反馈"],
         "forbidden_reply_tokens": ["把 Codex 输出当产品判断", "需要代码执行时再交给 /CODEX"],

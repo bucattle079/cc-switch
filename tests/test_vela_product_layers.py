@@ -99,7 +99,7 @@ class VelaProductLayerTests(unittest.TestCase):
                 reply_adapter=FakeGPTAdapter(),
             )
             project = product.run_layered_response(
-                "继续 AugSun 项目",
+                "继续 VELA 项目",
                 intent="project_assistant",
                 log_dir=Path(tmp),
                 reply_adapter=FakeGPTAdapter(),
@@ -169,8 +169,10 @@ class VelaProductLayerTests(unittest.TestCase):
 
         self.assertFalse(result.real_gpt_enabled)
         self.assertEqual(result.reply_adapter, "fallback")
-        self.assertIn("深度线超过前台预算", result.text)
-        self.assertIn("先给状态", result.text)
+        self.assertIn("深度分析这次没完整返回", result.text)
+        self.assertIn("先给可执行判断", result.text)
+        self.assertNotIn("前台预算", result.text)
+        self.assertNotIn("模型没有", result.text)
         self.assertNotIn("TimeoutError", result.text)
 
     def test_non_codex_lanes_select_deepseek_without_weather_api(self):
@@ -491,13 +493,13 @@ class VelaProductLayerTests(unittest.TestCase):
         product = load_product_module()
 
         cleaned = product.guard_layered_output(
-            "K，AugSun 这条线不断。先判产品方向，再派 Codex 做手上的活。",
+            "K，VELA 这条线不断。先判产品方向，再派 Codex 做手上的活。",
             intent="normal_chat",
             used_codex=False,
             used_retrieval=False,
         )
 
-        self.assertIn("AugSun", cleaned)
+        self.assertIn("VELA", cleaned)
         self.assertIn("Codex", cleaned)
 
     def test_repeated_normal_chat_rotates_away_from_last_response(self):
@@ -637,11 +639,11 @@ class VelaProductLayerTests(unittest.TestCase):
     def test_continue_uses_recent_context_instead_of_menu(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
-            product.run_layered_response("继续 AugSun 项目，下一步怎么推", intent="project_assistant", log_dir=Path(tmp))
+            product.run_layered_response("继续 VELA 项目，下一步怎么推", intent="project_assistant", log_dir=Path(tmp))
             reply = product.run_layered_response("继续", intent="normal_chat", log_dir=Path(tmp))
 
         self.assertIn("K", reply.text)
-        self.assertTrue(any(token in reply.text for token in ["AugSun", "项目", "上一刀", "上一轮"]))
+        self.assertTrue(any(token in reply.text for token in ["VELA", "项目", "上一刀", "上一轮"]))
         self.assertNotIn("要看盘，说 A股、美股或韩国", reply.text)
 
     def test_persona_profile_distills_required_traits_without_source_names(self):
@@ -843,7 +845,7 @@ class VelaProductLayerTests(unittest.TestCase):
     def test_humanization_interpretation_maps_project_operator(self):
         product = load_product_module()
 
-        interpretation = product.interpret_need("继续 AugSun 项目", "project_assistant")
+        interpretation = product.interpret_need("继续 VELA 项目", "project_assistant")
 
         self.assertEqual(interpretation.response_mode, "project_operator")
         self.assertIn("目标", interpretation.literal_need)
@@ -1059,14 +1061,14 @@ class VelaProductLayerTests(unittest.TestCase):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
             product.record_strategic_memory(
-                "AugSun 长期目标是先跑通最小商业闭环。",
+                "VELA 长期目标是先跑通 Companion Core 最小闭环。",
                 memory_type="project_goal",
                 confirmed_by_user=True,
                 log_dir=Path(tmp),
             )
 
             context = product.build_reply_context(
-                "继续 AugSun 项目",
+                "继续 VELA 项目",
                 intent="project_assistant",
                 log_dir=Path(tmp),
             )
@@ -1074,7 +1076,7 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("项目", context.need_interpretation)
         self.assertEqual(context.response_mode, "project_operator")
         self.assertEqual(context.human_tone_vector["strategic_depth"], 5)
-        self.assertIn("AugSun 长期目标", context.strategic_memories[0])
+        self.assertIn("VELA 长期目标", context.strategic_memories[0])
         self.assertIn("need_interpretation", context.to_dict())
         self.assertIn("response_mode", context.to_dict())
         self.assertIn("human_tone_vector", context.to_dict())
@@ -1341,7 +1343,7 @@ class VelaProductLayerTests(unittest.TestCase):
         product = load_product_module()
 
         text = product.guard_wechat_output(
-            "Strategic Memory Candidate project_goal: AugSun 长期目标\n"
+            "Strategic Memory Candidate project_goal: VELA 长期目标\n"
             "response_quality_signals=['preference_or_feedback_adapted']\n"
             "user_preferences=['少菜单']"
         )
@@ -1524,24 +1526,24 @@ class VelaProductLayerTests(unittest.TestCase):
     def test_long_term_project_goal_is_strategic_memory_candidate(self):
         product = load_product_module()
 
-        candidate = product.build_memory_candidate("记住：AugSun 长期目标是先跑通最小商业闭环")
+        candidate = product.build_memory_candidate("记住：VELA 项目长期目标是先跑通 Companion Core 最小闭环")
 
         self.assertEqual(candidate["level"], "Strategic Memory Candidate")
         self.assertEqual(candidate["classification"], "strategic_goal")
         self.assertEqual(candidate["strategic_memory_type"], "project_goal")
         self.assertTrue(candidate["requires_confirmation"])
         self.assertFalse(candidate["confirmed"])
-        self.assertIn("AugSun", candidate["summary"])
+        self.assertIn("VELA", candidate["summary"])
 
     def test_context_builder_reads_strategic_candidates_without_confirming_them(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
             product.record_memory_candidate(
-                "记住：AugSun 长期目标是先跑通最小商业闭环",
+                "记住：VELA 项目长期目标是先跑通 Companion Core 最小闭环",
                 log_dir=Path(tmp),
             )
             context = product.build_reply_context(
-                "继续 AugSun 项目",
+                "继续 VELA 项目",
                 intent="project_assistant",
                 log_dir=Path(tmp),
             )
@@ -1550,9 +1552,9 @@ class VelaProductLayerTests(unittest.TestCase):
         preferences = " ".join(context.user_preferences)
         self.assertIn("战略候选", strategic)
         self.assertIn("未确认", strategic)
-        self.assertIn("AugSun", strategic)
+        self.assertIn("VELA", strategic)
         self.assertNotIn("候选偏好", preferences)
-        self.assertNotIn("AugSun 长期目标", preferences)
+        self.assertNotIn("VELA 项目长期目标", preferences)
 
     def test_sensitive_memory_instruction_is_not_persisted_as_candidate(self):
         product = load_product_module()
@@ -1666,7 +1668,7 @@ class VelaProductLayerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
             product.run_layered_response(
-                "记住：AugSun 长期目标是先跑通最小商业闭环",
+                "记住：VELA 项目长期目标是先跑通 Companion Core 最小闭环",
                 intent="memory_related",
                 log_dir=log_dir,
                 reply_adapter=product.FallbackReplyAdapter(),
@@ -1684,7 +1686,7 @@ class VelaProductLayerTests(unittest.TestCase):
                 if line.strip()
             ]
             context = product.build_reply_context(
-                "继续 AugSun 项目",
+                "继续 VELA 项目",
                 intent="project_assistant",
                 log_dir=log_dir,
             )
@@ -1693,11 +1695,11 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertEqual(strategic_rows[-1]["level"], "Strategic Memory")
         self.assertEqual(strategic_rows[-1]["memory_type"], "project_goal")
         self.assertTrue(strategic_rows[-1]["confirmed"])
-        self.assertIn("AugSun", strategic_rows[-1]["summary"])
+        self.assertIn("VELA", strategic_rows[-1]["summary"])
         self.assertIn("固定", result.text)
-        self.assertIn("AugSun", result.text)
+        self.assertIn("VELA", result.text)
         strategic_context = " ".join(context.strategic_memories)
-        self.assertIn("AugSun", strategic_context)
+        self.assertIn("VELA", strategic_context)
         self.assertNotIn("战略候选", strategic_context)
         for internal in ["Strategic Memory Candidate", "候选类型", "schema", "jsonl"]:
             self.assertNotIn(internal, result.text)
@@ -1728,6 +1730,19 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertFalse(row["sensitive"])
         self.assertIn("机器人", row["summary"])
         self.assertIn("被反馈触动", row["need_interpretation"])
+
+    def test_context_leakage_feedback_candidate_is_not_project_state(self):
+        product = load_product_module()
+
+        message = "我们是VELA交互，怎么会出现AugSun?"
+        candidate = product.build_memory_candidate(message)
+        learning = product.evaluate_learning(message, "style_feedback")
+
+        self.assertEqual(candidate["classification"], "relationship_repair")
+        self.assertNotEqual(candidate["classification"], "project_state")
+        self.assertTrue(learning.should_affect_next_reply)
+        self.assertEqual(learning.classification, "relationship_repair")
+        self.assertNotIn("AugSun", candidate["summary"])
 
     def test_behavior_feedback_variants_become_reusable_preferences(self):
         product = load_product_module()
@@ -1819,7 +1834,7 @@ class VelaProductLayerTests(unittest.TestCase):
             ("脑子发懵", "normal_chat", "quiet_support", ["Meaning Decoder", "Witty Correction"]),
             ("我现在脑子糊住了，只给我一个下一步", "normal_chat", "quiet_support", ["Meaning Decoder", "Witty Correction"]),
             ("继续，不要拖", "style_feedback", "behavior_preference", ["Boundary Engine", "Witty Correction"]),
-            ("继续 AugSun / VELA 项目", "project_assistant", "project_operator", ["Evidence Gate", "Boundary Engine"]),
+            ("继续 VELA 项目", "project_assistant", "project_operator", ["Evidence Gate", "Boundary Engine"]),
             ("继续 VELA 项目，别讲愿景，给三条风险", "project_assistant", "project_operator", ["Evidence Gate", "Boundary Engine"]),
             ("今天能不能加仓", "market_brief", "market_brief", ["Evidence Gate", "Boundary Engine"]),
             ("我今天有点上头，想直接满仓冲进去", "market_brief", "market_brief", ["Evidence Gate", "Boundary Engine"]),
@@ -1888,7 +1903,7 @@ class VelaProductLayerTests(unittest.TestCase):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
             result = product.run_layered_response(
-                "继续 AugSun 项目，下一步怎么推",
+                "继续 VELA 项目，下一步怎么推",
                 intent="project_assistant",
                 log_dir=Path(tmp),
             )
@@ -1934,7 +1949,7 @@ class VelaProductLayerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             result = product.run_layered_response(
-                "继续 AugSun 项目，但不要开新模块，先查最小闭环",
+                "继续 VELA 项目，但不要开新模块，先查最小闭环",
                 intent="project_assistant",
                 log_dir=Path(tmp),
                 reply_adapter=product.FallbackReplyAdapter(),
@@ -2134,7 +2149,7 @@ class VelaProductLayerTests(unittest.TestCase):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
             product.record_session_note(
-                "继续 AugSun 项目",
+                "继续 VELA 项目",
                 "project_assistant",
                 "判断：先拆目标、风险和最小下一步。",
                 log_dir=Path(tmp),
@@ -2147,8 +2162,36 @@ class VelaProductLayerTests(unittest.TestCase):
             )
 
         self.assertIn("短期笔记:project_assistant", context.recent_summary)
-        self.assertIn("AugSun", context.recent_summary)
+        self.assertIn("VELA", context.recent_summary)
         self.assertIn("最小下一步", context.recent_summary)
+
+    def test_legacy_external_project_records_are_excluded_from_vela_context(self):
+        product = load_product_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.record_session_note(
+                "继续 AugSun 项目",
+                "project_assistant",
+                "判断：推进 AugSun 最小闭环。",
+                log_dir=log_dir,
+            )
+            product.record_strategic_memory(
+                "VELA Companion Core 长期方向：陪 K 推进 AugSun / ROLLQIIA / 市场分析。",
+                memory_type="companion_core_direction",
+                confirmed_by_user=True,
+                log_dir=log_dir,
+            )
+
+            context = product.build_reply_context(
+                "继续 VELA 项目",
+                intent="project_assistant",
+                log_dir=log_dir,
+            )
+
+        joined = " ".join([context.recent_summary, *context.strategic_memories, *context.user_preferences])
+        self.assertNotIn("AugSun", joined)
+        self.assertNotIn("ROLLQIIA", joined)
+        self.assertIn("VELA", context.message)
 
     def test_context_builder_reads_iteration_signal_for_next_turn_style(self):
         product = load_product_module()

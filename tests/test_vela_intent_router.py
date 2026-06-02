@@ -509,9 +509,50 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_project_discussion_routes_to_project_assistant(self):
         router = load_module(ROUTER, "vela_router")
 
-        intent = router.classify_intent("AugSun 项目下一步怎么拆")
+        intent = router.classify_intent("VELA 项目下一步怎么拆")
 
         self.assertEqual(intent.name, "project_assistant")
+
+    def test_legacy_external_project_name_alone_does_not_enter_vela_project_lane(self):
+        router = load_module(ROUTER, "vela_router")
+
+        intent = router.classify_intent("继续 AugSun，先别开大工程，给最小推进动作")
+
+        self.assertEqual(intent.name, "normal_chat")
+        self.assertFalse(intent.codex_allowed)
+        self.assertFalse(intent.market_allowed)
+
+    def test_context_leakage_complaint_routes_to_style_feedback(self):
+        router = load_module(ROUTER, "vela_router")
+
+        cases = [
+            "我们是VELA交互，怎么会出现AugSun?",
+            "这不是 AugSun 项目，为什么又串到项目线了",
+            "刚才不该出现 ROLLQIIA，重新判断",
+            "问候怎么会出现 Codex 工程日志",
+            "为什么又出现 DeepSeek 状态说明",
+            "我只是打招呼，怎么会出现市场资讯",
+            "刚才不该出现新闻列表，重新判断",
+        ]
+
+        for text in cases:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, "style_feedback")
+                self.assertIn("relationship_repair", intent.focus_tags)
+                self.assertFalse(intent.codex_allowed)
+                self.assertFalse(intent.market_allowed)
+
+    def test_context_leakage_complaint_uses_feedback_lane_not_project_plan(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，抓到了，是上下文串线。")) as run:
+            reply = router.reply_for("我们是VELA交互，怎么会出现AugSun?")
+
+        self.assertEqual(reply, "K，抓到了，是上下文串线。")
+        self.assertEqual(run.call_args.kwargs["intent"], "style_feedback")
+        self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
 
     def test_codex_status_question_routes_to_codex_task_without_market(self):
         router = load_module(ROUTER, "vela_router")
@@ -787,7 +828,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             def generate(self, context):
                 return SimpleNamespace(
                     text=(
-                        "K，目标：锁 AugSun 的最小用户闭环。\n"
+                        "K，目标：锁 VELA 的最小用户闭环。\n"
                         "风险：别开新模块，别让工程噪音进前台。\n"
                         "下一步：先验证一个用户从触发到反馈的闭环。"
                     ),
@@ -798,13 +839,13 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             reply = product.run_layered_response(
-                "继续 AugSun 项目",
+                "继续 VELA 项目",
                 intent="project_assistant",
                 reply_adapter=StructuredProjectAdapter(),
                 log_dir=Path(tmp),
             ).text
 
-        self.assertIn("目标：锁 AugSun 的最小用户闭环", reply)
+        self.assertIn("目标：锁 VELA 的最小用户闭环", reply)
         self.assertEqual(reply.count("风险："), 1)
         self.assertEqual(reply.count("下一步："), 1)
         self.assertNotIn("把 Codex 输出当产品判断", reply)
@@ -814,7 +855,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         product = load_module(PRODUCT, "vela_product_layers")
 
         packet = product.analysis_layer(
-            "继续 AugSun，但不要开新模块，先查最小闭环",
+            "继续 VELA 项目，但不要开新模块，先查最小闭环",
             "project_assistant",
         )
         rendered = product.render_vela_persona(packet)
@@ -834,7 +875,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             def generate(self, context):
                 return SimpleNamespace(
                     text=(
-                        "K，继续推进 AugSun，不开新模块。\n"
+                        "K，继续推进 VELA，不开新模块。\n"
                         "**判断**：当前最小闭环是跑通一个真实场景。\n"
                         "**阻塞**：上下文断链，每轮像新对话。\n"
                         "**最短路径**：选一个真实入口，验证触发到反馈是否闭合。"
@@ -846,7 +887,7 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             reply = product.run_layered_response(
-                "继续 AugSun，但不要开新模块，先查最小闭环",
+                "继续 VELA 项目，但不要开新模块，先查最小闭环",
                 intent="project_assistant",
                 reply_adapter=MarkdownProjectAdapter(),
                 log_dir=Path(tmp),

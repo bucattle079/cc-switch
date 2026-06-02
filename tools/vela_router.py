@@ -276,7 +276,7 @@ CODEX_KEYWORDS = [
     "开发任务",
     "电脑控制",
 ]
-PROJECT_KEYWORDS = ["augsun", "rollqiia", "项目", "广告中心", "intelligence center", "规划", "功能如何"]
+PROJECT_KEYWORDS = ["项目", "广告中心", "intelligence center", "规划", "功能如何"]
 DEEP_KEYWORDS = ["深入分析", "深度分析", "地狱验尸", "验尸", "架构判断", "架构", "推演", "复盘", "根因", "策略验尸"]
 STYLE_FEEDBACK_KEYWORDS = [
     "新闻列表",
@@ -323,6 +323,33 @@ STYLE_FEEDBACK_KEYWORDS = [
     "偏了",
 ]
 RELATIONSHIP_REPAIR_KEYWORDS = ["你没懂我", "没懂我", "没听懂", "没听明白", "没抓到", "不是这个意思", "不是我要的", "理解错", "重新判断", "偏了"]
+CONTEXT_LEAKAGE_FEEDBACK_KEYWORDS = [
+    "怎么会出现",
+    "为什么出现",
+    "为什么又",
+    "不该出现",
+    "不应该出现",
+    "串线",
+    "串到",
+    "从哪来的",
+    "哪里来的",
+    "这不是",
+    "不是这个项目",
+    "我们是vela交互",
+]
+CONTEXT_LEAKAGE_SUBJECT_KEYWORDS = [
+    "augsun",
+    "rollqiia",
+    "codex",
+    "deepseek",
+    "市场资讯",
+    "新闻列表",
+    "工程日志",
+    "日志",
+    "项目线",
+    "项目",
+    "vela",
+]
 WEATHER_KEYWORDS = [
     "天气",
     "气温",
@@ -456,6 +483,8 @@ def classify_intent(text: str) -> Intent:
         return Intent("deep_analysis", 0.82, deep_focus_tags(norm))
     if contains_any(norm, MEMORY_KEYWORDS) and contains_any(norm, MEMORY_PRIORITY_KEYWORDS):
         return Intent("memory_related", 0.88, memory_focus_tags(norm))
+    if is_context_leakage_feedback(norm):
+        return Intent("style_feedback", 0.92, ["memory", "style_feedback", "relationship_repair"])
     if contains_any(norm, CODEX_KEYWORDS):
         return Intent("codex_task", 0.86, ["codex"], codex_allowed=True)
     if contains_any(norm, PROJECT_KEYWORDS) and not is_explicit_market_judgment_request(norm):
@@ -486,6 +515,13 @@ def classify_intent(text: str) -> Intent:
     if is_daily_info_request(norm):
         return Intent("daily_info", 0.74, ["daily_info"])
     return Intent("normal_chat", 0.7, [])
+
+
+def is_context_leakage_feedback(text: str) -> bool:
+    return contains_any(text, CONTEXT_LEAKAGE_FEEDBACK_KEYWORDS) and contains_any(
+        text,
+        CONTEXT_LEAKAGE_SUBJECT_KEYWORDS,
+    )
 
 
 def contains_any(text: str, words: list[str]) -> bool:
@@ -582,7 +618,7 @@ def memory_focus_tags(text: str) -> list[str]:
         tags.append("style_feedback")
     if contains_any(text, ["a股", "美股", "韩国", "日本", "市场"]):
         tags.append("market_focus")
-    if contains_any(text, ["augsun", "rollqiia", "项目"]):
+    if contains_any(text, ["项目"]):
         tags.append("project_memory")
     return tags
 

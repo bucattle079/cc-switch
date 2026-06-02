@@ -167,15 +167,15 @@ class VelaReplyEngineTests(unittest.TestCase):
         engine = load_reply_engine()
         adapter = engine.FallbackReplyAdapter()
         context = engine.ReplyContext(
-            message="继续 AugSun 项目",
+            message="继续 VELA 项目",
             intent="project_assistant",
-            strategic_memories=["战略候选（未确认，project_goal）：AugSun 长期目标是先跑通最小商业闭环"],
+            strategic_memories=["战略候选（未确认，project_goal）：VELA 长期目标是先跑通 Companion Core 最小闭环"],
         )
 
         result = adapter.generate(context)
 
-        self.assertIn("AugSun", result.text)
-        self.assertIn("最小商业闭环", result.text)
+        self.assertIn("VELA", result.text)
+        self.assertIn("Companion Core", result.text)
         self.assertNotIn("project_goal", result.text)
         self.assertNotIn("战略候选", result.text)
         self.assertNotIn("未确认", result.text)
@@ -201,6 +201,27 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertTrue(any(token in result.text for token in ["不用谢", "在", "交给我"]))
         self.assertNotIn("废话", result.text)
         self.assertNotIn("卡点", result.text)
+
+    def test_plain_continue_is_not_menu_prompt(self):
+        engine = load_reply_engine()
+        adapter = engine.FallbackReplyAdapter()
+        context = engine.ReplyContext(message="继续", intent="normal_chat")
+
+        result = adapter.generate(context)
+
+        self.assertIn("K", result.text)
+        self.assertNotIn("市场、项目，还是架构", result.text)
+        self.assertNotIn("给我一个对象", result.text)
+        self.assertNotIn("菜单", result.text)
+
+    def test_continue_variants_are_not_menu_prompts(self):
+        engine = load_reply_engine()
+
+        for text in engine.FallbackReplyAdapter.CONTINUE_VARIANTS:
+            with self.subTest(text=text):
+                self.assertNotIn("市场、项目，还是架构", text)
+                self.assertNotIn("给我一个对象", text)
+                self.assertNotIn("菜单", text)
 
     def test_pure_style_feedback_uses_style_feedback_not_misread_repair(self):
         engine = load_reply_engine()
@@ -292,7 +313,7 @@ class VelaReplyEngineTests(unittest.TestCase):
         context = engine.ReplyContext(
             message="我现在有点乱",
             intent="normal_chat",
-            recent_summary="project_assistant:AugSun 卡住",
+            recent_summary="project_assistant:VELA 卡住",
             last_response="K，先稳住。",
             repeated_message=True,
             user_preferences=["少解释身份，多给判断"],
@@ -317,7 +338,7 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertIn("像微信里真正回话", system_text)
         self.assertIn("不要写括号动作", system_text)
         self.assertIn("用户原话：我现在有点乱", user_text)
-        self.assertIn("最近上下文：project_assistant:AugSun 卡住", user_text)
+        self.assertIn("最近上下文：project_assistant:VELA 卡住", user_text)
         self.assertIn("上一句回复：K，先稳住。", user_text)
         self.assertIn("已重复发送：是", user_text)
         self.assertIn("风格校准：少解释身份，多给判断", user_text)
@@ -382,7 +403,7 @@ class VelaReplyEngineTests(unittest.TestCase):
                 "memory_reference_need": 3,
             },
             persona_skeleton=["Meaning Decoder", "Witty Correction"],
-            strategic_memories=["AugSun 长期目标是先跑通最小商业闭环。"],
+            strategic_memories=["VELA 长期目标是先跑通 Companion Core 最小闭环。"],
         )
 
         brief = engine.build_dialogue_brief(context)
@@ -391,7 +412,7 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertIn("回应模式：relationship_repair", brief)
         self.assertIn("语气向量：warmth=4, directness=5, strategic_depth=2", brief)
         self.assertIn("人格骨架：Meaning Decoder / Witty Correction", brief)
-        self.assertIn("长期记忆：AugSun 长期目标是先跑通最小商业闭环。", brief)
+        self.assertIn("长期记忆：VELA 长期目标是先跑通 Companion Core 最小闭环。", brief)
         self.assertNotIn("{", brief)
         self.assertNotIn("need_interpretation", brief)
 
