@@ -845,6 +845,39 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertTrue(first)
         self.assertFalse(second)
 
+    def test_response_hash_guard_allows_same_text_after_style_feedback(self):
+        router = load_module(ROUTER, "vela_router")
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            first = router.claim_response_once(
+                "K，我在。",
+                "normal_chat",
+                state_dir=state_dir,
+                ttl_seconds=30,
+            )
+            router.claim_request_once(
+                "你太像机器人了",
+                "style_feedback",
+                state_dir=state_dir,
+                ttl_seconds=30,
+            )
+            after_feedback = router.claim_response_once(
+                "K，我在。",
+                "normal_chat",
+                state_dir=state_dir,
+                ttl_seconds=30,
+            )
+            repeated_after_feedback = router.claim_response_once(
+                "K，我在。",
+                "normal_chat",
+                state_dir=state_dir,
+                ttl_seconds=30,
+            )
+
+        self.assertTrue(first)
+        self.assertTrue(after_feedback)
+        self.assertFalse(repeated_after_feedback)
+
 
 class VelaMarketBriefingTests(unittest.TestCase):
     def test_market_briefing_windows_are_9_1230_and_17(self):
@@ -1034,6 +1067,40 @@ class VelaMarketBriefingTests(unittest.TestCase):
         self.assertTrue(first)
         self.assertFalse(second)
         self.assertEqual(len(logs), 1)
+
+    def test_router_send_once_allows_same_prompt_after_style_feedback(self):
+        router = load_module(ROUTER, "vela_router")
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            first = router.claim_request_once(
+                "你好",
+                "normal_chat",
+                state_dir=state_dir,
+                ttl_seconds=30,
+            )
+            feedback = router.claim_request_once(
+                "你太像机器人了",
+                "style_feedback",
+                state_dir=state_dir,
+                ttl_seconds=30,
+            )
+            after_feedback = router.claim_request_once(
+                "你好",
+                "normal_chat",
+                state_dir=state_dir,
+                ttl_seconds=30,
+            )
+            repeated_after_feedback = router.claim_request_once(
+                "你好",
+                "normal_chat",
+                state_dir=state_dir,
+                ttl_seconds=30,
+            )
+
+        self.assertTrue(first)
+        self.assertTrue(feedback)
+        self.assertTrue(after_feedback)
+        self.assertFalse(repeated_after_feedback)
 
     def test_9_beijing_uses_a_share_premarket(self):
         market = load_module(MARKET, "vela_market_briefing")

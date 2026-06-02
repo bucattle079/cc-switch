@@ -42,6 +42,7 @@ SEND_ONCE_DIR = ROOT / "VELA" / "send-once"
 MARKET_REFRESH_DIR = ROOT / "VELA" / "market-refresh"
 MARKET_REFRESH_LOCK_TTL_SECONDS = 20 * 60
 LOCAL_TOOL_TIMEOUT_SECONDS = 45
+FEEDBACK_DEDUP_WINDOW_SECONDS = 120
 
 
 @dataclass(frozen=True)
@@ -887,8 +888,41 @@ def duplicate_ttl_seconds(intent: str) -> int:
     return 12
 
 
-def request_key(message: str, intent: str) -> str:
-    payload = f"{intent}|{normalized_request_text(message)}"
+def recent_feedback_marker(state_dir: Path, *, max_age_seconds: int = FEEDBACK_DEDUP_WINDOW_SECONDS) -> str:
+    path = state_dir / "last-feedback-claim.json"
+    if not path.exists():
+        return ""
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return ""
+    if age > max_age_seconds:
+        return ""
+    try:
+        row = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        try:
+            return f"mtime:{int(path.stat().st_mtime)}"
+        except OSError:
+            return ""
+    marker = str(row.get("request_key") or "").strip()
+    return marker or f"mtime:{int(path.stat().st_mtime)}"
+
+
+def dedupe_context_marker(intent: str, state_dir: Path) -> str:
+    parts: list[str] = []
+    message_id = str(os.environ.get("CC_MESSAGE_ID") or "").strip()
+    if message_id:
+        parts.append(f"msg:{message_id}")
+    if intent != "style_feedback":
+        marker = recent_feedback_marker(state_dir)
+        if marker:
+            parts.append(f"after_feedback:{marker}")
+    return "|".join(parts)
+
+
+def request_key(message: str, intent: str, *, context_marker: str = "") -> str:
+    payload = f"{intent}|{normalized_request_text(message)}|{context_marker}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
 
@@ -911,9 +945,33 @@ def log_duplicate_request(
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def response_key(response: str, intent: str) -> str:
-    payload = f"{intent}|{normalized_request_text(response)}"
+def response_key(response: str, intent: str, *, context_marker: str = "") -> str:
+    payload = f"{intent}|{normalized_request_text(response)}|{context_marker}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+
+
+def write_claim_marker(
+    *,
+    state_dir: Path,
+    message: str,
+    intent: str,
+    key: str,
+    context_marker: str,
+) -> None:
+    row = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "intent": intent,
+        "request_key": key,
+        "context_marker": context_marker,
+        "message_preview": " ".join(str(message or "").split())[:160],
+    }
+    for name in ("last-claim.json", "last-feedback-claim.json" if intent == "style_feedback" else ""):
+        if not name:
+            continue
+        try:
+            (state_dir / name).write_text(json.dumps(row, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
 
 
 def log_duplicate_response(
@@ -944,7 +1002,8 @@ def claim_response_once(
 ) -> bool:
     state_dir = state_dir or SEND_ONCE_DIR
     state_dir.mkdir(parents=True, exist_ok=True)
-    key = response_key(response, intent)
+    context_marker = dedupe_context_marker(intent, state_dir)
+    key = response_key(response, intent, context_marker=context_marker)
     path = state_dir / f"{key}.response"
     now = time.time()
     if path.exists():
@@ -986,7 +1045,8 @@ def claim_request_once(
     state_dir = state_dir or SEND_ONCE_DIR
     state_dir.mkdir(parents=True, exist_ok=True)
     ttl = ttl_seconds if ttl_seconds is not None else duplicate_ttl_seconds(intent)
-    key = request_key(message, intent)
+    context_marker = dedupe_context_marker(intent, state_dir)
+    key = request_key(message, intent, context_marker=context_marker)
     path = state_dir / f"{key}.claim"
     now = time.time()
     if path.exists():
@@ -1010,11 +1070,19 @@ def claim_request_once(
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "intent": intent,
                     "request_key": key,
+                    "context_marker": context_marker,
                     "message_preview": " ".join(str(message or "").split())[:160],
                 },
                 ensure_ascii=False,
             )
         )
+    write_claim_marker(
+        state_dir=state_dir,
+        message=message,
+        intent=intent,
+        key=key,
+        context_marker=context_marker,
+    )
     return True
 
 

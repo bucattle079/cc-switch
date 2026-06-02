@@ -773,6 +773,7 @@ def weixin_command_dispatch(log_path: Path, inbound_time: datetime | None) -> di
     if not log_path.exists():
         return runtime_check(False, "cc-connect log missing; cannot prove vela-router dispatch")
     latest: datetime | None = None
+    latest_route = "vela-router"
     try:
         lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -790,9 +791,10 @@ def weixin_command_dispatch(log_path: Path, inbound_time: datetime | None) -> di
         parsed = parse_timestamp(match.group(1) if match else "")
         if parsed and parsed >= inbound_time and (latest is None or parsed > latest):
             latest = parsed
+            latest_route = "inbound-router" if routed_by_inbound_router else "vela-router"
     if latest is None:
         return runtime_check(False, "no logged vela-router dispatch after latest Weixin inbound")
-    return runtime_check(True, f"vela-router command dispatched at {latest.isoformat()}")
+    return runtime_check(True, f"{latest_route} dispatched at {latest.isoformat()}")
 
 
 def latest_path_mtime(paths: Iterable[Path]) -> datetime | None:
@@ -1026,6 +1028,22 @@ def run_runtime_audit(
         inbound_time=inbound_time,
         reply_time=reply_time,
     )
+    dispatch_detail = str(checks["weixin_command_dispatch"].get("detail") or "")
+    direct_inbound_router_path = (
+        bool(inbound_time)
+        and checks["weixin_command_dispatch"]["ok"]
+        and checks["weixin_dispatch_trace"]["ok"]
+        and "inbound-router" in dispatch_detail
+    )
+    if direct_inbound_router_path and not inbound_ok:
+        checks["latest_session_reply"] = runtime_check(
+            True,
+            "inbound-router direct foreground path observed; session history is not the proof surface for this route",
+        )
+        checks["inbound_to_reply"] = runtime_check(
+            True,
+            "latest Weixin inbound has logged inbound-router dispatch; direct replies may not write VELA session history",
+        )
 
     failed = [name for name, check in checks.items() if not check["ok"]]
     return {

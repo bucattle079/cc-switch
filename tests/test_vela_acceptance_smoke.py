@@ -685,6 +685,92 @@ command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.
 
         self.assertTrue(check["ok"])
         self.assertIn("dispatched", check["detail"])
+        self.assertIn("inbound-router", check["detail"])
+
+    def test_runtime_audit_accepts_inbound_router_direct_reply_without_session_write(self):
+        smoke = load_smoke_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            cc_home = Path(tmp) / ".cc-connect"
+            sessions = cc_home / "sessions"
+            sessions.mkdir(parents=True)
+            state_dir = cc_home / "weixin" / "codex-wechat" / "bot"
+            state_dir.mkdir(parents=True)
+            (state_dir / "get_updates.buf").write_text("poll", encoding="utf-8")
+            context_tokens = state_dir / "context_tokens.json"
+            context_tokens.write_text('{"moved":true}', encoding="utf-8")
+            (cc_home / "config.toml").write_text(
+                f"""
+[[commands]]
+name = "vela-router"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args}}}}"
+
+[[commands]]
+name = "vela-talk"
+exec = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" {{{{args:VELA}}}}"
+
+[[projects]]
+name = "VELA"
+
+[projects.intent_router]
+enabled = true
+command = "python -X utf8 \\"C:/Users/Admin/Desktop/CC-WECHAT/tools/vela_router.py\\" --stdin"
+
+[[projects.platforms]]
+type = "weixin"
+
+[projects.platforms.options]
+state_dir = "{str(state_dir).replace("\\", "/")}"
+""".strip(),
+                encoding="utf-8",
+            )
+            (sessions / "VELA_test.json").write_text(
+                json.dumps(
+                    {
+                        "sessions": {
+                            "s1": {
+                                "history": [
+                                    {
+                                        "role": "assistant",
+                                        "content": "旧的干净回复。",
+                                        "timestamp": "2026-06-01T00:00:00+00:00",
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            inbound_time = datetime(2026, 6, 1, 12, 47, 38, tzinfo=timezone.utc).timestamp()
+            after_inbound = datetime(2026, 6, 1, 12, 47, 40, tzinfo=timezone.utc).timestamp()
+            os.utime(context_tokens, (after_inbound, after_inbound))
+            (cc_home / "cc-connect.log").write_text(
+                "\n".join(
+                    [
+                        'time=2026-06-01T20:47:38+08:00 level=INFO msg="message received" platform=weixin content_len=24',
+                        'time=2026-06-01T20:47:39+08:00 level=INFO msg="audit: command_executed" platform=weixin project=VELA command=inbound-router type=inbound_router',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            fresh_poll = datetime.now(timezone.utc).timestamp()
+            os.utime(state_dir / "get_updates.buf", (fresh_poll, fresh_poll))
+            os.utime(sessions / "VELA_test.json", (inbound_time - 3600, inbound_time - 3600))
+
+            report = smoke.run_runtime_audit(
+                cc_home=cc_home,
+                process_running=True,
+                max_session_age_hours=1,
+            )
+
+        self.assertTrue(report["ok"])
+        self.assertTrue(report["checks"]["latest_session_reply"]["ok"])
+        self.assertIn("direct foreground path", report["checks"]["latest_session_reply"]["detail"])
+        self.assertTrue(report["checks"]["inbound_to_reply"]["ok"])
+        self.assertIn("direct replies may not write", report["checks"]["inbound_to_reply"]["detail"])
+        self.assertNotIn("latest_session_reply", report["failed"])
+        self.assertNotIn("inbound_to_reply", report["failed"])
 
     def test_runtime_audit_requires_weixin_inbound_not_only_internal_session_send(self):
         smoke = load_smoke_module()
