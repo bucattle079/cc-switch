@@ -181,6 +181,14 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertFalse(weather.allow_retrieval)
         self.assertIn("no external weather API", weather.reason)
 
+        now_daily = product.select_model_and_tools("daily_info", env=env, message="现在DeepSeek有什么新消息")
+        self.assertEqual(now_daily.model_adapter, "deepseek_chat")
+        self.assertTrue(now_daily.allow_retrieval)
+
+        now_world = product.select_model_and_tools("world_brief", env=env, message="现在日本地震新闻")
+        self.assertEqual(now_world.model_adapter, "deepseek_chat")
+        self.assertTrue(now_world.allow_retrieval)
+
         codex = product.select_model_and_tools("codex_task", env=env)
         self.assertEqual(codex.model_adapter, "codex_bridge")
         self.assertTrue(codex.allow_codex)

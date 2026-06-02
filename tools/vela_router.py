@@ -202,7 +202,53 @@ CURRENT_MARKET_SURFACE_KEYWORDS = [
     "市场",
     "盘面",
 ]
+CURRENT_MARKET_HARD_SURFACE_KEYWORDS = [
+    "a股",
+    "a 股",
+    "上证",
+    "沪深300",
+    "深成指",
+    "创业板",
+    "美股",
+    "nasdaq",
+    "s&p",
+    "sp500",
+    "kospi",
+    "nikkei",
+    "全球市场",
+    "世界市场",
+    "外盘",
+    "市场",
+    "盘面",
+]
 WORLD_KEYWORDS = ["世界", "全球", "军政", "地缘", "外交", "战争", "制裁", "航运", "能源安全", "世界简报"]
+CURRENT_INFO_ACTION_KEYWORDS = [
+    "资讯",
+    "新闻",
+    "消息",
+    "新消息",
+    "发生",
+    "发生了什么",
+    "有什么新",
+    "有什么新闻",
+    "查一下",
+    "查询",
+    "检索",
+    "搜索",
+]
+CURRENT_WORLD_EVENT_KEYWORDS = [
+    "地震",
+    "台风",
+    "海啸",
+    "战争",
+    "冲突",
+    "制裁",
+    "外交",
+    "军政",
+    "地缘",
+    "航运",
+    "能源安全",
+]
 CODEX_KEYWORDS = [
     "codex",
     "代码",
@@ -404,6 +450,10 @@ def classify_intent(text: str) -> Intent:
         return Intent("codex_task", 0.86, ["codex"], codex_allowed=True)
     if contains_any(norm, PROJECT_KEYWORDS) and not is_explicit_market_judgment_request(norm):
         return Intent("project_assistant", 0.78, ["project"])
+    if is_current_world_info_request(norm):
+        return Intent("world_brief", 0.84, ["geopolitics", "global"])
+    if is_current_general_info_request(norm):
+        return Intent("daily_info", 0.82, ["daily_info", "current_info"])
     if is_explicit_market_judgment_request(norm):
         tags = market_focus_tags(norm)
         return Intent("market_brief", 0.9, tags, market_allowed=True)
@@ -463,6 +513,26 @@ def is_current_market_query(text: str) -> bool:
     if is_expanded_market_query(norm):
         return False
     return contains_any(norm, CURRENT_MARKET_TIME_KEYWORDS) and contains_any(norm, CURRENT_MARKET_SURFACE_KEYWORDS)
+
+
+def is_current_world_info_request(text: str) -> bool:
+    norm = normalize(text)
+    if "现在" not in norm:
+        return False
+    if contains_any(norm, CURRENT_MARKET_HARD_SURFACE_KEYWORDS):
+        return False
+    return contains_any(norm, CURRENT_INFO_ACTION_KEYWORDS) and contains_any(norm, CURRENT_WORLD_EVENT_KEYWORDS)
+
+
+def is_current_general_info_request(text: str) -> bool:
+    norm = normalize(text)
+    if "现在" not in norm:
+        return False
+    if contains_any(norm, CURRENT_MARKET_HARD_SURFACE_KEYWORDS):
+        return False
+    if is_weather_query(norm):
+        return False
+    return contains_any(norm, CURRENT_INFO_ACTION_KEYWORDS)
 
 
 def is_weather_query(text: str) -> bool:

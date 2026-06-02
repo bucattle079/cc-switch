@@ -28,6 +28,8 @@ CURRENT_INFO_INTENTS = {"daily_info", "market_brief", "world_brief", "weather_qu
 CURRENT_INFO_SURFACE_MARKERS = (
     "资讯",
     "新闻",
+    "消息",
+    "新消息",
     "市场",
     "行情",
     "天气",
@@ -35,6 +37,8 @@ CURRENT_INFO_SURFACE_MARKERS = (
     "冷吗",
     "热吗",
     "发生",
+    "发生了什么",
+    "有什么新",
     "检索",
     "搜索",
     "查询",
@@ -1976,7 +1980,7 @@ def current_info_fallback_text(context: ReplyContext, adapter_name: str) -> str:
             "K，这条是现在类信息请求，但 DeepSeek API 没接上。"
             "我不把旧常识伪装成实时资讯。\n"
             "判断：先不下实时结论。\n"
-            "下一步：接通 DEEPSEEK_API_KEY 或给我可验证来源，再查。"
+            "下一步：接通 DeepSeek 配置或给我可验证来源，再查。"
         )
     return (
         "K，DeepSeek 已被调用，但这轮没有拿到可前台使用的实时结论。\n"

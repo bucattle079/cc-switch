@@ -164,6 +164,22 @@ SINGLE_TURN_CASES = [
         "expected_intent": "daily_info",
     },
     {
+        "id": "daily_info_now_general_news_uses_deepseek_chain",
+        "message": "现在DeepSeek有什么新消息",
+        "expected_intent": "daily_info",
+        "required_reply_tokens": ["DeepSeek API", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
+        "max_reply_chars": 260,
+    },
+    {
+        "id": "world_info_now_event_not_market",
+        "message": "现在日本地震新闻",
+        "expected_intent": "world_brief",
+        "required_reply_tokens": ["DeepSeek API", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "A股快照", "VELA 市场简报", "状态边界", "Market & World Briefing"],
+        "max_reply_chars": 260,
+    },
+    {
         "id": "weather_jinjiang",
         "message": "明天晋江会不会下雨，能不能出门",
         "expected_intent": "weather_query",

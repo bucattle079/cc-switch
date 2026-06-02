@@ -192,6 +192,28 @@ class VelaIntentRouterTests(unittest.TestCase):
             self.assertFalse(intent.codex_allowed)
             self.assertFalse(intent.market_allowed)
 
+    def test_now_general_information_routes_to_daily_info_not_market(self):
+        router = load_module(ROUTER, "vela_router")
+
+        for text in ["现在特斯拉有什么新闻", "现在DeepSeek有什么新消息", "现在这个政策发生了什么"]:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, "daily_info", text)
+                self.assertIn("current_info", intent.focus_tags)
+                self.assertFalse(intent.market_allowed)
+                self.assertFalse(intent.codex_allowed)
+
+    def test_now_world_event_information_routes_to_world_brief_not_market(self):
+        router = load_module(ROUTER, "vela_router")
+
+        for text in ["现在日本地震新闻", "现在中东冲突有什么新消息"]:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+
+                self.assertEqual(intent.name, "world_brief", text)
+                self.assertFalse(intent.market_allowed)
+
     def test_natural_market_time_phrases_route_to_market_brief(self):
         router = load_module(ROUTER, "vela_router")
 
