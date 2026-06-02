@@ -453,6 +453,17 @@ ENTRYPOINT_ONLY_CASES = [
     },
 ]
 
+ENTRYPOINT_SEQUENCE_CASES = [
+    {
+        "id": "entrypoint_repeated_hello_no_silent_drop",
+        "message": "你好",
+        "expected_intent": "normal_chat",
+        "required_reply_tokens": ["在", "听着", "醒着"],
+        "forbidden_reply_tokens": ["市场", "Codex", "debug", "schema", "DEEPSEEK_API_KEY"],
+        "max_reply_chars": 60,
+    },
+]
+
 
 TWO_TURN_CASES = [
     {
@@ -1377,6 +1388,68 @@ def run_entrypoint_single_case(case: dict[str, Any], base_log_dir: Path) -> dict
     }, started_at)
 
 
+def run_entrypoint_sequence_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    case_log_dir = base_log_dir / case["id"]
+    case_log_dir.mkdir(parents=True, exist_ok=True)
+    intent = route_case(case["message"])
+    original_run = router.run_layered_response
+
+    def run_with_case_log(message: str, *args: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("log_dir", case_log_dir)
+        kwargs.setdefault("reply_adapter", FallbackReplyAdapter())
+        return original_run(message, *args, **kwargs)
+
+    router.run_layered_response = run_with_case_log
+    try:
+        first = router.reply_for(case["message"])
+        second = router.reply_for(case["message"])
+    finally:
+        router.run_layered_response = original_run
+
+    combined = "\n".join([first, second])
+    leaks = find_leaks(combined)
+    route_ok = intent.name == case["expected_intent"]
+    required_ok = required_tokens_present(first, case.get("required_reply_tokens")) and required_tokens_present(
+        second,
+        case.get("required_reply_tokens"),
+    )
+    constraints = output_constraints(second, case)
+    nonempty = bool(first.strip()) and bool(second.strip())
+    changed = first.strip() != second.strip()
+    tool_boundary_ok = not intent.market_allowed and not intent.codex_allowed
+    return attach_latency({
+        "id": case["id"],
+        "kind": "entrypoint_sequence",
+        "message": case["message"],
+        "intent": intent.name,
+        "expected_intent": case["expected_intent"],
+        "market_allowed": intent.market_allowed,
+        "codex_allowed": intent.codex_allowed,
+        "side_effects_allowed": False,
+        "bridge_executed": False,
+        "reply_preview": preview(second),
+        "first_reply_preview": preview(first),
+        "second_reply_preview": preview(second),
+        "nonempty_replies": nonempty,
+        "changed_reply": changed,
+        "latest_iteration_signal": latest_iteration_signal(case_log_dir),
+        "latest_quality_log": latest_quality_log(case_log_dir),
+        "leaks": leaks,
+        **constraints,
+        "ok": (
+            route_ok
+            and required_ok
+            and nonempty
+            and changed
+            and tool_boundary_ok
+            and constraints["max_reply_chars_ok"]
+            and not constraints["forbidden_reply_tokens_found"]
+            and not leaks
+        ),
+    }, started_at)
+
+
 def run_two_turn_case(case: dict[str, Any], base_log_dir: Path) -> dict[str, Any]:
     started_at = time.perf_counter()
     case_log_dir = base_log_dir / case["id"]
@@ -1579,6 +1652,7 @@ def run_smoke_suite(
         if use_entrypoint:
             single_cases.extend(ENTRYPOINT_ONLY_CASES)
             cases = [run_entrypoint_single_case(case, base_log_dir) for case in single_cases]
+            cases.extend(run_entrypoint_sequence_case(case, base_log_dir) for case in ENTRYPOINT_SEQUENCE_CASES)
             cases.extend(run_entrypoint_two_turn_case(case, base_log_dir) for case in TWO_TURN_CASES)
             cases.extend(run_memory_confirmation_case(case, base_log_dir, use_entrypoint=True) for case in MEMORY_CONFIRMATION_CASES)
         else:
