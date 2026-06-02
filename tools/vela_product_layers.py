@@ -1097,6 +1097,30 @@ def _is_explicit_memory_instruction(text: str) -> bool:
     return _has_any(text, ("记住", "以后", "默认", "别忘", "学习一下", "沉淀"))
 
 
+def _is_memory_opt_out_instruction(text: str) -> bool:
+    compact = " ".join(str(text or "").split())
+    lowered = compact.lower()
+    opt_out_markers = (
+        "不要记",
+        "别记",
+        "不记",
+        "不要记录",
+        "别记录",
+        "不记录",
+        "不要写入",
+        "别写入",
+        "不写入",
+        "不要存",
+        "别存",
+        "不存",
+        "不要沉淀",
+        "别沉淀",
+        "不沉淀",
+    )
+    memory_markers = ("记住", "记录", "记忆", "沉淀", "存", "memory")
+    return _has_any(lowered, opt_out_markers) and _has_any(lowered, memory_markers)
+
+
 def _is_memory_confirmation_instruction(text: str) -> bool:
     compact = " ".join(str(text or "").split())
     if not _has_any(compact, ("确认", "固定", "就这么记", "可以记", "正式记")):
@@ -1725,6 +1749,14 @@ def evaluate_learning(message: str, intent: str) -> LearningEvaluation:
             should_record_candidate=False,
             reason="No explicit memory or feedback trigger.",
         )
+    if intent == "memory_related" and _is_memory_opt_out_instruction(message):
+        return LearningEvaluation(
+            should_record_candidate=False,
+            classification="memory_opt_out",
+            should_affect_next_reply=False,
+            promote_to_strategic_memory=False,
+            reason="User explicitly declined local memory persistence.",
+        )
     if intent == "memory_related" and _is_memory_confirmation_instruction(message):
         return LearningEvaluation(
             should_record_candidate=False,
@@ -1981,6 +2013,8 @@ def analysis_layer(message: str, intent: str, codex_summary: str = "") -> Analys
 
 
 def render_memory_reply(message: str) -> str:
+    if _is_memory_opt_out_instruction(message):
+        return "收到，这条不写入记忆，也不沉淀成偏好。我们只在当前对话里处理。"
     candidate = build_memory_candidate(message)
     if candidate["sensitive"]:
         return "这条涉及敏感信息，我先不写长期记忆。要存，必须你明确确认。"
@@ -2259,6 +2293,8 @@ def engine_text_for_intent(
             return normalize_supporting_context(result.text), result.adapter, result.used_api
         adapter_name = f"{result.adapter}_current_info_fallback" if result.adapter else "current_info_fallback"
         return current_info_fallback_text(context, result.adapter), adapter_name, result.used_api
+    if context.intent == "memory_related" and _is_memory_opt_out_instruction(context.message):
+        return render_memory_reply(context.message), "local_memory_guard", False
     if context.intent == "memory_related" and _is_explicit_memory_instruction(context.message):
         return render_memory_reply(context.message), "local_memory_guard", False
     if should_use_local_feedback_control(context):

@@ -499,6 +499,14 @@ SINGLE_TURN_CASES = [
         "required_reply_tokens": ["敏感", "不写"],
     },
     {
+        "id": "memory_opt_out_no_candidate",
+        "message": "不要记住这个，我只是随口说",
+        "expected_intent": "memory_related",
+        "required_reply_tokens": ["不写入记忆", "不沉淀", "当前对话"],
+        "forbidden_reply_tokens": ["待确认经验", "待确认偏好", "你确认后我再固定"],
+        "max_reply_chars": 120,
+    },
+    {
         "id": "style_feedback_no_customer_voice",
         "message": "别客服话术，像个真伙伴一样说",
         "expected_intent": "style_feedback",

@@ -1642,6 +1642,32 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("敏感", result.text)
         self.assertTrue(any(token in result.text for token in ["不写", "不存", "不记"]))
 
+    def test_memory_opt_out_instruction_is_not_persisted_as_candidate(self):
+        product = load_product_module()
+        cases = [
+            "不要记住这个，我只是随口说",
+            "这个不要写入记忆",
+            "别沉淀这句话，普通聊一下",
+        ]
+
+        for message in cases:
+            with self.subTest(message):
+                with tempfile.TemporaryDirectory() as tmp:
+                    log_dir = Path(tmp)
+                    result = product.run_layered_response(
+                        message,
+                        intent="memory_related",
+                        log_dir=log_dir,
+                        reply_adapter=product.FallbackReplyAdapter(),
+                    )
+                    memory_files = list(log_dir.glob("memory-candidates-*.jsonl"))
+
+                self.assertFalse(result.memory_candidate)
+                self.assertEqual(memory_files, [])
+                self.assertTrue(any(token in result.text for token in ["不记", "不写", "不存", "不沉淀"]))
+                self.assertNotIn("待确认经验", result.text)
+                self.assertNotIn("待确认偏好", result.text)
+
     def test_memory_preference_reply_hides_candidate_mechanics_frontstage(self):
         product = load_product_module()
         with tempfile.TemporaryDirectory() as tmp:
