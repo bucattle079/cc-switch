@@ -625,7 +625,30 @@ class FallbackReplyAdapter(ReplyAdapter):
 
     def _has_warmth_feedback(self, context: ReplyContext) -> bool:
         raw = " ".join(context.user_preferences)
-        return any(token in raw for token in ("太冷", "冷感", "任务单", "温柔", "像客服", "机器人感", "机器人", "机械"))
+        return any(
+            token in raw
+            for token in (
+                "太冷",
+                "冷感",
+                "任务单",
+                "温柔",
+                "像客服",
+                "机器人感",
+                "机器人",
+                "机械",
+                "更智能",
+                "智能伙伴",
+                "智能的伙伴",
+                "真伙伴",
+                "真正伙伴",
+                "理解偏差",
+                "没懂",
+                "真实意思",
+                "meaning_misread",
+                "style_expression",
+                "behavior_preference",
+            )
+        )
 
     def _is_pure_greeting(self, context: ReplyContext) -> bool:
         if context.intent != "normal_chat":

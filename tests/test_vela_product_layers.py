@@ -576,8 +576,10 @@ class VelaProductLayerTests(unittest.TestCase):
         product = load_product_module()
 
         cases = [
-            ("我需要你更智能", "你好", ["我在", "在。", "听着", "慢慢说", "递过来"]),
-            ("你没懂我", "你好", ["我在", "在。", "听着", "慢慢说", "递过来"]),
+            ("我需要你更智能", "你好", ["我在", "在。", "听着", "慢慢说", "先不推你", "轻一点"]),
+            ("我需要你更像真正的智能伙伴", "你好", ["我在", "听着", "慢慢说", "先不推你", "轻一点"]),
+            ("你没懂我", "你好", ["我在", "在。", "听着", "慢慢说", "先不推你", "轻一点"]),
+            ("你没懂我的意思", "你好", ["我在", "听着", "慢慢说", "先不推你", "轻一点"]),
             ("继续推进，不要拖", "继续", ["继续", "上一轮", "阻塞", "一个动作", "接着来"]),
         ]
 
@@ -610,6 +612,9 @@ class VelaProductLayerTests(unittest.TestCase):
                 self.assertNotIn("我已校准", next_reply.text)
                 self.assertNotIn("response_quality_signals", next_reply.text)
                 self.assertNotIn("要看盘，说 A股、美股或韩国", next_reply.text)
+                if followup == "你好":
+                    for tasky in ["目标", "卡点", "现状", "最烦的点", "递过来", "接着往下拆"]:
+                        self.assertNotIn(tasky, next_reply.text)
 
     def test_too_cold_feedback_warms_next_greeting_without_task_intake(self):
         product = load_product_module()

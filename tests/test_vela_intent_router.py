@@ -633,7 +633,14 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_human_iteration_feedback_variants_route_without_tool_pollution(self):
         router = load_module(ROUTER, "vela_router")
 
-        for text in ["我需要你更智能", "你理解一下我的意思", "继续推进，不要拖", "不够像真人", "不要机械道歉"]:
+        for text in [
+            "我需要你更智能",
+            "我需要你更像真正的智能伙伴",
+            "你理解一下我的意思",
+            "继续推进，不要拖",
+            "不够像真人",
+            "不要机械道歉",
+        ]:
             with self.subTest(text):
                 intent = router.classify_intent(text)
 

@@ -510,19 +510,19 @@ ENTRYPOINT_SEQUENCE_CASES = [
 TWO_TURN_CASES = [
     {
         "id": "feedback_smarter_then_hello",
-        "feedback": "我需要你更智能",
+        "feedback": "我需要你更像真正的智能伙伴",
         "followup": "你好",
         "expected_intent": "normal_chat",
-        "required_reply_tokens": ["我在", "在。", "听着", "慢慢说", "递过来"],
-        "forbidden_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准"],
+        "required_reply_tokens": ["我在", "听着", "慢慢说", "先不推你", "轻一点"],
+        "forbidden_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准", "目标", "卡点", "现状", "递过来"],
     },
     {
         "id": "feedback_misread_then_hello",
-        "feedback": "你没懂我",
+        "feedback": "你没懂我的意思",
         "followup": "你好",
         "expected_intent": "normal_chat",
-        "required_reply_tokens": ["我在", "在。", "听着", "慢慢说", "递过来"],
-        "forbidden_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准"],
+        "required_reply_tokens": ["我在", "听着", "慢慢说", "先不推你", "轻一点"],
+        "forbidden_reply_tokens": ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准", "目标", "卡点", "现状", "递过来"],
     },
     {
         "id": "feedback_push_then_continue",
