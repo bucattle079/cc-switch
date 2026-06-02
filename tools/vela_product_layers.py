@@ -55,6 +55,17 @@ CURRENT_INFO_SURFACE_MARKERS = (
     "查询",
     "查一下",
 )
+CURRENT_TIME_QUERY_MARKERS = (
+    "几点",
+    "几 点",
+    "当地时间",
+    "本地时间",
+    "当地几点",
+    "现在几点",
+    "约是几点",
+    "大概几点",
+    "时差",
+)
 CURRENT_MARKET_OBJECT_SURFACE_MARKERS = (
     "A股",
     "A 股",
@@ -1150,7 +1161,7 @@ def is_current_information_request(message: str, intent: str) -> bool:
         return False
     if intent == "market_brief" and _has_any(text, CURRENT_MARKET_OBJECT_SURFACE_MARKERS):
         return True
-    return _has_any(text, CURRENT_INFO_SURFACE_MARKERS)
+    return _has_any(text, CURRENT_INFO_SURFACE_MARKERS) or _has_any(text, CURRENT_TIME_QUERY_MARKERS)
 
 
 def _is_identity_core_question(text: str) -> bool:
@@ -2484,7 +2495,12 @@ def should_use_local_feedback_control(context: ReplyContext) -> bool:
 
 
 def avoid_repeated_reply(text: str, context: ReplyContext) -> str:
-    if context.last_response and str(text or "").strip() == context.last_response.strip():
+    if (
+        context.intent == "normal_chat"
+        and context.repeated_message
+        and context.last_response
+        and str(text or "").strip() == context.last_response.strip()
+    ):
         return FallbackReplyAdapter().generate(context).text
     return text
 

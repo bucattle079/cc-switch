@@ -262,6 +262,14 @@ SINGLE_TURN_CASES = [
         "max_reply_chars": 260,
     },
     {
+        "id": "daily_info_now_new_york_time_uses_deepseek_chain",
+        "message": "现在美国时间纽约约是几点",
+        "expected_intent": "daily_info",
+        "required_reply_tokens": ["DeepSeek API", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["先说最烦的点", "你慢慢说", "DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
+        "max_reply_chars": 260,
+    },
+    {
         "id": "world_info_now_event_not_market",
         "message": "现在日本地震新闻",
         "expected_intent": "world_brief",

@@ -249,6 +249,17 @@ CURRENT_INFO_ACTION_KEYWORDS = [
     "检索",
     "搜索",
 ]
+CURRENT_TIME_QUERY_KEYWORDS = [
+    "几点",
+    "几 点",
+    "当地时间",
+    "本地时间",
+    "当地几点",
+    "现在几点",
+    "约是几点",
+    "大概几点",
+    "时差",
+]
 CURRENT_WORLD_EVENT_KEYWORDS = [
     "地震",
     "台风",
@@ -552,6 +563,8 @@ def classify_intent(text: str) -> Intent:
         return Intent("project_assistant", 0.78, ["project"])
     if is_current_world_info_request(norm):
         return Intent("world_brief", 0.84, ["geopolitics", "global", "current_info"])
+    if is_current_time_query(norm):
+        return Intent("daily_info", 0.86, ["daily_info", "current_info", "time_query"])
     if is_current_general_info_request(norm):
         return Intent("daily_info", 0.82, ["daily_info", "current_info"])
     if is_freshness_question(norm) and not is_market_summary_request(norm):
@@ -656,7 +669,14 @@ def is_current_general_info_request(text: str) -> bool:
         return False
     if is_weather_query(norm):
         return False
-    return contains_any(norm, CURRENT_INFO_ACTION_KEYWORDS)
+    return contains_any(norm, CURRENT_INFO_ACTION_KEYWORDS) or is_current_time_query(norm)
+
+
+def is_current_time_query(text: str) -> bool:
+    norm = normalize(text)
+    if not has_current_info_time_word(norm):
+        return False
+    return contains_any(norm, CURRENT_TIME_QUERY_KEYWORDS)
 
 
 def is_weather_query(text: str) -> bool:
@@ -743,7 +763,9 @@ def route_decision(text: str) -> RouteDecision:
     markets = priority_markets(intent.focus_tags)
     return RouteDecision(
         intent=intent.name,
-        needs_retrieval=intent.name in {"market_refresh"},
+        needs_retrieval=intent.name in {"market_refresh"} or (
+            "current_info" in intent.focus_tags and intent.name in {"daily_info", "world_brief"}
+        ),
         needs_codex=intent.codex_allowed,
         needs_deep_reasoning=intent.name in {"market_brief", "deep_analysis", "project_assistant"},
         cache_allowed=intent.name in {"market_brief", "world_brief", "freshness_status", "market_refresh", "daily_briefing"},

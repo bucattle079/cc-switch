@@ -153,6 +153,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             "daily_info_now_search_openai_uses_deepseek_chain",
             "daily_info_now_company_notice_uses_deepseek_chain",
             "daily_info_now_app_update_uses_deepseek_chain",
+            "daily_info_now_new_york_time_uses_deepseek_chain",
             "world_info_now_event_not_market",
             "weather_now_new_york_uses_deepseek_chain",
         }

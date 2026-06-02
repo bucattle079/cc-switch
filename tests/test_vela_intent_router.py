@@ -626,6 +626,30 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertEqual(market.name, "market_brief")
         self.assertTrue(market.market_allowed)
 
+    def test_current_time_question_routes_to_current_info_not_chat(self):
+        router = load_module(ROUTER, "vela_router")
+
+        cases = [
+            "现在美国时间纽约约是几点",
+            "现在纽约几点",
+            "美国时间现在几点",
+        ]
+
+        for text in cases:
+            with self.subTest(text):
+                intent = router.classify_intent(text)
+                decision = router.route_decision(text)
+                reply = router.reply_for(text)
+
+                self.assertEqual(intent.name, "daily_info")
+                self.assertIn("current_info", intent.focus_tags)
+                self.assertEqual(decision.intent, "daily_info")
+                self.assertTrue(decision.needs_retrieval)
+                self.assertIn("DeepSeek API", reply)
+                self.assertIn("判断：", reply)
+                self.assertNotIn("先说最烦的点", reply)
+                self.assertNotIn("你慢慢说", reply)
+
     def test_project_opt_out_chat_reply_stays_in_companion_lane(self):
         router = load_module(ROUTER, "vela_router")
 
