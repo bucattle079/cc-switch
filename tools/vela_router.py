@@ -44,6 +44,7 @@ MARKET_REFRESH_DIR = ROOT / "VELA" / "market-refresh"
 MARKET_REFRESH_LOCK_TTL_SECONDS = 20 * 60
 LOCAL_TOOL_TIMEOUT_SECONDS = 45
 FEEDBACK_DEDUP_WINDOW_SECONDS = 120
+CONTENT_DEDUP_WITHOUT_PLATFORM_INTENTS = {"market_refresh"}
 
 
 @dataclass(frozen=True)
@@ -994,14 +995,26 @@ def recent_feedback_marker(state_dir: Path, *, max_age_seconds: int = FEEDBACK_D
 
 def dedupe_context_marker(intent: str, state_dir: Path) -> str:
     parts: list[str] = []
-    message_id = str(os.environ.get("CC_MESSAGE_ID") or "").strip()
-    if message_id:
-        parts.append(f"msg:{message_id}")
+    message_marker = platform_message_marker()
+    if message_marker:
+        parts.append(message_marker)
     if intent != "style_feedback":
         marker = recent_feedback_marker(state_dir)
         if marker:
             parts.append(f"after_feedback:{marker}")
     return "|".join(parts)
+
+
+def platform_message_marker() -> str:
+    for name in ("CC_MESSAGE_ID", "CC_UPDATE_ID", "WEIXIN_MESSAGE_ID"):
+        message_id = str(os.environ.get(name) or "").strip()
+        if message_id:
+            return f"{name}:{message_id}"
+    return ""
+
+
+def should_use_content_dedupe(intent: str) -> bool:
+    return bool(platform_message_marker()) or intent in CONTENT_DEDUP_WITHOUT_PLATFORM_INTENTS
 
 
 def request_key(message: str, intent: str, *, context_marker: str = "") -> str:
@@ -1087,6 +1100,8 @@ def claim_response_once(
     state_dir.mkdir(parents=True, exist_ok=True)
     context_marker = dedupe_context_marker(intent, state_dir)
     key = response_key(response, intent, context_marker=context_marker)
+    if not should_use_content_dedupe(intent):
+        return True
     path = state_dir / f"{key}.response"
     now = time.time()
     if path.exists():
@@ -1130,6 +1145,15 @@ def claim_request_once(
     ttl = ttl_seconds if ttl_seconds is not None else duplicate_ttl_seconds(intent)
     context_marker = dedupe_context_marker(intent, state_dir)
     key = request_key(message, intent, context_marker=context_marker)
+    if not should_use_content_dedupe(intent):
+        write_claim_marker(
+            state_dir=state_dir,
+            message=message,
+            intent=intent,
+            key=key,
+            context_marker=context_marker,
+        )
+        return True
     path = state_dir / f"{key}.claim"
     now = time.time()
     if path.exists():

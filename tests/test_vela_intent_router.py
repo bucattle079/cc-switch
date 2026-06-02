@@ -856,55 +856,182 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertNotIn("direction:", reply)
         self.assertNotIn("score:", reply)
 
-    def test_response_hash_guard_blocks_duplicate_candidates(self):
+    def test_response_hash_guard_blocks_duplicate_platform_message(self):
         router = load_module(ROUTER, "vela_router")
         with tempfile.TemporaryDirectory() as tmp:
-            first = router.claim_response_once(
-                "same reply",
-                "market_refresh",
-                state_dir=Path(tmp),
-                ttl_seconds=30,
-            )
-            second = router.claim_response_once(
-                "same reply",
-                "market_refresh",
-                state_dir=Path(tmp),
-                ttl_seconds=30,
-            )
+            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-1"}, clear=True):
+                first = router.claim_response_once(
+                    "same reply",
+                    "normal_chat",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
+                second = router.claim_response_once(
+                    "same reply",
+                    "normal_chat",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
 
         self.assertTrue(first)
         self.assertFalse(second)
 
-    def test_response_hash_guard_allows_same_text_after_style_feedback(self):
+    def test_response_hash_guard_allows_repeated_local_dialogue_without_platform_id(self):
+        router = load_module(ROUTER, "vela_router")
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict("os.environ", {}, clear=True):
+                first = router.claim_response_once(
+                    "K，我在。",
+                    "normal_chat",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
+                second = router.claim_response_once(
+                    "K，我在。",
+                    "normal_chat",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+
+    def test_response_hash_guard_allows_same_text_after_style_feedback_with_distinct_messages(self):
         router = load_module(ROUTER, "vela_router")
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
-            first = router.claim_response_once(
-                "K，我在。",
-                "normal_chat",
-                state_dir=state_dir,
-                ttl_seconds=30,
-            )
-            router.claim_request_once(
-                "你太像机器人了",
-                "style_feedback",
-                state_dir=state_dir,
-                ttl_seconds=30,
-            )
-            after_feedback = router.claim_response_once(
-                "K，我在。",
-                "normal_chat",
-                state_dir=state_dir,
-                ttl_seconds=30,
-            )
-            repeated_after_feedback = router.claim_response_once(
-                "K，我在。",
-                "normal_chat",
-                state_dir=state_dir,
-                ttl_seconds=30,
-            )
+            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-1"}, clear=True):
+                first = router.claim_response_once(
+                    "K，我在。",
+                    "normal_chat",
+                    state_dir=state_dir,
+                    ttl_seconds=30,
+                )
+            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-2"}, clear=True):
+                router.claim_request_once(
+                    "你太像机器人了",
+                    "style_feedback",
+                    state_dir=state_dir,
+                    ttl_seconds=30,
+                )
+            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-3"}, clear=True):
+                after_feedback = router.claim_response_once(
+                    "K，我在。",
+                    "normal_chat",
+                    state_dir=state_dir,
+                    ttl_seconds=30,
+                )
+                repeated_after_feedback = router.claim_response_once(
+                    "K，我在。",
+                    "normal_chat",
+                    state_dir=state_dir,
+                    ttl_seconds=30,
+                )
 
         self.assertTrue(first)
+        self.assertTrue(after_feedback)
+        self.assertFalse(repeated_after_feedback)
+
+    def test_router_send_once_claim_blocks_duplicate_platform_message(self):
+        router = load_module(ROUTER, "vela_router")
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-1"}, clear=True):
+                first = router.claim_request_once(
+                    "你好",
+                    "normal_chat",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
+                second = router.claim_request_once(
+                    "你好",
+                    "normal_chat",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
+
+            logs = list(Path(tmp).glob("duplicate-requests-*.jsonl"))
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertEqual(len(logs), 1)
+
+    def test_router_send_once_allows_repeated_local_dialogue_without_platform_id(self):
+        router = load_module(ROUTER, "vela_router")
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict("os.environ", {}, clear=True):
+                first = router.claim_request_once(
+                    "你好",
+                    "normal_chat",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
+                second = router.claim_request_once(
+                    "你好",
+                    "normal_chat",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
+
+            logs = list(Path(tmp).glob("duplicate-requests-*.jsonl"))
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+        self.assertEqual(len(logs), 0)
+
+    def test_market_refresh_still_dedupes_without_platform_id(self):
+        router = load_module(ROUTER, "vela_router")
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict("os.environ", {}, clear=True):
+                first = router.claim_request_once(
+                    "刷新最新市场资讯",
+                    "market_refresh",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
+                second = router.claim_request_once(
+                    "刷新最新市场资讯",
+                    "market_refresh",
+                    state_dir=Path(tmp),
+                    ttl_seconds=30,
+                )
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+
+    def test_router_send_once_allows_same_prompt_after_style_feedback(self):
+        router = load_module(ROUTER, "vela_router")
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-1"}, clear=True):
+                first = router.claim_request_once(
+                    "你好",
+                    "normal_chat",
+                    state_dir=state_dir,
+                    ttl_seconds=30,
+                )
+            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-2"}, clear=True):
+                feedback = router.claim_request_once(
+                    "你太像机器人了",
+                    "style_feedback",
+                    state_dir=state_dir,
+                    ttl_seconds=30,
+                )
+            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-3"}, clear=True):
+                after_feedback = router.claim_request_once(
+                    "你好",
+                    "normal_chat",
+                    state_dir=state_dir,
+                    ttl_seconds=30,
+                )
+                repeated_after_feedback = router.claim_request_once(
+                    "你好",
+                    "normal_chat",
+                    state_dir=state_dir,
+                    ttl_seconds=30,
+                )
+
+        self.assertTrue(first)
+        self.assertTrue(feedback)
         self.assertTrue(after_feedback)
         self.assertFalse(repeated_after_feedback)
 
@@ -1075,62 +1202,6 @@ class VelaMarketBriefingTests(unittest.TestCase):
         self.assertNotIn("bullish", text)
         self.assertNotIn("标签", text)
         self.assertNotIn("评分", text)
-
-    def test_router_send_once_claim_blocks_duplicate_content(self):
-        router = load_module(ROUTER, "vela_router")
-        with tempfile.TemporaryDirectory() as tmp:
-            first = router.claim_request_once(
-                "你好",
-                "normal_chat",
-                state_dir=Path(tmp),
-                ttl_seconds=30,
-            )
-            second = router.claim_request_once(
-                "你好",
-                "normal_chat",
-                state_dir=Path(tmp),
-                ttl_seconds=30,
-            )
-
-            logs = list(Path(tmp).glob("duplicate-requests-*.jsonl"))
-
-        self.assertTrue(first)
-        self.assertFalse(second)
-        self.assertEqual(len(logs), 1)
-
-    def test_router_send_once_allows_same_prompt_after_style_feedback(self):
-        router = load_module(ROUTER, "vela_router")
-        with tempfile.TemporaryDirectory() as tmp:
-            state_dir = Path(tmp)
-            first = router.claim_request_once(
-                "你好",
-                "normal_chat",
-                state_dir=state_dir,
-                ttl_seconds=30,
-            )
-            feedback = router.claim_request_once(
-                "你太像机器人了",
-                "style_feedback",
-                state_dir=state_dir,
-                ttl_seconds=30,
-            )
-            after_feedback = router.claim_request_once(
-                "你好",
-                "normal_chat",
-                state_dir=state_dir,
-                ttl_seconds=30,
-            )
-            repeated_after_feedback = router.claim_request_once(
-                "你好",
-                "normal_chat",
-                state_dir=state_dir,
-                ttl_seconds=30,
-            )
-
-        self.assertTrue(first)
-        self.assertTrue(feedback)
-        self.assertTrue(after_feedback)
-        self.assertFalse(repeated_after_feedback)
 
     def test_9_beijing_uses_a_share_premarket(self):
         market = load_module(MARKET, "vela_market_briefing")
