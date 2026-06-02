@@ -244,6 +244,14 @@ SINGLE_TURN_CASES = [
         "required_reply_tokens": ["实时源：未接入", "天气"],
     },
     {
+        "id": "weather_now_new_york_uses_deepseek_chain",
+        "message": "现在纽约冷吗",
+        "expected_intent": "weather_query",
+        "required_reply_tokens": ["DeepSeek API", "实时源：未接入", "判断：", "下一步："],
+        "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
+        "max_reply_chars": 360,
+    },
+    {
         "id": "market_add_position",
         "message": "我不想看新闻列表，A股今天先等还是冲",
         "expected_intent": "market_brief",

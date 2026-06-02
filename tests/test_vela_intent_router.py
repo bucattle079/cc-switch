@@ -101,6 +101,18 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertIn("不编实时温度", run.call_args.kwargs["supporting_context"])
         self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
 
+    def test_now_weather_can_use_deepseek_current_info_lane(self):
+        router = load_module(ROUTER, "vela_router")
+
+        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+            with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model current weather")) as run:
+                reply = router.reply_for("现在纽约冷吗")
+
+        self.assertEqual(reply, "K model current weather")
+        self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
+        self.assertIn("实时源：未接入", run.call_args.kwargs["supporting_context"])
+        self.assertIsNone(run.call_args.kwargs["reply_adapter"])
+
     def test_market_reply_uses_local_boundary_adapter_with_cache_context(self):
         router = load_module(ROUTER, "vela_router")
 
@@ -170,6 +182,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertIn("K，晋江", reply)
         self.assertIn("实时源：未接入", reply)
         self.assertIn("不编实时温度", reply)
+        self.assertIn("下一步：", reply)
         self.assertNotIn("天气线", reply)
         self.assertNotIn("模型仅生成", reply)
         self.assertNotIn("weather_query", reply)
