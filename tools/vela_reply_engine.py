@@ -391,15 +391,16 @@ class FallbackReplyAdapter(ReplyAdapter):
     name = "fallback"
 
     NORMAL_VARIANTS = (
-        "K，在。先别急着把世界全量扫描，你把混乱递过来，我负责拆开。",
-        "K，在线。系统没死，市场也还没赢。先稳住，别让噪音替你做决定。",
-        "K，在。今天不用摆菜单，直接把最硌手的那块丢过来。",
-        "K，在。你负责把雾端上来，我负责判断哪一团值得开刀。",
-        "K，在线。刀先不出鞘，但我醒着。坏逻辑靠近一步，我就切一步。",
+        "K，在。先把话说清一小块，我接住。",
+        "K，在线。先稳住，别让噪音替你做决定。",
+        "K，在。直接说最烦的那件事，我先听。",
+        "K，在。你先说，我先判断哪部分值得处理。",
+        "K，在线。我醒着；坏逻辑靠近一步，我就切一步。",
         "K，在。问候收到了。别急，先让脑子比情绪早到半步。",
     )
 
     PURE_GREETING_MESSAGES = (
+        "vela",
         "你好",
         "你好vela",
         "你好 vela",
@@ -420,9 +421,9 @@ class FallbackReplyAdapter(ReplyAdapter):
     )
 
     CALIBRATED_NORMAL_VARIANTS = (
-        "K，在。你把最硬的那块递过来，我先切判断。",
-        "K，在。先别铺满信息，说最硌手的点。",
-        "K，在。目标给我一句，我直接接住。",
+        "K，在。先说一件事，我直接判断。",
+        "K，在。信息不用铺满，先说最烦的点。",
+        "K，在。你给一句现状，我接着往下拆。",
     )
 
     WARM_CALIBRATED_GREETING_VARIANTS = (
@@ -492,9 +493,9 @@ class FallbackReplyAdapter(ReplyAdapter):
     )
 
     QUIET_SUPPORT_VARIANTS = (
-        "K，先停一下。不用整理世界，只给我一个最卡的点。",
-        "K，先少说。一口气只处理一个点，剩下我来切。",
-        "K，脑子发懵时别硬推。先给我一个点，别扛整片雾。",
+        "K，先停一下。我听着，你先说一小句。",
+        "K，不用整理世界。先给我一件最烦的事。",
+        "K，我听着。乱就慢一点，你先说，不急着拆。",
     )
 
     LISTENING_SUPPORT_MARKERS = (
@@ -624,7 +625,7 @@ class FallbackReplyAdapter(ReplyAdapter):
 
     def _has_warmth_feedback(self, context: ReplyContext) -> bool:
         raw = " ".join(context.user_preferences)
-        return any(token in raw for token in ("太冷", "冷感", "任务单", "温柔", "像客服", "机器人感"))
+        return any(token in raw for token in ("太冷", "冷感", "任务单", "温柔", "像客服", "机器人感", "机器人", "机械"))
 
     def _is_pure_greeting(self, context: ReplyContext) -> bool:
         if context.intent != "normal_chat":

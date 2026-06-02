@@ -912,6 +912,9 @@ QUIET_SUPPORT_MARKERS = (
     "有点累",
     "撑不住",
     "乱掉",
+    "有点乱",
+    "现在有点乱",
+    "我有点乱",
 )
 
 LISTENING_SUPPORT_MARKERS = (

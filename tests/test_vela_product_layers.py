@@ -815,11 +815,29 @@ class VelaProductLayerTests(unittest.TestCase):
         product = load_product_module()
 
         interpretation = product.interpret_need("脑子发懵", "normal_chat")
+        chaotic = product.interpret_need("我有点乱", "normal_chat")
 
         self.assertEqual(interpretation.response_mode, "quiet_support")
+        self.assertEqual(chaotic.response_mode, "quiet_support")
         self.assertIn("低负担", interpretation.preferred_reply_shape)
+        self.assertIn("低负担", chaotic.preferred_reply_shape)
         self.assertLessEqual(interpretation.human_tone_vector.strategic_depth, 2)
         self.assertGreaterEqual(interpretation.human_tone_vector.warmth_level, 4)
+
+    def test_chaotic_support_reply_is_not_stylized_task_prompt(self):
+        product = load_product_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = product.run_layered_response(
+                "我有点乱",
+                intent="normal_chat",
+                log_dir=Path(tmp),
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+        self.assertTrue(any(token in result.text for token in ["先停一下", "我听着", "你先说", "不用整理世界"]))
+        for tasky in ["开刀", "硌手", "卡点", "目标", "混乱递过来"]:
+            self.assertNotIn(tasky, result.text)
 
     def test_listening_request_does_not_become_task_assignment(self):
         product = load_product_module()
@@ -1221,8 +1239,11 @@ class VelaProductLayerTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(variants), 3)
         self.assertLessEqual(len(variants), 8)
-        self.assertTrue(any("不" in item and "菜单" in item for item in variants))
-        self.assertTrue(any("噪音" in item or "混乱" in item for item in variants))
+        self.assertTrue(any("噪音" in item or "烦" in item for item in variants))
+        self.assertTrue(any("听" in item or "接住" in item for item in variants))
+        for item in variants:
+            self.assertNotIn("菜单", item)
+            self.assertNotIn("混乱递过来", item)
 
     def test_calibrated_feedback_variants_show_change_without_self_certifying(self):
         reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")

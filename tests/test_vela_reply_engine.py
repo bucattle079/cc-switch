@@ -223,6 +223,41 @@ class VelaReplyEngineTests(unittest.TestCase):
                 self.assertNotIn("给我一个对象", text)
                 self.assertNotIn("菜单", text)
 
+    def test_vela_ping_is_pure_greeting_not_stylized_normal(self):
+        engine = load_reply_engine()
+        adapter = engine.FallbackReplyAdapter()
+        context = engine.ReplyContext(message="VELA", intent="normal_chat")
+
+        result = adapter.generate(context)
+
+        self.assertIn("K", result.text)
+        self.assertTrue(any(token in result.text for token in ["在", "听着", "醒着"]))
+        for token in ["开刀", "刀先", "硌手", "混乱递过来", "雾端", "市场", "Codex", "菜单"]:
+            self.assertNotIn(token, result.text)
+
+    def test_normal_fallback_variants_do_not_overperform_persona(self):
+        engine = load_reply_engine()
+
+        for text in engine.FallbackReplyAdapter.NORMAL_VARIANTS:
+            with self.subTest(text=text):
+                for token in ["开刀", "刀先", "硌手", "混乱递过来", "雾端", "市场也还没赢", "菜单"]:
+                    self.assertNotIn(token, text)
+
+    def test_robot_feedback_then_greeting_uses_warm_connection(self):
+        engine = load_reply_engine()
+        adapter = engine.FallbackReplyAdapter()
+        context = engine.ReplyContext(
+            message="你好",
+            intent="normal_chat",
+            user_preferences=["表达反馈候选：用户反馈太像机器人，下一轮降低模板感。"],
+        )
+
+        result = adapter.generate(context)
+
+        self.assertTrue(any(token in result.text for token in ["我在", "听着", "慢慢说", "先不推你"]))
+        for token in ["硌手", "目标", "卡点", "开刀", "菜单", "已校准"]:
+            self.assertNotIn(token, result.text)
+
     def test_pure_style_feedback_uses_style_feedback_not_misread_repair(self):
         engine = load_reply_engine()
         adapter = engine.FallbackReplyAdapter()

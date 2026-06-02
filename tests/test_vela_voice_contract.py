@@ -596,6 +596,25 @@ class VelaVoiceContractTests(unittest.TestCase):
         self.assertNotIn("AugSun / ROLLQIIA project discussion", module.PUBLIC_MODES)
         self.assertNotIn("AugSun / ROLLQIIA project discussion", PERSONALITY.read_text(encoding="utf-8"))
 
+    def test_vela_core_docs_do_not_embed_legacy_project_names(self):
+        docs = [
+            ROOT / "VELA" / "humanization-distillation.md",
+            ROOT / "VELA" / "runtime-config.md",
+            ROOT / "VELA" / "growth-notes.md",
+        ]
+
+        for path in docs:
+            with self.subTest(path=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("AugSun", text)
+                self.assertNotIn("ROLLQIIA", text)
+
+    def test_sync_script_ping_sample_is_not_menu_prompt(self):
+        text = SYNC_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertNotIn("今天磨哪块：判断、执行、记忆，还是语气", text)
+        self.assertNotIn("判断、执行、记忆", text)
+
 
 if __name__ == "__main__":
     unittest.main()

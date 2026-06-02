@@ -23,7 +23,7 @@ class VelaSkillTextTests(unittest.TestCase):
         text = PERSONALITY.read_text(encoding="utf-8")
 
         self.assertIn("## Reply Calibration", text)
-        self.assertIn("在。不是报到，是校准。今天磨哪块：判断、执行、记忆，还是语气？", text)
+        self.assertIn("在。不是报到，是连接。我听着，你说。", text)
         self.assertIn("Exact `VELA`", text)
         self.assertIn("growth note", text)
         self.assertIn("## Zhou Xun Texture Vector", text)
@@ -166,7 +166,7 @@ class VelaSkillTextTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(
             completed.stdout.strip(),
-            "在。不是报到，是校准。今天磨哪块：判断、执行、记忆，还是语气？",
+            "在。不是报到，是连接。我听着，你说。",
         )
         self.assertNotIn("你好", completed.stdout)
         self.assertNotIn("有什么可以帮", completed.stdout)
