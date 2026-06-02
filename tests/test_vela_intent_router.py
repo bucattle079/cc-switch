@@ -27,11 +27,19 @@ def load_module(path: Path, name: str):
 
 class VelaIntentRouterTests(unittest.TestCase):
     def setUp(self):
-        self.env_patcher = patch.dict("os.environ", {}, clear=True)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.learning_loop_dir = Path(self.temp_dir.name) / "learning-loop"
+        self.env_patcher = patch.dict("os.environ", self.isolated_env(), clear=True)
         self.env_patcher.start()
 
     def tearDown(self):
         self.env_patcher.stop()
+        self.temp_dir.cleanup()
+
+    def isolated_env(self, **overrides):
+        env = {"VELA_LEARNING_LOOP_DIR": str(self.learning_loop_dir)}
+        env.update(overrides)
+        return env
 
     def test_hello_vela_is_normal_chat_not_market(self):
         router = load_module(ROUTER, "vela_router")
@@ -54,6 +62,14 @@ class VelaIntentRouterTests(unittest.TestCase):
         reply = router.reply_for("VELA")
         self.assertNotIn("要看盘，说 A股、美股或韩国", reply)
         self.assertLess(len(reply), 120)
+
+    def test_reply_for_uses_isolated_learning_loop_env(self):
+        router = load_module(ROUTER, "vela_router")
+
+        router.reply_for("VELA")
+
+        self.assertTrue(list(self.learning_loop_dir.glob("interaction-*.jsonl")))
+        self.assertTrue(list(self.learning_loop_dir.glob("reply-quality-*.jsonl")))
 
     def test_a_share_question_routes_to_market_brief(self):
         router = load_module(ROUTER, "vela_router")
@@ -104,7 +120,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_now_weather_can_use_deepseek_current_info_lane(self):
         router = load_module(ROUTER, "vela_router")
 
-        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+        with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model current weather")) as run:
                 reply = router.reply_for("现在纽约冷吗")
 
@@ -135,7 +151,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             ("刷新最新市场资讯", "market_refresh"),
         ]
 
-        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+        with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
             with tempfile.TemporaryDirectory() as tmp:
                 with patch.object(router, "MARKET_REFRESH_DIR", Path(tmp)):
                     with patch.object(router.subprocess, "Popen") as popen:
@@ -151,7 +167,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_deepseek_env_does_not_take_over_style_feedback_lane(self):
         router = load_module(ROUTER, "vela_router")
 
-        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+        with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，少菜单，多判断。")) as run:
                 reply = router.reply_for("你太像机器人了")
 
@@ -721,7 +737,7 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         with patch.dict(
             "os.environ",
-            {"VELA_GPT_COMMAND": slow_command, "VELA_GPT_TIMEOUT_SECONDS": "5"},
+            self.isolated_env(VELA_GPT_COMMAND=slow_command, VELA_GPT_TIMEOUT_SECONDS="5"),
             clear=True,
         ):
             started = time.perf_counter()
@@ -735,7 +751,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_hello_vela_can_use_real_adapter_when_available(self):
         router = load_module(ROUTER, "vela_router")
 
-        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+        with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
                 reply = router.reply_for("你好 VELA")
 
@@ -745,7 +761,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_plain_hello_can_use_real_adapter_when_available(self):
         router = load_module(ROUTER, "vela_router")
 
-        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+        with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
                 reply = router.reply_for("你好")
 
@@ -755,7 +771,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_plain_vela_uses_deepseek_layer_when_available(self):
         router = load_module(ROUTER, "vela_router")
 
-        with patch.dict("os.environ", {"DEEPSEEK_API_KEY": "sk-test-secret"}, clear=True):
+        with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
                 reply = router.reply_for("VELA")
 
@@ -905,7 +921,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_response_hash_guard_blocks_duplicate_platform_message(self):
         router = load_module(ROUTER, "vela_router")
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-1"}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(CC_MESSAGE_ID="wechat-msg-1"), clear=True):
                 first = router.claim_response_once(
                     "same reply",
                     "normal_chat",
@@ -925,7 +941,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_response_hash_guard_allows_repeated_local_dialogue_without_platform_id(self):
         router = load_module(ROUTER, "vela_router")
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.dict("os.environ", {}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(), clear=True):
                 first = router.claim_response_once(
                     "K，我在。",
                     "normal_chat",
@@ -946,21 +962,21 @@ class VelaIntentRouterTests(unittest.TestCase):
         router = load_module(ROUTER, "vela_router")
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
-            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-1"}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(CC_MESSAGE_ID="wechat-msg-1"), clear=True):
                 first = router.claim_response_once(
                     "K，我在。",
                     "normal_chat",
                     state_dir=state_dir,
                     ttl_seconds=30,
                 )
-            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-2"}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(CC_MESSAGE_ID="wechat-msg-2"), clear=True):
                 router.claim_request_once(
                     "你太像机器人了",
                     "style_feedback",
                     state_dir=state_dir,
                     ttl_seconds=30,
                 )
-            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-3"}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(CC_MESSAGE_ID="wechat-msg-3"), clear=True):
                 after_feedback = router.claim_response_once(
                     "K，我在。",
                     "normal_chat",
@@ -981,7 +997,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_router_send_once_claim_blocks_duplicate_platform_message(self):
         router = load_module(ROUTER, "vela_router")
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-1"}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(CC_MESSAGE_ID="wechat-msg-1"), clear=True):
                 first = router.claim_request_once(
                     "你好",
                     "normal_chat",
@@ -1004,7 +1020,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_router_send_once_allows_repeated_local_dialogue_without_platform_id(self):
         router = load_module(ROUTER, "vela_router")
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.dict("os.environ", {}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(), clear=True):
                 first = router.claim_request_once(
                     "你好",
                     "normal_chat",
@@ -1027,7 +1043,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_market_refresh_still_dedupes_without_platform_id(self):
         router = load_module(ROUTER, "vela_router")
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.dict("os.environ", {}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(), clear=True):
                 first = router.claim_request_once(
                     "刷新最新市场资讯",
                     "market_refresh",
@@ -1048,21 +1064,21 @@ class VelaIntentRouterTests(unittest.TestCase):
         router = load_module(ROUTER, "vela_router")
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
-            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-1"}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(CC_MESSAGE_ID="wechat-msg-1"), clear=True):
                 first = router.claim_request_once(
                     "你好",
                     "normal_chat",
                     state_dir=state_dir,
                     ttl_seconds=30,
                 )
-            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-2"}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(CC_MESSAGE_ID="wechat-msg-2"), clear=True):
                 feedback = router.claim_request_once(
                     "你太像机器人了",
                     "style_feedback",
                     state_dir=state_dir,
                     ttl_seconds=30,
                 )
-            with patch.dict("os.environ", {"CC_MESSAGE_ID": "wechat-msg-3"}, clear=True):
+            with patch.dict("os.environ", self.isolated_env(CC_MESSAGE_ID="wechat-msg-3"), clear=True):
                 after_feedback = router.claim_request_once(
                     "你好",
                     "normal_chat",

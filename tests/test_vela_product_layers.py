@@ -35,11 +35,19 @@ def load_module(path: Path, name: str):
 
 class VelaProductLayerTests(unittest.TestCase):
     def setUp(self):
-        self.env_patcher = patch.dict("os.environ", {}, clear=True)
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.learning_loop_dir = Path(self.temp_dir.name) / "learning-loop"
+        self.env_patcher = patch.dict("os.environ", self.isolated_env(), clear=True)
         self.env_patcher.start()
 
     def tearDown(self):
         self.env_patcher.stop()
+        self.temp_dir.cleanup()
+
+    def isolated_env(self, **overrides):
+        env = {"VELA_LEARNING_LOOP_DIR": str(self.learning_loop_dir)}
+        env.update(overrides)
+        return env
 
     def test_layered_response_exposes_fallback_adapter_status(self):
         product = load_product_module()
@@ -48,6 +56,14 @@ class VelaProductLayerTests(unittest.TestCase):
 
         self.assertEqual(result.reply_adapter, "fallback")
         self.assertFalse(result.real_gpt_enabled)
+
+    def test_default_learning_loop_uses_env_override(self):
+        product = load_product_module()
+
+        product.run_layered_response("VELA", intent="normal_chat")
+
+        self.assertTrue(list(self.learning_loop_dir.glob("interaction-*.jsonl")))
+        self.assertTrue(list(self.learning_loop_dir.glob("reply-quality-*.jsonl")))
 
     def test_normal_project_and_deep_can_use_real_gpt_adapter(self):
         product = load_product_module()

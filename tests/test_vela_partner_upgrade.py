@@ -26,6 +26,21 @@ def load_module(path: Path, name: str):
 
 
 class VelaPartnerUpgradeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.learning_loop_dir = Path(self.temp_dir.name) / "learning-loop"
+        self.env_patcher = patch.dict("os.environ", self.isolated_env(), clear=True)
+        self.env_patcher.start()
+
+    def tearDown(self):
+        self.env_patcher.stop()
+        self.temp_dir.cleanup()
+
+    def isolated_env(self, **overrides):
+        env = {"VELA_LEARNING_LOOP_DIR": str(self.learning_loop_dir)}
+        env.update(overrides)
+        return env
+
     def test_freshness_reply_is_human_readable_and_hides_schema(self):
         router = load_module(ROUTER, "vela_router_partner_freshness")
 

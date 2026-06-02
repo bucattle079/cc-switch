@@ -95,13 +95,22 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def learning_loop_dir(log_dir: Path | None = None) -> Path:
+    if log_dir is not None:
+        return Path(log_dir)
+    configured = os.environ.get("VELA_LEARNING_LOOP_DIR")
+    if configured:
+        return Path(configured)
+    return LEARNING_LOOP_DIR
+
+
 def record_adapter_failure(
     *,
     adapter: str,
     reason: str,
     log_dir: Path | None = None,
 ) -> Path:
-    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir = learning_loop_dir(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"gpt-adapter-failures-{utc_now():%Y-%m-%d}.jsonl"
     row = {

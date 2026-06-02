@@ -329,6 +329,15 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def learning_loop_dir(log_dir: Path | None = None) -> Path:
+    if log_dir is not None:
+        return Path(log_dir)
+    configured = os.environ.get("VELA_LEARNING_LOOP_DIR")
+    if configured:
+        return Path(configured)
+    return LEARNING_LOOP_DIR
+
+
 def voice_contract_forbidden_phrases() -> tuple[str, ...]:
     phrases = list(EXTRA_FORBIDDEN_DIALOGUE_PHRASES)
     try:
@@ -460,7 +469,7 @@ def record_reply_quality(
     human_tone_vector: dict | None = None,
     log_dir: Path | None = None,
 ) -> Path:
-    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir = learning_loop_dir(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"reply-quality-{utc_now():%Y-%m-%d}.jsonl"
     row = {
@@ -505,7 +514,7 @@ def record_interaction(
     foreground_lane: str = "",
     log_dir: Path | None = None,
 ) -> Path:
-    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir = learning_loop_dir(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"interaction-{utc_now():%Y-%m-%d}.jsonl"
     row = {
@@ -549,7 +558,7 @@ def record_session_note(
     *,
     log_dir: Path | None = None,
 ) -> Path:
-    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir = learning_loop_dir(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"session-notes-{utc_now():%Y-%m-%d}.jsonl"
     row = {
@@ -689,7 +698,7 @@ def build_iteration_signal(
 
 
 def record_iteration_signal(signal: HumanIterationSignal, log_dir: Path | None = None) -> Path:
-    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir = learning_loop_dir(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"human-iteration-{utc_now():%Y-%m-%d}.jsonl"
     row = {
@@ -718,7 +727,7 @@ def read_jsonl_rows(path: Path) -> list[dict]:
 
 
 def latest_learning_rows(pattern: str, log_dir: Path | None = None, limit: int = 12) -> list[dict]:
-    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir = learning_loop_dir(log_dir)
     rows: list[dict] = []
     if not log_dir.exists():
         return rows
@@ -1571,7 +1580,7 @@ def evaluate_learning(message: str, intent: str) -> LearningEvaluation:
 
 
 def record_memory_candidate(message: str, log_dir: Path | None = None) -> Path:
-    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir = learning_loop_dir(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"memory-candidates-{utc_now():%Y-%m-%d}.jsonl"
     candidate = build_memory_candidate(message)
@@ -1588,7 +1597,7 @@ def record_confirmed_preference(
 ) -> Path:
     if not confirmed_by_user:
         raise ValueError("confirmed user preference requires explicit user confirmation")
-    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir = learning_loop_dir(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"confirmed-preferences-{utc_now():%Y-%m-%d}.jsonl"
     row = {
@@ -1614,7 +1623,7 @@ def record_strategic_memory(
         raise ValueError("strategic memory requires explicit user confirmation")
     if not str(memory_type or "").strip():
         raise ValueError("strategic memory requires an explicit memory_type")
-    log_dir = log_dir or LEARNING_LOOP_DIR
+    log_dir = learning_loop_dir(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_dir / f"strategic-memory-{utc_now():%Y-%m-%d}.jsonl"
     row = {
