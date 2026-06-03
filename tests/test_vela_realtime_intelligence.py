@@ -60,6 +60,17 @@ class VelaRealtimeIntelligenceTests(unittest.TestCase):
         self.assertIn("market_data", plan.source_type)
         self.assertEqual(plan.freshness_requirement, "real_time")
 
+    def test_source_planner_maps_storage_light_module_without_punctuation_to_news_and_market(self):
+        rt = load_module(REALTIME, "vela_realtime_intelligence_storage_no_punct")
+
+        plan = rt.plan_sources("帮我查一下今天存储和光模块的市场讨论度", "market_brief")
+
+        self.assertTrue(plan.source_need)
+        self.assertIn("news", plan.source_type)
+        self.assertIn("web_search", plan.source_type)
+        self.assertIn("market_data", plan.source_type)
+        self.assertEqual(plan.freshness_requirement, "real_time")
+
     def test_source_planner_default_source_types_are_domain_agnostic(self):
         rt = load_module(REALTIME, "vela_realtime_intelligence_sources")
 
