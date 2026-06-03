@@ -113,7 +113,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text=api_reply)) as run:
                 reply = router.reply_for("明天晋江天气")
 
-        self.assertEqual(reply, api_reply)
+        self.assertEqual(reply, api_reply.removeprefix("K，"))
         self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
         self.assertIn("实时天气源：已接入", run.call_args.kwargs["supporting_context"])
         self.assertIn("24-30°C", run.call_args.kwargs["supporting_context"])
@@ -128,7 +128,7 @@ class VelaIntentRouterTests(unittest.TestCase):
                 with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text=api_reply)) as run:
                     reply = router.reply_for("现在纽约冷吗")
 
-        self.assertEqual(reply, api_reply)
+        self.assertEqual(reply, api_reply.removeprefix("K，"))
         self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
         self.assertIn("实时天气源：已接入", run.call_args.kwargs["supporting_context"])
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
@@ -140,7 +140,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model market")) as run:
                 reply = router.reply_for("今天的资讯")
 
-        self.assertEqual(reply, "K model market")
+        self.assertEqual(reply, "model market")
         self.assertEqual(run.call_args.kwargs["intent"], "market_brief")
         self.assertIn("缓存市场判断", run.call_args.kwargs["supporting_context"])
         self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
@@ -163,7 +163,7 @@ class VelaIntentRouterTests(unittest.TestCase):
                             for message, expected_intent in cases:
                                 with self.subTest(message):
                                     reply = router.reply_for(message)
-                                    self.assertEqual(reply, "K local boundary")
+                                    self.assertEqual(reply, "local boundary")
                                     self.assertEqual(run.call_args.kwargs["intent"], expected_intent)
                                     self.assertIsInstance(run.call_args.kwargs["reply_adapter"], router.FallbackReplyAdapter)
 
@@ -174,7 +174,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，少菜单，多判断。")) as run:
                 reply = router.reply_for("你太像机器人了")
 
-        self.assertEqual(reply, "K，少菜单，多判断。")
+        self.assertEqual(reply, "少菜单，多判断。")
         self.assertEqual(run.call_args.kwargs["intent"], "style_feedback")
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
@@ -516,7 +516,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，模型市场判断。")) as run:
                 reply = router.reply_for("今天的资讯")
 
-        self.assertEqual(reply, "K，模型市场判断。")
+        self.assertEqual(reply, "模型市场判断。")
         self.assertEqual(run.call_args.kwargs["intent"], "market_brief")
         self.assertIn("缓存市场判断", run.call_args.kwargs["supporting_context"])
 
@@ -584,7 +584,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，抓到了，是上下文串线。")) as run:
             reply = router.reply_for("我们是VELA交互，怎么会出现AugSun?")
 
-        self.assertEqual(reply, "K，抓到了，是上下文串线。")
+        self.assertEqual(reply, "抓到了，是上下文串线。")
         self.assertEqual(run.call_args.kwargs["intent"], "style_feedback")
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
@@ -674,7 +674,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         with patch.object(router, "render_time_query_reply", return_value=expected) as render:
             reply = router.reply_for("现在美国时间纽约约是几点")
 
-        self.assertEqual(reply, expected)
+        self.assertEqual(reply, expected.removeprefix("K，"))
         render.assert_called_once_with("现在美国时间纽约约是几点")
 
     def test_current_time_question_passes_fact_context_to_deepseek_layer(self):
@@ -685,7 +685,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，纽约现在约 06:30。")) as run:
                 reply = router.reply_for("现在美国时间纽约约是几点")
 
-        self.assertEqual(reply, "K，纽约现在约 06:30。")
+        self.assertEqual(reply, "纽约现在约 06:30。")
         self.assertEqual(run.call_args.kwargs["intent"], "daily_info")
         self.assertEqual(run.call_args.kwargs["supporting_context"], fact)
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
@@ -735,7 +735,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，我听着。你先说。")) as run:
             reply = router.reply_for("不要项目线，普通聊一下")
 
-        self.assertEqual(reply, "K，我听着。你先说。")
+        self.assertEqual(reply, "我听着。你先说。")
         self.assertEqual(run.call_args.kwargs["intent"], "normal_chat")
 
     def test_project_opt_out_chat_real_reply_does_not_turn_into_judgment_intake(self):
@@ -768,7 +768,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K，Codex 摘要。")) as run:
                 reply = router.reply_for(user_text)
 
-        self.assertEqual(reply, "K，Codex 摘要。")
+        self.assertEqual(reply, "Codex 摘要。")
         self.assertEqual(run.call_args.args[0], user_text)
         self.assertEqual(run.call_args.kwargs["intent"], "codex_task")
         self.assertIn("Codex 摘要", run.call_args.kwargs["codex_summary"])
@@ -996,7 +996,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
                 reply = router.reply_for("你好 VELA")
 
-        self.assertEqual(reply, "K real")
+        self.assertEqual(reply, "real")
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
     def test_plain_hello_can_use_real_adapter_when_available(self):
@@ -1006,7 +1006,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
                 reply = router.reply_for("你好")
 
-        self.assertEqual(reply, "K real")
+        self.assertEqual(reply, "real")
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
     def test_plain_vela_uses_deepseek_layer_when_available(self):
@@ -1016,7 +1016,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
                 reply = router.reply_for("VELA")
 
-        self.assertEqual(reply, "K real")
+        self.assertEqual(reply, "real")
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
     def test_current_daily_info_builds_realtime_evidence_before_model_reply(self):
@@ -1026,7 +1026,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model")) as run:
                 reply = router.reply_for("现在DeepSeek有什么新消息")
 
-        self.assertEqual(reply, "K model")
+        self.assertEqual(reply, "model")
         self.assertEqual(run.call_args.kwargs["intent"], "daily_info")
         self.assertIn("实时资讯源：已接入", run.call_args.kwargs["supporting_context"])
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
@@ -1038,7 +1038,7 @@ class VelaIntentRouterTests(unittest.TestCase):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K real")) as run:
                 reply = router.reply_for("你太像机器人了")
 
-        self.assertEqual(reply, "K real")
+        self.assertEqual(reply, "real")
         self.assertEqual(run.call_args.kwargs["intent"], "style_feedback")
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 

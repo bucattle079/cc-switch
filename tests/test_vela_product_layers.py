@@ -720,7 +720,8 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertEqual(result.intent, "normal_chat")
         self.assertFalse(result.used_codex)
         self.assertFalse(result.used_retrieval)
-        self.assertIn("K", result.text)
+        self.assertFalse(result.text.startswith("K"), result.text)
+        self.assertTrue(any(token in result.text for token in ["在", "我在", "醒着", "听着", "你说"]), result.text)
         self.assertNotIn("要看盘，说 A股、美股或韩国", result.text)
         self.assertNotIn("要动 Codex，用 /CODEX", result.text)
         self.assertNotIn("Market & World Briefing", result.text)
@@ -759,7 +760,7 @@ class VelaProductLayerTests(unittest.TestCase):
             second = product.run_layered_response("你好 VELA", intent="normal_chat", log_dir=Path(tmp))
 
         self.assertNotEqual(first.text, second.text)
-        self.assertIn("K", second.text)
+        self.assertFalse(second.text.startswith("K"), second.text)
         self.assertNotIn("要看盘，说 A股、美股或韩国", second.text)
 
     def test_adjacent_greetings_do_not_copy_same_sentence(self):
@@ -769,8 +770,8 @@ class VelaProductLayerTests(unittest.TestCase):
             second = product.run_layered_response("你好 VELA", intent="normal_chat", log_dir=Path(tmp))
 
         self.assertNotEqual(first.text, second.text)
-        self.assertIn("K", first.text)
-        self.assertIn("K", second.text)
+        self.assertFalse(first.text.startswith("K"), first.text)
+        self.assertFalse(second.text.startswith("K"), second.text)
         self.assertLess(len(first.text), 160)
         self.assertLess(len(second.text), 160)
 
@@ -780,7 +781,7 @@ class VelaProductLayerTests(unittest.TestCase):
             product.run_layered_response("你刚才太像机器人了", intent="memory_related", log_dir=Path(tmp))
             next_reply = product.run_layered_response("你好", intent="normal_chat", log_dir=Path(tmp))
 
-        self.assertIn("K", next_reply.text)
+        self.assertFalse(next_reply.text.startswith("K"), next_reply.text)
         self.assertTrue(any(token in next_reply.text for token in ["我在", "在。", "听着", "慢慢说", "递过来"]))
         for self_label in ["少菜单", "直接给判断", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准"]:
             self.assertNotIn(self_label, next_reply.text)
@@ -889,7 +890,7 @@ class VelaProductLayerTests(unittest.TestCase):
                 reply_adapter=product.FallbackReplyAdapter(),
             )
 
-        self.assertIn("K", next_reply.text)
+        self.assertFalse(next_reply.text.startswith("K"), next_reply.text)
         self.assertTrue(any(token in next_reply.text for token in ["我在", "听着", "先听", "接住", "话放"]))
         for self_label in ["少菜单", "不解释身份", "废话收短", "机械味", "不像提示牌", "已校准"]:
             self.assertNotIn(self_label, next_reply.text)
@@ -902,7 +903,7 @@ class VelaProductLayerTests(unittest.TestCase):
             product.run_layered_response("继续 VELA 项目，下一步怎么推", intent="project_assistant", log_dir=Path(tmp))
             reply = product.run_layered_response("继续", intent="normal_chat", log_dir=Path(tmp))
 
-        self.assertIn("K", reply.text)
+        self.assertFalse(reply.text.startswith("K"), reply.text)
         self.assertTrue(any(token in reply.text for token in ["VELA", "项目", "上一刀", "上一轮"]))
         self.assertNotIn("要看盘，说 A股、美股或韩国", reply.text)
 
@@ -1378,10 +1379,10 @@ class VelaProductLayerTests(unittest.TestCase):
             )
             memory_files = list(Path(tmp).glob("memory-candidates-*.jsonl"))
 
-        self.assertIn("K", boundary.text)
+        self.assertFalse(boundary.text.startswith("K"), boundary.text)
         self.assertTrue(any(token in boundary.text for token in ["不能", "不顺着", "代价", "刹车"]))
         self.assertNotIn("抱歉", boundary.text)
-        self.assertIn("K", identity.text)
+        self.assertFalse(identity.text.startswith("K"), identity.text)
         self.assertTrue(any(token in identity.text for token in ["人格", "工具", "记忆", "连续"]))
         self.assertNotIn("schema", identity.text.lower())
         self.assertFalse(identity.memory_candidate)
@@ -1520,7 +1521,7 @@ class VelaProductLayerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = product.run_layered_response("脑子发懵", intent="normal_chat", log_dir=Path(tmp))
 
-        self.assertIn("K", result.text)
+        self.assertFalse(result.text.startswith("K"), result.text)
         self.assertLess(len(result.text), 90)
         self.assertTrue(any(token in result.text for token in ["停", "一口气", "一个点", "不用整理"]))
         self.assertNotIn("菜单", result.text)
@@ -1536,7 +1537,7 @@ class VelaProductLayerTests(unittest.TestCase):
                 reply_adapter=product.FallbackReplyAdapter(),
             )
 
-        self.assertIn("K", result.text)
+        self.assertFalse(result.text.startswith("K"), result.text)
         self.assertLessEqual(len(result.text), 40)
         self.assertTrue(any(token in result.text for token in ["在", "听着", "醒着"]))
         for tasky in ["目标", "卡点", "开刀", "硌手", "混乱", "雾端", "菜单", "市场", "Codex"]:

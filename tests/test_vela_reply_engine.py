@@ -158,10 +158,10 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         result = adapter.generate(context)
 
-        self.assertIn("K", result.text)
         self.assertTrue(any(token in result.text for token in ["逻辑", "先看", "对象", "证据"]))
         self.assertNotIn("少菜单", result.text)
         self.assertNotIn("说目标", result.text)
+        self.assertFalse(result.text.startswith("K"), result.text)
 
     def test_fallback_project_reply_uses_strategic_memory_without_schema(self):
         engine = load_reply_engine()
@@ -197,10 +197,10 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         result = adapter.generate(context)
 
-        self.assertIn("K", result.text)
         self.assertTrue(any(token in result.text for token in ["不用谢", "在", "交给我"]))
         self.assertNotIn("废话", result.text)
         self.assertNotIn("卡点", result.text)
+        self.assertFalse(result.text.startswith("K"), result.text)
 
     def test_plain_continue_is_not_menu_prompt(self):
         engine = load_reply_engine()
@@ -209,10 +209,10 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         result = adapter.generate(context)
 
-        self.assertIn("K", result.text)
         self.assertNotIn("市场、项目，还是架构", result.text)
         self.assertNotIn("给我一个对象", result.text)
         self.assertNotIn("菜单", result.text)
+        self.assertFalse(result.text.startswith("K"), result.text)
 
     def test_continue_variants_are_not_menu_prompts(self):
         engine = load_reply_engine()
@@ -230,8 +230,8 @@ class VelaReplyEngineTests(unittest.TestCase):
 
         result = adapter.generate(context)
 
-        self.assertIn("K", result.text)
         self.assertTrue(any(token in result.text for token in ["在", "听着", "醒着"]))
+        self.assertFalse(result.text.startswith("K"), result.text)
         for token in [
             "开刀",
             "刀先",
@@ -307,7 +307,7 @@ class VelaReplyEngineTests(unittest.TestCase):
         self.assertGreaterEqual(len(variants), 3)
         for text in variants:
             with self.subTest(text=text):
-                self.assertIn("K", text)
+                self.assertFalse(text.startswith("K"), text)
                 self.assertTrue(any(token in text for token in ["根因", "验尸"]))
                 self.assertTrue(any(token in text for token in ["修正路径", "下一步"]))
                 for token in forbidden:

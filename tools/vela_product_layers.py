@@ -599,12 +599,16 @@ def ensure_k_address(text: str) -> str:
 
 
 ANTI_TEMPLATE_PHRASES = (
+    "K，",
+    "K。",
+    "K，在",
     "直接说",
     "不用铺垫",
     "不绕弯",
     "废话我会过滤",
     "刻板也是一种风格",
     "我会自己过滤",
+    "把真正的问题放前面",
     "当前状态如下",
     "模型生成：不可用",
     "缓存状态：可用",
@@ -629,6 +633,15 @@ ANSWER_FIRST_MARKERS = (
 STYLE_CRITICISM_MARKERS = (
     "没懂我",
     "没理解",
+    "刻板",
+    "模板",
+    "不要k",
+    "不要K",
+    "不像真人",
+    "你又偏了",
+    "别绕",
+    "直接点",
+    "更智能的伙伴",
     "还是很刻板",
     "一样刻板",
     "又模板",
@@ -637,6 +650,40 @@ STYLE_CRITICISM_MARKERS = (
     "你回答还是一样",
     "回答还是一样",
     "没有先回答",
+)
+
+SESSION_STYLE_OVERRIDE_TRIGGERS = (
+    "刻板",
+    "模板",
+    "不要 k",
+    "不要K",
+    "不要k",
+    "不像真人",
+    "你没懂我",
+    "不是这个意思",
+    "你又偏了",
+    "回答还是一样",
+    "别绕",
+    "直接点",
+    "更智能的伙伴",
+    "机器人/刻板感",
+    "style_feedback",
+    "relationship_repair",
+)
+
+ELLIPSIS_DISSATISFACTION_MARKERS = (
+    "。",
+    "。。",
+    "...",
+    "…",
+    "……",
+    "= =",
+    "？",
+    "？？",
+    "emmm",
+    "算了",
+    "你看",
+    "不是",
 )
 
 
@@ -648,6 +695,11 @@ def _strip_k_prefix(text: str) -> str:
     return re.sub(r"^\s*K\s*[,，:：]\s*", "", str(text or "")).strip()
 
 
+def _strip_default_k_prefix(text: str) -> str:
+    cleaned = re.sub(r"^\s*K\s*[,，。:：]?\s*", "", str(text or "")).strip()
+    return cleaned
+
+
 def _remove_template_tics(text: str) -> str:
     cleaned = str(text or "")
     replacements = {
@@ -655,6 +707,12 @@ def _remove_template_tics(text: str) -> str:
         "我会自己过滤": "我会把问题收清楚",
         "不用铺垫": "不用写很长",
         "不绕弯": "先说核心",
+        "直接说人话": "说人话",
+        "直接说": "你说",
+        "把真正的问题放前面": "我先帮你把问题放回核心",
+        "你先给我一句最核心的目标": "我先帮你把问题放回核心",
+        "告诉我你想查什么": "我先把可查范围说清楚",
+        "刻板也是一种风格": "刚才确实太刻板，我重说",
         "当前状态如下": "",
         "模型生成：不可用": "",
         "缓存状态：可用": "",
@@ -700,6 +758,31 @@ def is_style_criticism_message(message: str) -> bool:
     )
 
 
+def is_ellipsis_dissatisfaction_message(message: str) -> bool:
+    raw = str(message or "").strip()
+    compact = _compact_user_text(raw)
+    if not compact:
+        return False
+    normalized = raw.replace(" ", "")
+    if normalized in {"。", "。。", "...", "…", "……", "？", "？？", "==", "= =", "emmm", "不是", "算了", "你看"}:
+        return True
+    return compact in {marker.replace(" ", "").lower() for marker in ELLIPSIS_DISSATISFACTION_MARKERS}
+
+
+def is_deepseek_retrieval_question(message: str) -> bool:
+    compact = _compact_user_text(message)
+    return (
+        "deepseek" in compact
+        and ("api" in compact or "后台" in compact or "连接" in compact)
+        and any(token in compact for token in ("检索", "资料", "外部", "联网", "搜索", "网页", "接入"))
+    )
+
+
+def is_vix_realtime_question(message: str) -> bool:
+    compact = _compact_user_text(message)
+    return "vix" in compact and any(token in compact for token in ("现在", "是多少", "值", "实时"))
+
+
 def is_plain_vela_ping(message: str) -> bool:
     return _compact_user_text(message).strip("，。！？!?") == "vela"
 
@@ -725,6 +808,29 @@ def natural_filter_repair_reply() -> str:
     return (
         "我说错了，不是过滤你。\n"
         "该过滤的是我的废话、误判和状态腔。你正常说，我负责把真正问题拎出来。"
+    )
+
+
+def natural_ellipsis_repair_reply() -> str:
+    return (
+        "我懂，你不是在提新问题，是觉得我刚才又有点话术化。\n"
+        "我重说一版：先给结论，再补边界；如果问题卡在 DeepSeek 和检索，DeepSeek API 负责推理，外部资料要靠搜索、网页抓取或行情源来拿。"
+    )
+
+
+def natural_deepseek_retrieval_reply() -> str:
+    return (
+        "你接的是模型推理能力，不是外部信息入口。\n"
+        "DeepSeek API 能分析你给它的内容，但不能自己凭空读取网页、行情或数据库。\n"
+        "要实时查资料，需要再接搜索工具、网页抓取工具或行情数据源，然后把查到的内容交给 DeepSeek 判断。"
+    )
+
+
+def natural_vix_boundary_reply() -> str:
+    return (
+        "实时源暂不可用，所以我不能给当前 VIX 数值，也不能把缓存当盘中事实。\n"
+        "方向判断：存储和光模块的讨论度仍然跟 AI 算力链、资本开支和美股风险偏好绑定；能否持续，要看英伟达/半导体链、美元美债和 VIX 是否一起支持风险资产。\n"
+        "下一步：先接外盘行情/VIX 实时源，再把实时数值交给 DeepSeek 做持续性判断。"
     )
 
 
@@ -755,7 +861,7 @@ def natural_style_criticism_reply(message: str, current_text: str) -> str:
     if any(marker in str(message or "") for marker in RELATIONSHIP_REPAIR_MARKERS) or "没懂" in compact:
         return (
             "偏了，我刚才没抓住真实意思。\n"
-            "重切：你先给我一句最核心的目标，我从那里接，不再把话绕回模板。"
+            "重切：我先帮你把问题放回核心；你不用重新解释，我从这里重说。"
         )
     if "实时" in compact or "状态" in str(current_text):
         return (
@@ -804,10 +910,17 @@ def final_reply_humanizer(
     intent: str,
     used_retrieval: bool = False,
     used_cache: bool = False,
+    style_override: bool = False,
 ) -> str:
     """Last foreground pass: answer first, reduce template tics, and translate system status."""
     raw = _remove_template_tics(text)
     raw = strip_mechanical_meta_lines(raw)
+    if is_ellipsis_dissatisfaction_message(message):
+        return natural_ellipsis_repair_reply()
+    if is_deepseek_retrieval_question(message):
+        return natural_deepseek_retrieval_reply()
+    if is_vix_realtime_question(message):
+        return natural_vix_boundary_reply()
     if is_realtime_source_duration_question(message):
         return natural_realtime_duration_reply()
     if is_filter_wording_repair(message):
@@ -819,11 +932,54 @@ def final_reply_humanizer(
     if is_style_criticism_message(message):
         return natural_style_criticism_reply(message, raw)
     raw = humanize_realtime_boundary(raw, intent=intent)
-    if is_plain_vela_ping(message):
-        raw = _strip_k_prefix(raw)
-        if not raw:
-            raw = "我在。你说。"
+    raw = _strip_default_k_prefix(raw)
+    if style_override:
+        raw = _remove_template_tics(raw)
+        raw = _strip_default_k_prefix(raw)
+    if is_plain_vela_ping(message) and not raw:
+        raw = "我在。你说。"
+    if not raw:
+        raw = "我在。你说。"
     return raw.strip()
+
+
+def session_style_override_active(context: ReplyContext | None = None, *, message: str = "") -> bool:
+    parts: list[str] = [str(message or "")]
+    if context is not None:
+        parts.extend(
+            [
+                context.message or "",
+                context.recent_summary or "",
+                context.last_response or "",
+                " ".join(context.user_preferences),
+            ]
+        )
+    raw = " ".join(parts)
+    compact = _compact_user_text(raw)
+    return any(trigger.lower().replace(" ", "") in compact for trigger in SESSION_STYLE_OVERRIDE_TRIGGERS)
+
+
+def last_mile_foreground_filter(
+    text: str,
+    *,
+    message: str,
+    intent: str,
+    used_retrieval: bool = False,
+    used_cache: bool = False,
+    style_override: bool = False,
+    max_chars: int = 3600,
+) -> str:
+    return guard_wechat_output(
+        final_reply_humanizer(
+            text,
+            message=message,
+            intent=intent,
+            used_retrieval=used_retrieval,
+            used_cache=used_cache,
+            style_override=style_override,
+        ),
+        max_chars=max_chars,
+    )
 
 
 def guard_layered_output(
@@ -2959,14 +3115,13 @@ def run_layered_response(
         used_codex=used_codex,
         used_retrieval=used_retrieval,
     )
-    guarded = guard_wechat_output(
-        final_reply_humanizer(
-            guarded,
-            message=message,
-            intent=intent,
-            used_retrieval=used_retrieval,
-            used_cache=used_cache,
-        )
+    guarded = last_mile_foreground_filter(
+        guarded,
+        message=message,
+        intent=intent,
+        used_retrieval=used_retrieval,
+        used_cache=used_cache,
+        style_override=session_style_override_active(context),
     )
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     quality_flags = [

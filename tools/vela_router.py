@@ -35,6 +35,8 @@ from vela_product_layers import (
     guard_wechat_output,
     interpret_user_need,
     is_current_information_request,
+    is_deepseek_retrieval_question,
+    last_mile_foreground_filter,
     record_interaction,
     record_reply_quality,
     record_session_note,
@@ -548,6 +550,8 @@ def classify_intent(text: str) -> Intent:
         return Intent("normal_chat", 0.87, ["conversation_boundary"])
     if is_weather_query(raw):
         return Intent("weather_query", 0.9, weather_focus_tags(raw))
+    if is_deepseek_retrieval_question(raw):
+        return Intent("daily_info", 0.9, ["daily_info", "deepseek", "retrieval_boundary"])
     if is_market_refresh_request(norm):
         return Intent("market_refresh", 0.94, market_focus_tags(norm), market_allowed=True)
     if contains_any(norm, DEEP_KEYWORDS):
@@ -1007,68 +1011,71 @@ def schedule_market_refresh(text: str, *, state_dir: Path | None = None) -> Mark
 
 def reply_for(text: str) -> str:
     intent = classify_intent(text)
+    reply: str
     if intent.name == "persona_tool":
         supporting_context = render_persona_tool_reply(text)
-        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
-    if intent.name == "daily_briefing":
+        reply = run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
+    elif intent.name == "daily_briefing":
         supporting_context = render_daily_briefing_reply(text)
-        return run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
-    if intent.name == "freshness_status":
+        reply = run_layered_response(text, intent=intent.name, supporting_context=supporting_context).text
+    elif intent.name == "freshness_status":
         supporting_context = render_freshness_reply(text)
-        return run_layered_response(
+        reply = run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
             reply_adapter=FallbackReplyAdapter(),
         ).text
-    if intent.name == "market_refresh":
+    elif intent.name == "market_refresh":
         supporting_context = render_market_refresh_reply(text)
-        return run_layered_response(
+        reply = run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
             reply_adapter=FallbackReplyAdapter(),
         ).text
-    if intent.name == "market_brief":
+    elif intent.name == "market_brief":
         supporting_context = render_cached_market_reply(text)
         reply_adapter = None if is_current_information_request(text, intent.name) else FallbackReplyAdapter()
-        return run_layered_response(
+        reply = run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
             reply_adapter=reply_adapter,
         ).text
-    if intent.name == "weather_query":
+    elif intent.name == "weather_query":
         supporting_context = render_weather_reply(text)
-        return run_layered_response(
+        reply = run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
         ).text
-    if intent.name == "daily_info" and is_current_time_query(text):
+    elif intent.name == "daily_info" and is_current_time_query(text):
         supporting_context = guard_wechat_output(render_time_query_reply(text))
-        return run_layered_response(
+        reply = run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
         ).text
-    if intent.name in {"daily_info", "world_brief"} and is_current_information_request(text, intent.name):
+    elif intent.name in {"daily_info", "world_brief"} and is_current_information_request(text, intent.name):
         supporting_context = guard_wechat_output(render_current_info_query_reply(text))
-        return run_layered_response(
+        reply = run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
         ).text
-    if intent.name == "style_feedback":
-        return run_layered_response(
+    elif intent.name == "style_feedback":
+        reply = run_layered_response(
             text,
             intent=intent.name,
         ).text
-    if intent.name == "codex_task":
-        return guard_wechat_output(render_codex_bridge(text))
-    if intent.name == "normal_chat" and is_fast_greeting(text) and should_force_fallback_for_greeting(text):
-        return run_layered_response(text, intent=intent.name, reply_adapter=FallbackReplyAdapter()).text
-    return run_layered_response(text, intent=intent.name).text
+    elif intent.name == "codex_task":
+        reply = guard_wechat_output(render_codex_bridge(text))
+    elif intent.name == "normal_chat" and is_fast_greeting(text) and should_force_fallback_for_greeting(text):
+        reply = run_layered_response(text, intent=intent.name, reply_adapter=FallbackReplyAdapter()).text
+    else:
+        reply = run_layered_response(text, intent=intent.name).text
+    return last_mile_foreground_filter(reply, message=text, intent=intent.name)
 
 
 def is_expanded_market_query(text: str) -> bool:

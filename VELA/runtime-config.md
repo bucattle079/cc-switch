@@ -59,13 +59,14 @@ Mechanism distillation is abstract behavior only: VELA keeps her own identity, s
 
 ## Final Reply Humanizer
 
-The final foreground pass runs after persona rendering and guardrails. It is not a template generator; it is the last quality gate for WeChat-facing language.
+The final foreground pass runs after persona rendering and guardrails. It is not a template generator; it is the last quality gate for WeChat-facing language. `router.reply_for()` and `run_layered_response()` both pass WeChat-visible text through this last-mile foreground filter, including Codex, weather, market, current-info, ordinary chat, and fallback paths.
 
 - Answer-first questions, especially `现在...`, `多久`, `能不能`, `为什么`, `过滤啥`, and direct correction prompts, must put the useful answer before status or explanation.
-- Time and factual lanes must remove self-proving meta lines such as local-computation explanations, "not a chat template" claims, or tool-chain bragging. If the fact is available, keep the fact and a human next-sentence; drop the defensive label.
+- Time and factual lanes must remove self-proving meta lines such as local-computation explanations, "not a chat template" claims, or tool-chain bragging. If the fact is available, keep the fact and a human next-sentence; drop the defensive label. Example: a New York time query should answer with the clock, date/UTC offset, and a practical time-window judgment, not "判断：这是按本地时区直接计算...".
+- DeepSeek API is the dialogue/reasoning adapter, not an automatic external search source. If the user asks why DeepSeek cannot "directly retrieve资料", explain the model-vs-retrieval boundary in plain Chinese and name the missing retrieval layer: search, webpage capture, market/weather data source, or another verified source.
 - Realtime/cache boundaries must be translated into plain Chinese: `实时源暂不可用`, `实时源未接入`, `有本地缓存可参考`, and the practical next step. Raw `数据来源：`, `状态边界：`, `缓存摘要`, `模型仅生成`, API status, schema keys, and internal paths stay out of WeChat.
 - Style feedback such as "太像机器人", "太刻板", "没懂我", or "不是这个意思" is a next-turn behavior signal. The next reply should reduce fixed openings, answer the core first, and repair the misunderstanding by performance, not by saying it has calibrated itself.
-- A bare `VELA` ping may strip the fixed `K，` opening when the sentence is already clear. Other short replies may still use it, but tests should not require it as identity proof.
+- Fixed `K，` openings are not identity proof and should not be required by tests. The fallback engine and last-mile output should prefer short natural openings such as `在。你说。`, `我在。听着。`, or a direct factual answer.
 
 ## Memory Safety
 
