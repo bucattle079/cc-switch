@@ -287,7 +287,7 @@ CODEX_KEYWORDS = [
     "开发任务",
     "电脑控制",
 ]
-PROJECT_KEYWORDS = ["项目", "广告中心", "intelligence center", "规划", "功能如何"]
+PROJECT_KEYWORDS = ["项目", "intelligence center", "规划", "功能如何"]
 PROJECT_OPT_OUT_KEYWORDS = [
     "先别聊项目",
     "别聊项目",
@@ -410,8 +410,6 @@ CONTEXT_LEAKAGE_FEEDBACK_KEYWORDS = [
     "我们是vela交互",
 ]
 CONTEXT_LEAKAGE_SUBJECT_KEYWORDS = [
-    "augsun",
-    "rollqiia",
     "codex",
     "deepseek",
     "市场资讯",
@@ -517,26 +515,6 @@ def is_daily_briefing_request(text: str) -> bool:
     return command_key(first_command_token(text)) in DAILY_BRIEFING_COMMANDS
 
 
-def is_external_ads_analysis_request(text: str) -> bool:
-    norm = normalize(text)
-    return "augsun" in norm and contains_any(
-        norm,
-        [
-            "广告",
-            "amazon ads",
-            "amazonads",
-            "acos",
-            "广告分析",
-            "广告投放",
-            "seller sprite",
-            "sellersprite",
-            "seller_sprite",
-            "投放",
-            "广告账户",
-        ],
-    )
-
-
 def is_sector_discussion_source_request(text: str) -> bool:
     norm = normalize(text)
     return contains_any(norm, ["讨论度", "市场讨论度", "存储", "光模块"]) and contains_any(
@@ -591,12 +569,6 @@ def classify_intent(text: str) -> Intent:
         return Intent("normal_chat", 0.86, ["conversation_boundary"])
     if is_context_leakage_feedback(norm):
         return Intent("style_feedback", 0.92, ["memory", "style_feedback", "relationship_repair"])
-    if is_external_ads_analysis_request(norm):
-        return Intent(
-            "daily_info",
-            0.86,
-            ["daily_info", "business_data", "amazon_ads", "seller_sprite_mcp", "local_files", "local_memory"],
-        )
     if contains_legacy_external_project(norm):
         return Intent("style_feedback", 0.91, ["memory", "style_feedback", "context_quarantine"])
     if contains_any(norm, CODEX_KEYWORDS):
@@ -634,10 +606,9 @@ def classify_intent(text: str) -> Intent:
 
 
 def is_context_leakage_feedback(text: str) -> bool:
-    return contains_any(text, CONTEXT_LEAKAGE_FEEDBACK_KEYWORDS) and contains_any(
-        text,
-        CONTEXT_LEAKAGE_SUBJECT_KEYWORDS,
-    )
+    if not contains_any(text, CONTEXT_LEAKAGE_FEEDBACK_KEYWORDS):
+        return False
+    return contains_any(text, CONTEXT_LEAKAGE_SUBJECT_KEYWORDS) or contains_legacy_external_project(text)
 
 
 def is_project_opt_out_chat(text: str) -> bool:
@@ -1104,7 +1075,7 @@ def reply_for(text: str) -> str:
             intent=intent.name,
             supporting_context=supporting_context,
         ).text
-    elif intent.name == "daily_info" and is_external_ads_analysis_request(text):
+    elif intent.name in {"daily_info", "world_brief"} and is_current_information_request(text, intent.name):
         evidence = build_realtime_evidence(text, intent.name)
         supporting_context = guard_wechat_output(evidence.frontstage_boundary)
         reply = run_layered_response(
@@ -1112,13 +1083,6 @@ def reply_for(text: str) -> str:
             intent=intent.name,
             supporting_context=supporting_context,
             reply_adapter=FallbackReplyAdapter(),
-        ).text
-    elif intent.name in {"daily_info", "world_brief"} and is_current_information_request(text, intent.name):
-        supporting_context = guard_wechat_output(render_current_info_query_reply(text))
-        reply = run_layered_response(
-            text,
-            intent=intent.name,
-            supporting_context=supporting_context,
         ).text
     elif intent.name == "style_feedback":
         reply = run_layered_response(

@@ -191,9 +191,15 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
             if case["id"] in current_daily_info_ids:
                 with self.subTest(case["id"]):
                     adapter_flag = case["latest_quality_log"]["quality_flags"][1]
-                    self.assertIn(adapter_flag, {"adapter:deepseek_chat", "adapter:fallback_current_info_fallback"})
+                    self.assertIn(
+                        adapter_flag,
+                        {"adapter:deepseek_chat", "adapter:fallback_current_info_fallback", "adapter:local_realtime_boundary"},
+                    )
                     self.assertNotIn(adapter_flag, {"adapter:local_market", "adapter:local_status"})
-                    self.assertIn("DeepSeek", case["reply_preview"])
+                    self.assertTrue(
+                        "DeepSeek" in case["reply_preview"] or "网页/新闻搜索源" in case["reply_preview"],
+                        case["reply_preview"],
+                    )
                     self.assertNotIn("状态边界", case["reply_preview"])
                     self.assertFalse(case["leaks"], case)
             if case["id"] in time_fact_ids:

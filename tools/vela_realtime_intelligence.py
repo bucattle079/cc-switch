@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib
+import json
+import os
 from pathlib import Path
 from typing import Any
+import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +17,17 @@ FRESH_DELAYED = "delayed_source_available"
 FRESH_CACHE = "cached_summary_available"
 FRESH_MODEL_ONLY = "model_generated_only"
 FRESH_UNAVAILABLE = "unavailable"
+
+DEFAULT_SOURCE_TYPES = (
+    "web_search",
+    "news",
+    "market_data",
+    "weather",
+    "local_memory",
+    "local_files",
+    "user_uploaded_context",
+    "generic_tool_connector",
+)
 
 
 @dataclass(frozen=True)
@@ -70,7 +84,7 @@ class RealtimeEvidenceResult:
 
 
 class RetrievalConnector:
-    source_type = "generic"
+    source_type = "generic_tool_connector"
     source_name = "generic connector"
 
     def can_handle(self, source_type: str) -> bool:
@@ -173,81 +187,104 @@ class WeatherConnector(RetrievalConnector):
         )
 
 
-class NewsConnector(RetrievalConnector):
-    source_type = "news"
-    source_name = "news/rss connector"
+class WebNewsSearchConnector(RetrievalConnector):
+    source_name = "web/news search connector"
+
+    def __init__(self, source_type: str):
+        self.source_type = source_type
+
+    def can_handle(self, source_type: str) -> bool:
+        return source_type in {"web_search", "news"} and source_type == self.source_type
 
     def fetch(self, query: str, freshness_requirement: str) -> ConnectorRawResult:
+        provider = str(os.environ.get("VELA_SEARCH_PROVIDER") or "").strip().lower()
+        api_key = str(os.environ.get("VELA_SEARCH_API_KEY") or "").strip()
+        if not provider or not api_key:
+            return self._unavailable("网页/新闻搜索源未接入", ["search_provider_not_configured"])
+        if provider != "serper":
+            return self._unavailable("搜索 provider 暂不支持", ["search_provider_unsupported"])
         try:
-            from vela_realtime_info import fetch_current_info_items
-
-            items = fetch_current_info_items(query, max_items=3)
-        except Exception:
-            items = []
-        if not items:
+            payload = self._fetch_serper(query)
+            return self.normalize(payload)
+        except Exception as exc:
             return ConnectorRawResult(
-                source_name=self.source_name,
+                source_name="Serper search",
                 source_type=self.source_type,
                 freshness_status=FRESH_UNAVAILABLE,
-                title="新闻资料源暂未抓到高置信条目",
-                summary="没有抓到可验证新闻条目；不能把模型常识包装成今天发生的事。",
-                source_url_or_origin="Google News RSS connector",
+                title="搜索源调用失败",
+                summary="公开搜索源调用失败；不能把模型判断伪装成已检索结果。",
+                key_values={"error": type(exc).__name__},
+                source_url_or_origin="Serper API",
                 confidence_level="medium",
-                known_limits=["no_high_confidence_news_items"],
+                known_limits=["search_provider_error"],
             )
-        first = items[0]
-        return ConnectorRawResult(
-            source_name=str(first.source or self.source_name),
-            source_type=self.source_type,
-            freshness_status=FRESH_REALTIME,
-            title=str(first.title or "实时资讯线索"),
-            summary=f"抓到 {len(items)} 条可用线索；第一条来自 {first.source or '未标明来源'}。",
-            key_values={"item_count": str(len(items))},
-            source_url_or_origin=str(first.link or "Google News RSS"),
-            confidence_level="medium",
-            known_limits=["rss_title_is_not_final_conclusion"],
-        )
 
-
-class WebSearchConnector(RetrievalConnector):
-    source_type = "web_search"
-    source_name = "web search connector"
-
-    def fetch(self, query: str, freshness_requirement: str) -> ConnectorRawResult:
+    def _unavailable(self, title: str, limits: list[str]) -> ConnectorRawResult:
         return ConnectorRawResult(
             source_name=self.source_name,
             source_type=self.source_type,
             freshness_status=FRESH_UNAVAILABLE,
-            title="网页搜索 connector 未配置",
-            summary="MVP 还没有独立网页搜索 API；如新闻 RSS 没抓到资料，就不能伪装成已联网检索。",
-            source_url_or_origin="local placeholder connector",
+            title=title,
+            summary="未配置 VELA_SEARCH_PROVIDER / VELA_SEARCH_API_KEY；不能把模型常识包装成实时检索。",
+            source_url_or_origin="local search connector config",
             confidence_level="high",
-            known_limits=["web_search_api_not_configured"],
+            known_limits=limits,
         )
 
+    def _fetch_serper(self, query: str) -> dict[str, Any]:
+        endpoint = "https://google.serper.dev/news" if self.source_type == "news" else "https://google.serper.dev/search"
+        data = json.dumps({"q": query, "num": 5}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            endpoint,
+            data=data,
+            headers={
+                "X-API-KEY": str(os.environ.get("VELA_SEARCH_API_KEY") or "").strip(),
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=_timeout_seconds()) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("search_payload_not_object")
+        return payload
 
-class BusinessDataConnector(RetrievalConnector):
-    def __init__(self, source_type: str, source_name: str):
-        self.source_type = source_type
-        self.source_name = source_name
-
-    def fetch(self, query: str, freshness_requirement: str) -> ConnectorRawResult:
-        readable = {
-            "amazon_ads": "Amazon Ads",
-            "seller_sprite_mcp": "SellerSprite MCP",
-            "local_files": "本地文件",
-            "local_memory": "本地记忆",
-            "gmail_import": "Gmail 导入",
-        }.get(self.source_type, self.source_name)
+    def normalize(self, raw_result: ConnectorRawResult | dict[str, Any]) -> ConnectorRawResult:
+        if isinstance(raw_result, ConnectorRawResult):
+            return raw_result
+        items = raw_result.get("news") if self.source_type == "news" else raw_result.get("organic")
+        if not isinstance(items, list) or not items:
+            items = raw_result.get("organic") if isinstance(raw_result.get("organic"), list) else []
+        if not items:
+            return ConnectorRawResult(
+                source_name="Serper search",
+                source_type=self.source_type,
+                freshness_status=FRESH_UNAVAILABLE,
+                title="搜索源暂未返回可用条目",
+                summary="搜索 provider 已调用，但没有返回可整理为证据包的公开条目。",
+                source_url_or_origin="Serper API",
+                confidence_level="medium",
+                known_limits=["no_search_results"],
+            )
+        first = items[0] if isinstance(items[0], dict) else {}
+        title = str(first.get("title") or "公开资料线索").strip()
+        summary = str(first.get("snippet") or first.get("description") or "搜索结果缺少摘要；需要打开原始来源复核。").strip()
+        source = str(first.get("source") or first.get("sitelinks", "") or "Serper search").strip()
+        link = str(first.get("link") or first.get("url") or "Serper API").strip()
+        key_values = {"provider": "serper", "item_count": str(len(items))}
+        date_text = str(first.get("date") or "").strip()
+        if date_text:
+            key_values["published_or_indexed"] = date_text
         return ConnectorRawResult(
-            source_name=readable,
+            source_name=source or "Serper search",
             source_type=self.source_type,
-            freshness_status=FRESH_UNAVAILABLE,
-            title=f"{readable} 资料源边界",
-            summary=f"{readable} connector 尚未接入当前 VELA 前台；不能用普通网页搜索替代广告账户或店铺数据。",
-            source_url_or_origin="future connector slot",
-            confidence_level="high",
-            known_limits=["business_connector_not_configured"],
+            freshness_status=FRESH_REALTIME,
+            title=title,
+            summary=summary,
+            key_values=key_values,
+            source_url_or_origin=link,
+            confidence_level="medium",
+            known_limits=["search_result_is_lead_not_final_fact", "source_must_be_verified_before_strong_claims"],
         )
 
 
@@ -255,13 +292,9 @@ def default_connectors() -> list[RetrievalConnector]:
     return [
         MarketDataConnector(),
         WeatherConnector(),
-        NewsConnector(),
-        WebSearchConnector(),
-        BusinessDataConnector("amazon_ads", "Amazon Ads connector"),
-        BusinessDataConnector("seller_sprite_mcp", "SellerSprite MCP connector"),
-        BusinessDataConnector("local_files", "local files connector"),
-        BusinessDataConnector("local_memory", "local memory connector"),
-        BusinessDataConnector("gmail_import", "Gmail import connector"),
+        WebNewsSearchConnector("news"),
+        WebNewsSearchConnector("web_search"),
+        RetrievalConnector(),
     ]
 
 
@@ -283,6 +316,17 @@ def _dedupe(items: list[str]) -> list[str]:
     return result
 
 
+def _timeout_seconds() -> float:
+    raw = str(os.environ.get("VELA_SEARCH_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return 8.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 8.0
+    return min(max(value, 2.0), 20.0)
+
+
 def plan_sources(message: str, intent: str) -> SourcePlan:
     compact = _compact(message)
     source_types: list[str] = []
@@ -291,24 +335,6 @@ def plan_sources(message: str, intent: str) -> SourcePlan:
     should_use_cache = False
     warn = False
     reason = ""
-
-    ads_query = _has_any(
-        compact,
-        ["augsun广告", "amazonads", "广告分析", "广告投放", "acos", "seller_sprite", "sellersprite", "gmail导入"],
-    )
-    if ads_query:
-        source_types.extend(["amazon_ads", "seller_sprite_mcp", "local_files", "local_memory"])
-        if "gmail" in compact or "邮件" in compact:
-            source_types.append("gmail_import")
-        return SourcePlan(
-            source_need=True,
-            source_type=_dedupe(source_types),
-            freshness_requirement="recent_local_or_account_data",
-            acceptable_fallback=["local_memory", "local_files", FRESH_UNAVAILABLE],
-            should_use_cache=True,
-            should_warn_if_unavailable=True,
-            reason="广告/业务分析要账户、店铺、本地文件或记忆，不用普通网页搜索代替。",
-        )
 
     if intent == "weather_query" or _has_any(compact, ["天气", "冷吗", "热吗", "下雨", "温度"]):
         return SourcePlan(
@@ -354,7 +380,21 @@ def plan_sources(message: str, intent: str) -> SourcePlan:
             reason=reason,
         )
 
-    current_info = _has_any(compact, ["现在", "今天", "当前", "最新", "查一下", "搜一下", "检索", "资料", "新闻", "公告"])
+    if _has_any(compact, ["deepseek", "codex", "记忆"]) and _has_any(compact, ["关系", "是什么", "能访问", "资料源", "自己搜"]):
+        return SourcePlan(
+            source_need=True,
+            source_type=["local_memory", "generic_tool_connector"],
+            freshness_requirement="local_context",
+            acceptable_fallback=["local_memory", FRESH_UNAVAILABLE],
+            should_use_cache=True,
+            should_warn_if_unavailable=False,
+            reason="身份/工具能力问题读取本地记忆和通用工具状态，不触发外部检索。",
+        )
+
+    current_info = _has_any(
+        compact,
+        ["现在", "今天", "当前", "最新", "查一下", "搜一下", "检索", "资料", "新闻", "公告", "网上讨论", "行业资讯", "政策"],
+    )
     if intent in {"daily_info", "world_brief"} and current_info:
         return SourcePlan(
             source_need=True,
@@ -369,7 +409,7 @@ def plan_sources(message: str, intent: str) -> SourcePlan:
     if intent in {"memory_related", "project_assistant"}:
         return SourcePlan(
             source_need=True,
-            source_type=["local_memory", "local_files"],
+            source_type=["local_memory", "local_files", "generic_tool_connector"],
             freshness_requirement="local_context",
             acceptable_fallback=["local_memory", FRESH_UNAVAILABLE],
             should_use_cache=True,
@@ -413,24 +453,28 @@ def format_realtime_boundary(plan: SourcePlan, packets: list[EvidencePacket]) ->
         return ""
     statuses = {packet.freshness_status for packet in packets}
     types = set(plan.source_type)
-    if {"amazon_ads", "seller_sprite_mcp", "local_files", "local_memory"} & types:
-        return (
-            "这类广告分析要读 Amazon Ads、SellerSprite、本地文件或本地记忆；"
-            "当前这些业务数据源还没接到前台，所以只能先说明缺口，不能冒充账户数据。"
-        )
     if "market_data" in types and {"news", "web_search"} & types:
+        if FRESH_REALTIME in statuses:
+            return "已拿到公开网页/新闻线索；市场数据源仍需单独确认，结论不能只凭搜索标题下死。"
         return (
             "存储和光模块讨论度要同时看行情、新闻和网页线索；"
-            "当前实时资料源不完整，只能先标出证据缺口，不能把缓存盘面当成板块热度。"
+            "当前网页/新闻搜索源未接入，只能先标出证据缺口，不能把缓存盘面当成板块热度。"
         )
+    if {"web_search", "news"} & types and FRESH_REALTIME not in statuses:
+        return "网页/新闻搜索源未接入；我不能把模型常识伪装成实时检索。"
     if "market_data" in types and FRESH_REALTIME not in statuses:
         if FRESH_CACHE in statuses:
-            return "我现在没有完整实时行情源，只能基于本地缓存和已接入资料做方向判断。"
-        return "我现在没有可用实时行情源，不能给盘中数值，也不能把模型判断伪装成行情。"
+            return "当前未接入实时行情源，只能基于本地缓存和已接入资料做有限方向判断。"
+        return "当前未接入实时行情源，不能给盘中数值，也不能把模型判断伪装成行情。"
     if "weather" in types:
         return "天气问题先走天气源；源不可用时只给出行风险边界，不编温度。"
-    if FRESH_REALTIME in statuses:
-        return "实时资料源已有可用线索；结论仍要区分标题证据和最终判断。"
+    if {"web_search", "news"} & types and FRESH_REALTIME in statuses:
+        first = next((packet for packet in packets if packet.freshness_status == FRESH_REALTIME), None)
+        if first is not None:
+            return f"公开网页/新闻搜索源已返回线索；先看《{first.title}》。判断前仍要复核原始来源。"
+        return "公开网页/新闻搜索源已返回线索；判断前仍要复核原始来源。"
+    if "generic_tool_connector" in types:
+        return "这类问题先看本地记忆和通用工具状态；不把模型能力说成外部检索能力。"
     return "我现在没有可用外部资料源，不能把模型判断伪装成实时检索。"
 
 

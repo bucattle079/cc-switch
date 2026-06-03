@@ -217,7 +217,7 @@ SINGLE_TURN_CASES = [
         "id": "daily_info_now_general_news_uses_deepseek_chain",
         "message": "现在DeepSeek有什么新消息",
         "expected_intent": "daily_info",
-        "required_reply_tokens": ["DeepSeek", "判断：", "下一步："],
+        "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
         "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
         "max_reply_chars": 260,
     },
@@ -225,7 +225,7 @@ SINGLE_TURN_CASES = [
         "id": "daily_info_now_search_policy_uses_deepseek_chain",
         "message": "现在帮我查这个政策",
         "expected_intent": "daily_info",
-        "required_reply_tokens": ["DeepSeek", "判断：", "下一步："],
+        "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
         "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
         "max_reply_chars": 260,
     },
@@ -233,7 +233,7 @@ SINGLE_TURN_CASES = [
         "id": "daily_info_now_policy_question_uses_deepseek_chain",
         "message": "现在这个政策怎么样",
         "expected_intent": "daily_info",
-        "required_reply_tokens": ["DeepSeek", "判断：", "下一步："],
+        "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
         "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
         "max_reply_chars": 260,
     },
@@ -241,7 +241,7 @@ SINGLE_TURN_CASES = [
         "id": "daily_info_now_search_openai_uses_deepseek_chain",
         "message": "现在帮我搜一下OpenAI",
         "expected_intent": "daily_info",
-        "required_reply_tokens": ["DeepSeek", "判断：", "下一步："],
+        "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
         "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
         "max_reply_chars": 260,
     },
@@ -249,7 +249,7 @@ SINGLE_TURN_CASES = [
         "id": "daily_info_now_company_notice_uses_deepseek_chain",
         "message": "现在小米汽车有什么公告",
         "expected_intent": "daily_info",
-        "required_reply_tokens": ["DeepSeek", "判断：", "下一步："],
+        "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
         "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
         "max_reply_chars": 260,
     },
@@ -257,7 +257,7 @@ SINGLE_TURN_CASES = [
         "id": "daily_info_now_app_update_uses_deepseek_chain",
         "message": "现在ChatGPT有什么更新",
         "expected_intent": "daily_info",
-        "required_reply_tokens": ["DeepSeek", "判断：", "下一步："],
+        "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
         "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "状态边界", "VELA 市场简报", "Market & World Briefing"],
         "max_reply_chars": 260,
     },
@@ -294,7 +294,7 @@ SINGLE_TURN_CASES = [
         "id": "world_info_now_event_not_market",
         "message": "现在日本地震新闻",
         "expected_intent": "world_brief",
-        "required_reply_tokens": ["DeepSeek", "判断：", "下一步："],
+        "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
         "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "A股快照", "VELA 市场简报", "状态边界", "Market & World Briefing"],
         "max_reply_chars": 260,
     },
@@ -472,11 +472,11 @@ SINGLE_TURN_CASES = [
         "side_effects_allowed": False,
     },
     {
-        "id": "daily_info_external_ads_business_sources",
-        "message": "继续 AugSun 广告分析。",
-        "expected_intent": "daily_info",
-        "required_reply_tokens": ["Amazon Ads", "SellerSprite", "本地文件", "业务数据源"],
-        "forbidden_reply_tokens": ["普通网页搜索", "项目线", "context_quarantine", "source_type", "evidence_id", "raw payload", "schema"],
+        "id": "identity_model_tool_memory_relation",
+        "message": "VELA 现在和 DeepSeek / Codex / 记忆是什么关系",
+        "expected_intent": "memory_related",
+        "required_reply_tokens": ["DeepSeek", "Codex", "记忆"],
+        "forbidden_reply_tokens": ["source_type", "evidence_id", "raw payload", "schema", "垂直业务源", "业务报表"],
         "max_reply_chars": 260,
     },
     {
@@ -718,7 +718,7 @@ def supporting_context_for(intent: str, message: str) -> str:
         return router.render_freshness_reply(message)
     if intent == "daily_info" and router.is_current_time_query(message):
         return router.guard_wechat_output(router.render_time_query_reply(message))
-    if intent == "daily_info" and router.is_external_ads_analysis_request(message):
+    if intent in {"daily_info", "world_brief"} and router.is_current_information_request(message, intent):
         evidence = router.build_realtime_evidence(message, intent)
         return router.guard_wechat_output(evidence.frontstage_boundary)
     return ""

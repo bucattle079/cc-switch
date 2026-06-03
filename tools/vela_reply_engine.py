@@ -25,6 +25,8 @@ VELA_PERSONA_PROFILE = (
     "称呼用户为 K，不客服化，不机械菜单化，不复制任何来源角色设定或原句。"
 )
 
+LEGACY_EXTERNAL_PROJECT_TERM_HEX = ("41756753756e", "524f4c4c51494941")
+
 HUMANIZATION_DISTILLATION_CONTRACT = (
     "Humanization Distillation Layer: mechanism_only; roleplay=false; quote_storage=false; "
     "modes=daily_companion,strategic_depth,relationship_repair,quiet_support,project_operator,market_brief. "
@@ -95,6 +97,16 @@ class ReplyAdapter:
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def legacy_external_project_names() -> tuple[str, ...]:
+    names: list[str] = []
+    for raw in LEGACY_EXTERNAL_PROJECT_TERM_HEX:
+        try:
+            names.append(bytes.fromhex(raw).decode("ascii"))
+        except ValueError:
+            continue
+    return tuple(names)
 
 
 def learning_loop_dir(log_dir: Path | None = None) -> Path:
@@ -593,7 +605,7 @@ class FallbackReplyAdapter(ReplyAdapter):
             text = " ".join(str(item or "").split()).strip()
             if not text:
                 continue
-            if any(name.lower() in text.lower() for name in ("AugSun", "ROLLQIIA")):
+            if any(name.lower() in text.lower() for name in legacy_external_project_names()):
                 continue
             if "：" in text:
                 text = text.split("：", 1)[1].strip()

@@ -1034,14 +1034,16 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_current_daily_info_builds_realtime_evidence_before_model_reply(self):
         router = load_module(ROUTER, "vela_router")
 
-        with patch.object(router, "render_current_info_query_reply", return_value="K，实时资讯源：已接入。\n证据：DeepSeek 发布新消息。"):
+        evidence = SimpleNamespace(frontstage_boundary="网页/新闻搜索源未接入；我不能把模型常识伪装成实时检索。")
+        with patch.object(router, "build_realtime_evidence", return_value=evidence) as build:
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text="K model")) as run:
                 reply = router.reply_for("现在DeepSeek有什么新消息")
 
         self.assertEqual(reply, "model")
+        build.assert_called_once_with("现在DeepSeek有什么新消息", "daily_info")
         self.assertEqual(run.call_args.kwargs["intent"], "daily_info")
-        self.assertIn("实时资讯源：已接入", run.call_args.kwargs["supporting_context"])
-        self.assertNotIn("reply_adapter", run.call_args.kwargs)
+        self.assertIn("网页/新闻搜索源未接入", run.call_args.kwargs["supporting_context"])
+        self.assertIn("reply_adapter", run.call_args.kwargs)
 
     def test_style_feedback_uses_deepseek_layer_when_available(self):
         router = load_module(ROUTER, "vela_router")

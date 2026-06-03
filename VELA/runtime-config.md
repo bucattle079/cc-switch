@@ -62,7 +62,7 @@ Mechanism distillation is abstract behavior only: VELA keeps her own identity, s
 The final foreground pass runs after persona rendering and guardrails. It is not a template generator; it is the last quality gate for WeChat-facing language. `router.reply_for()` and `run_layered_response()` both pass WeChat-visible text through this last-mile foreground filter, including Codex, weather, market, current-info, ordinary chat, and fallback paths.
 
 - Answer-first questions, especially `现在...`, `多久`, `能不能`, `为什么`, `过滤啥`, and direct correction prompts, must put the useful answer before status or explanation.
-- Time and factual lanes must remove self-proving meta lines such as local-computation explanations, "not a chat template" claims, or tool-chain bragging. If the fact is available, keep the fact and a human next-sentence; drop the defensive label. Example: a New York time query should answer with the clock, date/UTC offset, and a practical time-window judgment, not "判断：这是按本地时区直接计算...".
+- Time and factual lanes must remove self-proving meta lines such as local-computation explanations, "not a chat template" claims, or tool-chain bragging. If the fact is available, keep the fact and a human next-sentence; drop defensive proof labels. Example: a New York time query should answer with the clock, date/UTC offset, and a practical time-window judgment, not a meta explanation of how the clock was computed.
 - DeepSeek API is the dialogue/reasoning adapter, not an automatic external search source. If the user asks why DeepSeek cannot "directly retrieve资料", explain the model-vs-retrieval boundary in plain Chinese and name the missing retrieval layer: search, webpage capture, market/weather data source, or another verified source.
 - Realtime/cache boundaries must be translated into plain Chinese: `实时源暂不可用`, `实时源未接入`, `有本地缓存可参考`, and the practical next step. Raw `数据来源：`, `状态边界：`, `缓存摘要`, `模型仅生成`, API status, schema keys, and internal paths stay out of WeChat.
 - Style feedback such as "太像机器人", "太刻板", "没懂我", or "不是这个意思" is a next-turn behavior signal. The next reply should reduce fixed openings, answer the core first, and repair the misunderstanding by performance, not by saying it has calibrated itself.
@@ -97,18 +97,24 @@ Realtime-capable questions now pass through a local evidence layer before model/
 
 The MVP implementation lives in `tools/vela_realtime_intelligence.py` and keeps four responsibilities separate:
 
-- `SourcePlan`: decides whether the request needs outside material and which source families apply: `web_search`, `news`, `market_data`, `weather`, `local_memory`, `local_files`, `amazon_ads`, `seller_sprite_mcp`, or `gmail_import`.
+- `SourcePlan`: decides whether the request needs outside material and which source families apply: `web_search`, `news`, `market_data`, `weather`, `local_memory`, `local_files`, `user_uploaded_context`, or `generic_tool_connector`.
 - `RetrievalConnector`: a replaceable connector interface with `can_handle`, `fetch`, `normalize`, and `build_evidence_packet`. Current connectors are local/cache/MVP placeholders unless a real source is already configured.
 - `EvidencePacket`: stores normalized source evidence for the model, including freshness status, key values, confidence, origin, and known limits.
 - `Realtime Boundary Formatter`: translates source state into user-facing Chinese without leaking raw field names.
 
 DeepSeek remains the reasoning/dialogue adapter. It is not treated as a search engine. If a source is missing, VELA must say the source is missing, use cache only when explicitly safe, and never invent current market numbers, weather values, account metrics, or web search results.
 
+Web/news search is enabled only when both env vars are present:
+
+- `VELA_SEARCH_PROVIDER`: currently supports `serper`.
+- `VELA_SEARCH_API_KEY`: search provider key. Keep it in the process/user environment, never in this repo.
+
+If either value is missing, VELA returns a plain boundary such as "网页/新闻搜索源未接入" and must not mock or imply realtime retrieval.
+
 Source-specific boundaries:
 
 - VIX/current market/add-position questions check `market_data` before judgment. Without a real realtime market connector, VELA gives no current number and no fake live trade signal.
 - Sector discussion questions such as storage or optical modules plan `market_data + news + web_search`. If those sources are incomplete, VELA says the evidence gap instead of reusing broad A-share cache as sector heat.
-- External ad/account analysis plans `amazon_ads + seller_sprite_mcp + local_files + local_memory` and never substitutes generic web material for account data.
 - Weather questions remain in the weather lane and use the existing forecast connector path, with conservative travel-risk fallback if the source fails.
 
 ## Local Acceptance Smoke

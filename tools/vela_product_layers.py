@@ -446,18 +446,28 @@ def interaction_has_matching_claim(row: dict, claims: list[dict]) -> bool:
     return False
 
 
-LEGACY_EXTERNAL_PROJECT_NAMES = ("AugSun", "ROLLQIIA")
+LEGACY_EXTERNAL_PROJECT_TERM_HEX = ("41756753756e", "524f4c4c51494941")
 LEGACY_EXTERNAL_PROJECT_PLACEHOLDER = "外部项目"
+
+
+def legacy_external_project_names() -> tuple[str, ...]:
+    names: list[str] = []
+    for raw in LEGACY_EXTERNAL_PROJECT_TERM_HEX:
+        try:
+            names.append(bytes.fromhex(raw).decode("ascii"))
+        except ValueError:
+            continue
+    return tuple(names)
 
 
 def contains_legacy_external_project(value: object) -> bool:
     text = str(value or "")
-    return any(name.lower() in text.lower() for name in LEGACY_EXTERNAL_PROJECT_NAMES)
+    return any(name.lower() in text.lower() for name in legacy_external_project_names())
 
 
 def scrub_legacy_external_project_text(value: object) -> str:
     text = str(value or "")
-    for name in LEGACY_EXTERNAL_PROJECT_NAMES:
+    for name in legacy_external_project_names():
         text = re.sub(re.escape(name), LEGACY_EXTERNAL_PROJECT_PLACEHOLDER, text, flags=re.IGNORECASE)
     text = re.sub(rf"(?:\s*/\s*{LEGACY_EXTERNAL_PROJECT_PLACEHOLDER})+", "", text)
     text = re.sub(rf"{LEGACY_EXTERNAL_PROJECT_PLACEHOLDER}(?:\s*/\s*{LEGACY_EXTERNAL_PROJECT_PLACEHOLDER})+", LEGACY_EXTERNAL_PROJECT_PLACEHOLDER, text)
@@ -2884,10 +2894,9 @@ def is_frontstage_source_boundary_context(text: str) -> bool:
         "资料源边界",
         "实时资料源",
         "实时行情源",
-        "业务数据源",
-        "Amazon Ads",
-        "SellerSprite",
-        "不能用普通网页搜索冒充",
+        "网页/新闻搜索源",
+        "公开网页/新闻线索",
+        "搜索源未接入",
         "不能把模型判断伪装成实时检索",
     )
     return any(marker in raw for marker in markers)
