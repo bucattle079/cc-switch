@@ -729,6 +729,18 @@ class VelaIntentRouterTests(unittest.TestCase):
                 self.assertTrue(router.is_current_time_query(text))
                 self.assertTrue(product.is_current_information_request(text, "daily_info"))
 
+    def test_deepseek_api_self_search_question_routes_to_retrieval_boundary(self):
+        router = load_module(ROUTER, "vela_router")
+
+        intent = router.classify_intent("为什么接了 DeepSeek API 还不能自己搜？")
+        reply = router.reply_for("为什么接了 DeepSeek API 还不能自己搜？")
+
+        self.assertEqual(intent.name, "daily_info")
+        self.assertIn("retrieval_boundary", intent.focus_tags)
+        self.assertIn("模型推理", reply)
+        self.assertIn("DeepSeek", reply)
+        self.assertNotIn("先把真实问题拎出来", reply)
+
     def test_project_opt_out_chat_reply_stays_in_companion_lane(self):
         router = load_module(ROUTER, "vela_router")
 
@@ -897,7 +909,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         payload = decision.to_dict()
 
         self.assertEqual(payload["intent"], "market_brief")
-        self.assertFalse(payload["needs_retrieval"])
+        self.assertTrue(payload["needs_retrieval"])
         self.assertFalse(payload["needs_codex"])
         self.assertTrue(payload["needs_deep_reasoning"])
         self.assertTrue(payload["cache_allowed"])

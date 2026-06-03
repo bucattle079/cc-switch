@@ -171,6 +171,16 @@ class VelaFinalHumanizerTests(unittest.TestCase):
         self.assertNotIn("小白", reply)
         self.assert_no_template_tics(reply)
 
+    def test_deepseek_api_self_search_question_explains_retrieval_boundary(self):
+        reply = self.reply("为什么接了 DeepSeek API 还不能自己搜？")
+
+        self.assertFalse(reply.startswith("K"), reply)
+        self.assertIn("模型推理", reply)
+        self.assertTrue(any(token in reply for token in ["外部信息入口", "检索工具", "搜索工具", "网页抓取", "行情数据源"]), reply)
+        self.assertIn("DeepSeek", reply)
+        self.assertNotIn("先把真实问题拎出来", reply)
+        self.assert_no_template_tics(reply)
+
     def test_market_vix_question_keeps_realtime_boundary_and_mentions_vix(self):
         reply = self.reply("目前的存储和光模块在国际金融市场的讨论度很高，还能持续吗？另外现在 VIX 值是多少呢？")
 

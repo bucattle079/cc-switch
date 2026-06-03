@@ -774,7 +774,7 @@ def is_deepseek_retrieval_question(message: str) -> bool:
     return (
         "deepseek" in compact
         and ("api" in compact or "后台" in compact or "连接" in compact)
-        and any(token in compact for token in ("检索", "资料", "外部", "联网", "搜索", "网页", "接入"))
+        and any(token in compact for token in ("检索", "资料", "外部", "联网", "搜索", "网页", "接入", "自己搜", "搜"))
     )
 
 
@@ -826,11 +826,18 @@ def natural_deepseek_retrieval_reply() -> str:
     )
 
 
-def natural_vix_boundary_reply() -> str:
+def natural_vix_boundary_reply(message: str = "") -> str:
+    compact = _compact_user_text(message)
+    if "存储" in compact or "光模块" in compact:
+        return (
+            "实时源暂不可用，所以我不能给当前 VIX 数值，也不能把缓存当盘中事实。\n"
+            "方向判断：存储和光模块的讨论度仍然跟 AI 算力链、资本开支和美股风险偏好绑定；能否持续，要看英伟达/半导体链、美元美债和 VIX 是否一起支持风险资产。\n"
+            "下一步：先接外盘行情/VIX 实时源，再把实时数值交给 DeepSeek 做持续性判断。"
+        )
     return (
         "实时源暂不可用，所以我不能给当前 VIX 数值，也不能把缓存当盘中事实。\n"
-        "方向判断：存储和光模块的讨论度仍然跟 AI 算力链、资本开支和美股风险偏好绑定；能否持续，要看英伟达/半导体链、美元美债和 VIX 是否一起支持风险资产。\n"
-        "下一步：先接外盘行情/VIX 实时源，再把实时数值交给 DeepSeek 做持续性判断。"
+        "判断：VIX 是风险偏好的温度计；没有实时值，最多看方向，不能报数字。\n"
+        "下一步：接入外盘行情/VIX 数据源后，再让 DeepSeek 做风险判断。"
     )
 
 
@@ -920,7 +927,7 @@ def final_reply_humanizer(
     if is_deepseek_retrieval_question(message):
         return natural_deepseek_retrieval_reply()
     if is_vix_realtime_question(message):
-        return natural_vix_boundary_reply()
+        return natural_vix_boundary_reply(message)
     if is_realtime_source_duration_question(message):
         return natural_realtime_duration_reply()
     if is_filter_wording_repair(message):
@@ -2869,6 +2876,23 @@ def current_info_fallback_text(context: ReplyContext, adapter_name: str) -> str:
     )
 
 
+def is_frontstage_source_boundary_context(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    markers = (
+        "资料源边界",
+        "实时资料源",
+        "实时行情源",
+        "业务数据源",
+        "Amazon Ads",
+        "SellerSprite",
+        "不能用普通网页搜索冒充",
+        "不能把模型判断伪装成实时检索",
+    )
+    return any(marker in raw for marker in markers)
+
+
 def compact_current_info_evidence_context(supporting_context: str, adapter_name: str) -> str:
     raw = str(supporting_context or "").strip()
     if "实时资讯源：已接入" not in raw:
@@ -2923,6 +2947,10 @@ def engine_text_for_intent(
     current_info = is_current_information_request(context.message, context.intent)
     if context.intent in {"freshness_status", "market_refresh"} and context.supporting_context.strip():
         return context.supporting_context.strip(), "local_status", False
+    if context.intent in {"daily_info", "market_brief", "world_brief"} and is_frontstage_source_boundary_context(
+        context.supporting_context
+    ):
+        return context.supporting_context.strip(), "local_realtime_boundary", False
     if context.intent == "weather_query" and context.supporting_context.strip():
         result = adapter.generate(context)
         if result.used_api and not factual_context_reply_has_frontstage_hazards(result.text):

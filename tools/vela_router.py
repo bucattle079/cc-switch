@@ -29,6 +29,7 @@ from vela_realtime_info import (
     render_time_query_reply,
     render_weather_query_reply,
 )
+from vela_realtime_intelligence import build_realtime_evidence, plan_sources
 from vela_product_layers import (
     RouteDecision,
     contains_legacy_external_project,
@@ -516,6 +517,34 @@ def is_daily_briefing_request(text: str) -> bool:
     return command_key(first_command_token(text)) in DAILY_BRIEFING_COMMANDS
 
 
+def is_external_ads_analysis_request(text: str) -> bool:
+    norm = normalize(text)
+    return "augsun" in norm and contains_any(
+        norm,
+        [
+            "广告",
+            "amazon ads",
+            "amazonads",
+            "acos",
+            "广告分析",
+            "广告投放",
+            "seller sprite",
+            "sellersprite",
+            "seller_sprite",
+            "投放",
+            "广告账户",
+        ],
+    )
+
+
+def is_sector_discussion_source_request(text: str) -> bool:
+    norm = normalize(text)
+    return contains_any(norm, ["讨论度", "市场讨论度", "存储", "光模块"]) and contains_any(
+        norm,
+        ["今天", "现在", "当前", "最新", "查", "检索", "搜"],
+    )
+
+
 def persona_tool_args(text: str) -> list[str]:
     parts = str(text or "").strip().split()
     if not parts:
@@ -562,6 +591,12 @@ def classify_intent(text: str) -> Intent:
         return Intent("normal_chat", 0.86, ["conversation_boundary"])
     if is_context_leakage_feedback(norm):
         return Intent("style_feedback", 0.92, ["memory", "style_feedback", "relationship_repair"])
+    if is_external_ads_analysis_request(norm):
+        return Intent(
+            "daily_info",
+            0.86,
+            ["daily_info", "business_data", "amazon_ads", "seller_sprite_mcp", "local_files", "local_memory"],
+        )
     if contains_legacy_external_project(norm):
         return Intent("style_feedback", 0.91, ["memory", "style_feedback", "context_quarantine"])
     if contains_any(norm, CODEX_KEYWORDS):
@@ -768,9 +803,12 @@ def market_focus_tags(text: str) -> list[str]:
 def route_decision(text: str) -> RouteDecision:
     intent = classify_intent(text)
     markets = priority_markets(intent.focus_tags)
+    source_plan = plan_sources(text, intent.name)
     return RouteDecision(
         intent=intent.name,
-        needs_retrieval=intent.name in {"market_refresh", "weather_query"} or (
+        needs_retrieval=source_plan.source_need
+        or intent.name in {"market_refresh", "weather_query"}
+        or (
             "current_info" in intent.focus_tags and intent.name in {"daily_info", "world_brief"}
         ),
         needs_codex=intent.codex_allowed,
@@ -1034,6 +1072,15 @@ def reply_for(text: str) -> str:
             supporting_context=supporting_context,
             reply_adapter=FallbackReplyAdapter(),
         ).text
+    elif intent.name == "market_brief" and is_sector_discussion_source_request(text):
+        evidence = build_realtime_evidence(text, intent.name)
+        supporting_context = guard_wechat_output(evidence.frontstage_boundary)
+        reply = run_layered_response(
+            text,
+            intent=intent.name,
+            supporting_context=supporting_context,
+            reply_adapter=FallbackReplyAdapter(),
+        ).text
     elif intent.name == "market_brief":
         supporting_context = render_cached_market_reply(text)
         reply_adapter = None if is_current_information_request(text, intent.name) else FallbackReplyAdapter()
@@ -1056,6 +1103,15 @@ def reply_for(text: str) -> str:
             text,
             intent=intent.name,
             supporting_context=supporting_context,
+        ).text
+    elif intent.name == "daily_info" and is_external_ads_analysis_request(text):
+        evidence = build_realtime_evidence(text, intent.name)
+        supporting_context = guard_wechat_output(evidence.frontstage_boundary)
+        reply = run_layered_response(
+            text,
+            intent=intent.name,
+            supporting_context=supporting_context,
+            reply_adapter=FallbackReplyAdapter(),
         ).text
     elif intent.name in {"daily_info", "world_brief"} and is_current_information_request(text, intent.name):
         supporting_context = guard_wechat_output(render_current_info_query_reply(text))

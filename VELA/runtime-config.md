@@ -89,6 +89,28 @@ Market, weather, and realtime-info lanes must distinguish:
 
 The raw field names stay inside local state and tests. WeChat output uses plain Chinese status labels, such as whether realtime source is connected, whether cache is available, whether the answer is only a model risk suggestion, and what the user can do next.
 
+## Real-Time Intelligence Layer
+
+Realtime-capable questions now pass through a local evidence layer before model/persona wording:
+
+`User Message -> Intent Router -> Source Planner -> Connector Fetch -> Evidence Packet Builder -> Context Builder -> DeepSeek / Model Reasoning -> VELA Persona Renderer -> Final Reply Humanizer -> WeChat Output -> Local Learning Candidate`
+
+The MVP implementation lives in `tools/vela_realtime_intelligence.py` and keeps four responsibilities separate:
+
+- `SourcePlan`: decides whether the request needs outside material and which source families apply: `web_search`, `news`, `market_data`, `weather`, `local_memory`, `local_files`, `amazon_ads`, `seller_sprite_mcp`, or `gmail_import`.
+- `RetrievalConnector`: a replaceable connector interface with `can_handle`, `fetch`, `normalize`, and `build_evidence_packet`. Current connectors are local/cache/MVP placeholders unless a real source is already configured.
+- `EvidencePacket`: stores normalized source evidence for the model, including freshness status, key values, confidence, origin, and known limits.
+- `Realtime Boundary Formatter`: translates source state into user-facing Chinese without leaking raw field names.
+
+DeepSeek remains the reasoning/dialogue adapter. It is not treated as a search engine. If a source is missing, VELA must say the source is missing, use cache only when explicitly safe, and never invent current market numbers, weather values, account metrics, or web search results.
+
+Source-specific boundaries:
+
+- VIX/current market/add-position questions check `market_data` before judgment. Without a real realtime market connector, VELA gives no current number and no fake live trade signal.
+- Sector discussion questions such as storage or optical modules plan `market_data + news + web_search`. If those sources are incomplete, VELA says the evidence gap instead of reusing broad A-share cache as sector heat.
+- External ad/account analysis plans `amazon_ads + seller_sprite_mcp + local_files + local_memory` and never substitutes generic web material for account data.
+- Weather questions remain in the weather lane and use the existing forecast connector path, with conservative travel-risk fallback if the source fails.
+
 ## Local Acceptance Smoke
 
 Run `python -X utf8 tools/vela_acceptance_smoke.py` for a local, side-effect-safe smoke check of foreground behavior. It uses temporary learning-loop storage by default, verifies route boundaries, two-turn feedback adaptation, weather/market freshness wording, Codex route gating without executing the bridge, response-speed budgets, and foreground leakage checks. Use `--json --log-dir <dir>` when a machine-readable report or retained smoke logs are needed. Use `--entrypoint --fake-deepseek-env` to exercise `router.reply_for()` with safe stubs and verify hard status lanes stay local even when the DeepSeek environment is present. Fast-lane smoke cases must stay within 2000 ms; cached market/news cases must stay within 8000 ms. Deep-lane DeepSeek failures are rendered as a foreground status plus a usable fallback judgment, not as silent waiting or fake complete analysis.

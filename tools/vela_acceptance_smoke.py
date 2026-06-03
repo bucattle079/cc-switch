@@ -283,6 +283,14 @@ SINGLE_TURN_CASES = [
         "max_reply_chars": 260,
     },
     {
+        "id": "daily_info_deepseek_api_self_search_boundary",
+        "message": "为什么接了 DeepSeek API 还不能自己搜？",
+        "expected_intent": "daily_info",
+        "required_reply_tokens": ["模型推理", "外部信息入口", "检索工具", "DeepSeek"],
+        "forbidden_reply_tokens": ["先把真实问题拎出来", "DEEPSEEK_API_KEY", "状态边界", "schema", "raw payload"],
+        "max_reply_chars": 300,
+    },
+    {
         "id": "world_info_now_event_not_market",
         "message": "现在日本地震新闻",
         "expected_intent": "world_brief",
@@ -337,6 +345,22 @@ SINGLE_TURN_CASES = [
         "required_reply_tokens": ["实时源", "判断：", "仓位"],
         "forbidden_reply_tokens": ["以下基于最近缓存", "VELA 市场简报", "状态边界：", "关键风险\n1."],
         "max_reply_chars": 620,
+    },
+    {
+        "id": "market_vix_current_no_fake_number",
+        "message": "现在 VIX 是多少？",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["VIX", "实时源", "不能给"],
+        "forbidden_reply_tokens": ["存储", "光模块", "source_type", "evidence_id", "raw payload", "schema", "状态边界"],
+        "max_reply_chars": 280,
+    },
+    {
+        "id": "market_storage_light_discussion_source_boundary",
+        "message": "帮我查一下今天存储和光模块的市场讨论度。",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["存储", "光模块", "资料源", "证据缺口"],
+        "forbidden_reply_tokens": ["A股仍按震荡修复处理", "source_type", "evidence_id", "raw payload", "schema", "状态边界"],
+        "max_reply_chars": 260,
     },
     {
         "id": "market_current_a_share_realtime_compact",
@@ -446,6 +470,14 @@ SINGLE_TURN_CASES = [
         "expected_intent": "codex_task",
         "codex_summary": "Codex smoke: current progress summary without logs or paths.",
         "side_effects_allowed": False,
+    },
+    {
+        "id": "daily_info_external_ads_business_sources",
+        "message": "继续 AugSun 广告分析。",
+        "expected_intent": "daily_info",
+        "required_reply_tokens": ["Amazon Ads", "SellerSprite", "本地文件", "业务数据源"],
+        "forbidden_reply_tokens": ["普通网页搜索", "项目线", "context_quarantine", "source_type", "evidence_id", "raw payload", "schema"],
+        "max_reply_chars": 260,
     },
     {
         "id": "project_vela_continue",
@@ -678,11 +710,17 @@ def supporting_context_for(intent: str, message: str) -> str:
     if intent == "weather_query":
         return router.render_weather_reply(message)
     if intent == "market_brief":
+        if router.is_sector_discussion_source_request(message):
+            evidence = router.build_realtime_evidence(message, intent)
+            return router.guard_wechat_output(evidence.frontstage_boundary)
         return router.render_cached_market_reply(message)
     if intent == "freshness_status":
         return router.render_freshness_reply(message)
     if intent == "daily_info" and router.is_current_time_query(message):
         return router.guard_wechat_output(router.render_time_query_reply(message))
+    if intent == "daily_info" and router.is_external_ads_analysis_request(message):
+        evidence = router.build_realtime_evidence(message, intent)
+        return router.guard_wechat_output(evidence.frontstage_boundary)
     return ""
 
 
