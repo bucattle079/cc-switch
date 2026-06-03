@@ -51,7 +51,9 @@ class VelaPartnerUpgradeTests(unittest.TestCase):
         self.assertLess(elapsed, 2.0)
         self.assertIn("不是实时直播", reply)
         self.assertIn("更新时间", reply)
-        self.assertIn("数据来源", reply)
+        self.assertIn("实时源", reply)
+        self.assertIn("缓存", reply)
+        self.assertNotIn("数据来源：", reply)
         for leaked in [
             "data_status",
             "last_updated:",

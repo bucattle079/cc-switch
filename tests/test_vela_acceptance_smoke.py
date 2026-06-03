@@ -172,7 +172,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
                     if case["id"].startswith("market_"):
                         self.assertIn("实时源", case["reply_preview"])
                     else:
-                        self.assertIn("实时源：未接入", case["reply_preview"])
+                        self.assertIn("实时源未接入", case["reply_preview"])
                     self.assertFalse(case["leaks"], case)
             if case["id"] in weather_fact_ids:
                 with self.subTest(case["id"]):
@@ -193,7 +193,7 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
                     adapter_flag = case["latest_quality_log"]["quality_flags"][1]
                     self.assertIn(adapter_flag, {"adapter:deepseek_chat", "adapter:fallback_current_info_fallback"})
                     self.assertNotIn(adapter_flag, {"adapter:local_market", "adapter:local_status"})
-                    self.assertIn("DeepSeek API", case["reply_preview"])
+                    self.assertIn("DeepSeek", case["reply_preview"])
                     self.assertNotIn("状态边界", case["reply_preview"])
                     self.assertFalse(case["leaks"], case)
             if case["id"] in time_fact_ids:
@@ -984,9 +984,11 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
                 ),
                 encoding="utf-8",
             )
-            service_started = datetime(2026, 6, 2, 3, 45, 0, tzinfo=timezone.utc)
-            claim_time = datetime(2026, 6, 2, 3, 51, 37, 904581, tzinfo=timezone.utc)
-            reply_time = datetime(2026, 6, 2, 3, 51, 38, 80840, tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            service_started = now - timedelta(minutes=8)
+            claim_time = service_started + timedelta(minutes=6)
+            reply_time = claim_time + timedelta(seconds=1)
+            date_tag = claim_time.strftime("%Y-%m-%d")
             state_time = claim_time.timestamp()
             (state_dir / "context_tokens.json").write_text('{"moved":true}', encoding="utf-8")
             (state_dir / "get_updates.buf").write_text("poll", encoding="utf-8")
@@ -1009,8 +1011,8 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
                 encoding="utf-8",
             )
             rows_by_file = {
-                "session-notes-2026-06-02.jsonl": [{"level": "Session Notes", "summary": "你好 VELA"}],
-                "interaction-2026-06-02.jsonl": [
+                f"session-notes-{date_tag}.jsonl": [{"level": "Session Notes", "summary": "你好 VELA"}],
+                f"interaction-{date_tag}.jsonl": [
                     {
                         "created_at": reply_time.isoformat(),
                         "level": "Interaction Log",
@@ -1019,11 +1021,11 @@ state_dir = "{str(state_dir).replace("\\", "/")}"
                         "response_preview": "K，我在。先听你这句。",
                     }
                 ],
-                "human-iteration-2026-06-02.jsonl": [{"response_quality_signals": ["foreground_reply_clean"]}],
-                "memory-candidates-2026-06-02.jsonl": [
+                f"human-iteration-{date_tag}.jsonl": [{"response_quality_signals": ["foreground_reply_clean"]}],
+                f"memory-candidates-{date_tag}.jsonl": [
                     {"level": "Preference Candidate", "classification": "style_feedback", "summary": "less robotic"}
                 ],
-                "strategic-memory-2026-06-02.jsonl": [
+                f"strategic-memory-{date_tag}.jsonl": [
                     {"level": "Strategic Memory", "memory_type": "project_goal", "summary": "confirmed VELA direction"}
                 ],
             }

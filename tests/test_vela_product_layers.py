@@ -426,8 +426,9 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertFalse(called["value"])
         self.assertEqual(result.reply_adapter, "local_market")
         self.assertFalse(result.real_gpt_enabled)
-        self.assertEqual(result.text, supporting_context)
-        self.assertIn("实时源：已接入", result.text)
+        self.assertIn("实时源已接入", result.text)
+        self.assertIn("新浪财经行情快照", result.text)
+        self.assertIn("A股快照：", result.text)
         self.assertIn("判断：", result.text)
         self.assertIn("下一步：", result.text)
         self.assertNotIn("以下基于最近缓存", result.text)
@@ -564,7 +565,10 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertTrue(called["value"])
         self.assertEqual(result.reply_adapter, "deepseek_chat_current_info_fallback")
         self.assertTrue(result.real_gpt_enabled)
-        self.assertEqual(result.text, supporting_context)
+        self.assertIn("实时源暂不可用", result.text)
+        self.assertIn("方向判断", result.text)
+        self.assertIn("最近缓存：2026-06-02 09:00 北京时间", result.text)
+        self.assertIn("判断：实时源没回来前", result.text)
         self.assertNotIn("以下基于最近缓存", result.text)
         self.assertNotIn("状态边界", result.text)
 
@@ -702,8 +706,9 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertEqual(result.reply_adapter, "fallback_current_info_fallback")
         self.assertFalse(result.real_gpt_enabled)
         self.assertTrue(result.used_retrieval)
-        self.assertIn("DeepSeek API 未接上", result.text)
-        self.assertIn("本地源/缓存降级", result.text)
+        self.assertIn("实时源暂不可用", result.text)
+        self.assertNotIn("DeepSeek API 未接上", result.text)
+        self.assertNotIn("本地源/缓存降级", result.text)
         self.assertIn("判断：", result.text)
         self.assertIn("下一步：", result.text)
 
@@ -1416,7 +1421,6 @@ class VelaProductLayerTests(unittest.TestCase):
 
             row = json.loads(next(Path(tmp).glob("memory-candidates-*.jsonl")).read_text(encoding="utf-8").strip())
 
-        self.assertIn("K", result.text)
         self.assertIn("偏", result.text)
         self.assertTrue(any(token in result.text for token in ["重切", "补一句", "漏掉"]))
         self.assertNotIn("抱歉", result.text)
@@ -1436,7 +1440,6 @@ class VelaProductLayerTests(unittest.TestCase):
             )
             row = json.loads(next(log_dir.glob("memory-candidates-*.jsonl")).read_text(encoding="utf-8").strip())
 
-        self.assertIn("K", result.text)
         self.assertTrue(any(token in result.text for token in ["说人话", "先听懂", "真实意思", "结论", "重切"]))
         for internal in ["风格反馈候选", "候选记录", "长期记忆", "写死", "已收进", "已校准"]:
             self.assertNotIn(internal, result.text)

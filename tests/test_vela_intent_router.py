@@ -918,8 +918,8 @@ class VelaIntentRouterTests(unittest.TestCase):
 
         self.assertLess(elapsed, 2.0)
         self.assertIn("更新时间", reply)
-        self.assertIn("数据来源", reply)
-        self.assertIn("实时源：未接入", reply)
+        self.assertIn("实时源未接入", reply)
+        self.assertNotIn("数据来源：", reply)
         self.assertNotIn("data_status", reply)
         self.assertNotIn("source_type", reply)
         self.assertNotIn("real_time_source_available", reply)
@@ -944,7 +944,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertLess(elapsed, 2.0)
         self.assertIn("不拿缓存冒充实时", reply)
         self.assertIn("前台先返回状态", reply)
-        self.assertIn("实时源：未接入", reply)
+        self.assertIn("实时源未接入", reply)
         self.assertIn("--lock-file", popen_args)
         self.assertNotIn("以下基于最近缓存", reply)
         self.assertNotIn("VELA 市场简报", reply)
@@ -1173,7 +1173,7 @@ class VelaIntentRouterTests(unittest.TestCase):
         reply = router.reply_for("如果不是实时的重要资讯梳理给我")
 
         self.assertIn("不是实时直播", reply)
-        self.assertIn("实时源：未接入", reply)
+        self.assertIn("实时源未接入", reply)
         self.assertIn("最近缓存", reply)
         self.assertNotIn("data_status", reply)
         self.assertIn("60秒判断", reply)

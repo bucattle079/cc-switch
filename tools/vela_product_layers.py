@@ -598,6 +598,234 @@ def ensure_k_address(text: str) -> str:
     return "K，" + stripped
 
 
+ANTI_TEMPLATE_PHRASES = (
+    "直接说",
+    "不用铺垫",
+    "不绕弯",
+    "废话我会过滤",
+    "刻板也是一种风格",
+    "我会自己过滤",
+    "当前状态如下",
+    "模型生成：不可用",
+    "缓存状态：可用",
+    "real_time_source_available",
+    "model_generated_only",
+    "cached_summary_available",
+)
+
+ANSWER_FIRST_MARKERS = (
+    "多久",
+    "多少",
+    "能不能",
+    "是不是",
+    "为什么",
+    "怎么做",
+    "下一步",
+    "该不该",
+    "是否可以",
+    "有没有必要",
+)
+
+STYLE_CRITICISM_MARKERS = (
+    "没懂我",
+    "没理解",
+    "还是很刻板",
+    "一样刻板",
+    "又模板",
+    "模板化",
+    "不是这个意思",
+    "你回答还是一样",
+    "回答还是一样",
+    "没有先回答",
+)
+
+
+def _compact_user_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "").lower())
+
+
+def _strip_k_prefix(text: str) -> str:
+    return re.sub(r"^\s*K\s*[,，:：]\s*", "", str(text or "")).strip()
+
+
+def _remove_template_tics(text: str) -> str:
+    cleaned = str(text or "")
+    replacements = {
+        "废话我会过滤": "我会把问题收清楚",
+        "我会自己过滤": "我会把问题收清楚",
+        "不用铺垫": "不用写很长",
+        "不绕弯": "先说核心",
+        "当前状态如下": "",
+        "模型生成：不可用": "",
+        "缓存状态：可用": "",
+        "real_time_source_available": "",
+        "model_generated_only": "",
+        "cached_summary_available": "",
+    }
+    for source, target in replacements.items():
+        cleaned = cleaned.replace(source, target)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return cleaned.strip()
+
+
+def is_communication_help_request(message: str) -> bool:
+    compact = _compact_user_text(message)
+    return "沟通" in compact and any(token in compact for token in ("如何", "怎么", "了解", "与你", "和你"))
+
+
+def is_direction_correction_to_communication(message: str) -> bool:
+    compact = _compact_user_text(message)
+    return "沟通" in compact and any(token in compact for token in ("现在是需要", "需要的是", "不是", "了解如何"))
+
+
+def is_filter_wording_repair(message: str) -> bool:
+    compact = _compact_user_text(message)
+    return "过滤啥" in compact or "过滤什么" in compact or compact == "过滤？" or compact == "过滤?"
+
+
+def is_realtime_source_duration_question(message: str) -> bool:
+    compact = _compact_user_text(message)
+    return (
+        "多久" in compact
+        and "实时" in compact
+        and any(token in compact for token in ("源", "接通", "行情", "资讯", "数据"))
+    )
+
+
+def is_style_criticism_message(message: str) -> bool:
+    compact = _compact_user_text(message)
+    return any(token in compact for token in STYLE_CRITICISM_MARKERS) or (
+        "刻板" in compact and any(token in compact for token in ("回答", "还是", "一样", "你的"))
+    )
+
+
+def is_plain_vela_ping(message: str) -> bool:
+    return _compact_user_text(message).strip("，。！？!?") == "vela"
+
+
+def natural_realtime_duration_reply() -> str:
+    return (
+        "最小可用版大概几个小时；稳定可用版半天到一天。\n"
+        "如果还要做多数据源、缓存、错误提示和前台展示，可能需要 1-2 天。\n"
+        "现在的问题不是模型能力，而是缺少可靠实时行情源。"
+    )
+
+
+def natural_communication_reply(*, corrected: bool = False) -> str:
+    prefix = "对，你问的是怎么和我沟通，不是让我推进别的事。\n" if corrected else ""
+    return (
+        prefix
+        + "和我沟通时，先给三件事就够：你要的结论、关键背景、不能踩的限制。\n"
+        "如果你不确定怎么说，就直接丢原话；我先帮你分清目标、事实和判断，不把你拖进表格。"
+    )
+
+
+def natural_filter_repair_reply() -> str:
+    return (
+        "我说错了，不是过滤你。\n"
+        "该过滤的是我的废话、误判和状态腔。你正常说，我负责把真正问题拎出来。"
+    )
+
+
+MECHANICAL_META_MARKERS = (
+    "本地时区直接计算",
+    "本地计算",
+    "闲聊模板",
+    "冒充答案",
+    "不是模板",
+    "不拿模板",
+)
+
+
+def strip_mechanical_meta_lines(text: str) -> str:
+    kept: list[str] = []
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if any(marker in stripped for marker in MECHANICAL_META_MARKERS):
+            continue
+        kept.append(stripped)
+    return "\n".join(kept).strip()
+
+
+def natural_style_criticism_reply(message: str, current_text: str) -> str:
+    compact = _compact_user_text(message)
+    if any(marker in str(message or "") for marker in RELATIONSHIP_REPAIR_MARKERS) or "没懂" in compact:
+        return (
+            "偏了，我刚才没抓住真实意思。\n"
+            "重切：你先给我一句最核心的目标，我从那里接，不再把话绕回模板。"
+        )
+    if "实时" in compact or "状态" in str(current_text):
+        return (
+            "你说得对，刚才我把状态当答案端出来了。\n"
+            "重切：先给结论，再补一句限制；细节不往前台倒。"
+        )
+    return (
+        "你说得对，刚才像提示牌。\n"
+        "重切：先回答核心，再听懂真实意思、给结论；要说人话，不把你拖进身份解释。"
+    )
+
+
+def humanize_realtime_boundary(text: str, *, intent: str) -> str:
+    if intent not in {"market_brief", "freshness_status", "market_refresh", "world_brief", "daily_info"}:
+        return text
+    raw = str(text or "")
+    raw = raw.replace("实时信息链：DeepSeek API 未接上；以下只按本地源/缓存降级。\n", "")
+    raw = raw.replace("实时信息链：DeepSeek API 未接上；以下只按本地源/缓存降级。", "")
+    raw = raw.replace("实时源：暂不可用；缓存降级。", "实时源暂不可用；我只能参考本地缓存做方向判断。")
+    raw = raw.replace("实时源：暂不可用", "实时源暂不可用")
+    raw = raw.replace("实时源：已接入", "实时源已接入")
+    raw = raw.replace("实时源：未接入", "实时源未接入")
+    raw = raw.replace("缓存摘要：可用", "有本地缓存可参考")
+    raw = raw.replace("模型仅生成：否", "不是纯模型猜测")
+    raw = raw.replace("模型仅生成：不可用", "")
+    raw = raw.replace("可用性：缓存可用", "缓存可用")
+    kept: list[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("数据来源："):
+            continue
+        if stripped.startswith("状态边界："):
+            stripped = stripped.replace("状态边界：", "边界：", 1)
+        if "模型仅生成" in stripped or "缓存摘要" in stripped or "可用性：" in stripped:
+            continue
+        kept.append(stripped)
+    return "\n".join(kept).strip()
+
+
+def final_reply_humanizer(
+    text: str,
+    *,
+    message: str,
+    intent: str,
+    used_retrieval: bool = False,
+    used_cache: bool = False,
+) -> str:
+    """Last foreground pass: answer first, reduce template tics, and translate system status."""
+    raw = _remove_template_tics(text)
+    raw = strip_mechanical_meta_lines(raw)
+    if is_realtime_source_duration_question(message):
+        return natural_realtime_duration_reply()
+    if is_filter_wording_repair(message):
+        return natural_filter_repair_reply()
+    if is_direction_correction_to_communication(message):
+        return natural_communication_reply(corrected=True)
+    if is_communication_help_request(message):
+        return natural_communication_reply()
+    if is_style_criticism_message(message):
+        return natural_style_criticism_reply(message, raw)
+    raw = humanize_realtime_boundary(raw, intent=intent)
+    if is_plain_vela_ping(message):
+        raw = _strip_k_prefix(raw)
+        if not raw:
+            raw = "我在。你说。"
+    return raw.strip()
+
+
 def guard_layered_output(
     text: str,
     *,
@@ -1728,6 +1956,8 @@ def build_memory_candidate(message: str) -> dict:
         "太慢",
         "太长",
         "工程化",
+        "太刻板",
+        "刻板",
         "太机械",
         "机械",
         "机械道歉",
@@ -1749,6 +1979,11 @@ def build_memory_candidate(message: str) -> dict:
         "智能的伙伴",
         "理解一下我的意思",
         "我需要你更智能",
+        "回答还是一样",
+        "你回答还是一样",
+        "没有先回答",
+        "没先回答",
+        "模板化",
         "不要拖",
         "继续推进",
         "语气",
@@ -1794,7 +2029,10 @@ def build_memory_candidate(message: str) -> dict:
     elif classification == "behavior_preference":
         summary = "行为偏好候选：更快理解真实意思，减少拖延和自证，下一轮直接给判断和推进路径。"
     elif classification == "style_feedback":
-        summary = "表达反馈候选：减少模板、冷感、冗长、机器人感和反复自证；下一轮更直接地听懂需求并自然回应。"
+        summary = (
+            "表达反馈候选：用户反馈机器人/刻板感；减少 K 和固定口头禅，少说直接说/不绕弯；"
+            "先回答核心问题，把工程状态翻成人话，下一轮更自然、更短、更有判断。"
+        )
     strategic_memory_type = ""
     if classification == "strategic_goal":
         if any(key in text for key in ["项目", "商业闭环"]):
@@ -2721,6 +2959,15 @@ def run_layered_response(
         used_codex=used_codex,
         used_retrieval=used_retrieval,
     )
+    guarded = guard_wechat_output(
+        final_reply_humanizer(
+            guarded,
+            message=message,
+            intent=intent,
+            used_retrieval=used_retrieval,
+            used_cache=used_cache,
+        )
+    )
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     quality_flags = [
         "reply_engine",
@@ -2731,6 +2978,7 @@ def run_layered_response(
         "humanization_layer",
         "persona_rendered",
         "guarded_output",
+        "final_reply_humanized",
     ]
     if learning.should_record_candidate:
         quality_flags.append(f"learning_eval:{learning.classification or 'candidate'}")

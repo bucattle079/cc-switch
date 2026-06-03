@@ -171,7 +171,7 @@ class VelaSkillTextTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("K", completed.stdout)
+        self.assertRegex(completed.stdout, r"(我在|我听着|你说|醒着)")
         self.assertNotIn("不是报到，是连接", completed.stdout)
         self.assertNotIn("你好", completed.stdout)
         self.assertNotIn("有什么可以帮", completed.stdout)

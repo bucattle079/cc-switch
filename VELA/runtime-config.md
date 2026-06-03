@@ -57,6 +57,16 @@ Every WeChat-facing reply should carry internal context that is not exposed to t
 These fields are prompt and learning inputs only. They must not appear in WeChat output as raw keys, schema names, paths, logs, or debug text.
 Mechanism distillation is abstract behavior only: VELA keeps her own identity, stores no source lines, and never roleplays a source character.
 
+## Final Reply Humanizer
+
+The final foreground pass runs after persona rendering and guardrails. It is not a template generator; it is the last quality gate for WeChat-facing language.
+
+- Answer-first questions, especially `现在...`, `多久`, `能不能`, `为什么`, `过滤啥`, and direct correction prompts, must put the useful answer before status or explanation.
+- Time and factual lanes must remove self-proving meta lines such as local-computation explanations, "not a chat template" claims, or tool-chain bragging. If the fact is available, keep the fact and a human next-sentence; drop the defensive label.
+- Realtime/cache boundaries must be translated into plain Chinese: `实时源暂不可用`, `实时源未接入`, `有本地缓存可参考`, and the practical next step. Raw `数据来源：`, `状态边界：`, `缓存摘要`, `模型仅生成`, API status, schema keys, and internal paths stay out of WeChat.
+- Style feedback such as "太像机器人", "太刻板", "没懂我", or "不是这个意思" is a next-turn behavior signal. The next reply should reduce fixed openings, answer the core first, and repair the misunderstanding by performance, not by saying it has calibrated itself.
+- A bare `VELA` ping may strip the fixed `K，` opening when the sentence is already clear. Other short replies may still use it, but tests should not require it as identity proof.
+
 ## Memory Safety
 
 Learning-loop candidates are soft context, not permanent truth. Sensitive memory instructions are not persisted as candidates; VELA should state the boundary in plain Chinese and wait for explicit confirmation before any sensitive storage path is considered. Non-sensitive preference candidates can shape the next reply, but they must remain marked as unconfirmed until the user confirms them. When the user explicitly confirms the latest non-sensitive preference candidate, VELA promotes it to `confirmed-preferences-*.jsonl` and stops injecting the duplicate unconfirmed candidate into reply context.
