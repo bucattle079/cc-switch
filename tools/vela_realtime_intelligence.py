@@ -6,7 +6,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 from typing import Any
+from urllib.parse import urlencode
 import urllib.request
 
 
@@ -27,6 +29,18 @@ DEFAULT_SOURCE_TYPES = (
     "local_files",
     "user_uploaded_context",
     "generic_tool_connector",
+)
+
+WEATHERAPI_FORECAST_URL = "https://api.weatherapi.com/v1/forecast.json"
+WEATHER_EVIDENCE_KEYS = (
+    "location",
+    "temperature",
+    "condition",
+    "precipitation_probability",
+    "wind",
+    "humidity",
+    "forecast_window",
+    "provider_updated_at",
 )
 
 
@@ -59,7 +73,12 @@ class EvidencePacket:
     known_limits: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if self.source_type == "weather":
+            for key in WEATHER_EVIDENCE_KEYS:
+                if key in self.key_values:
+                    payload[key] = self.key_values[key]
+        return payload
 
 
 @dataclass(frozen=True)
@@ -170,20 +189,346 @@ class MarketDataConnector(RetrievalConnector):
         )
 
 
+@dataclass(frozen=True)
+class WeatherLocationTarget:
+    label: str
+    query: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"label": self.label, "query": self.query}
+
+
+WEATHER_LOCATION_ALIASES: tuple[tuple[str, str, str], ...] = (
+    ("晋江", "晋江", "24.7814,118.5511"),
+    ("泉州", "泉州", "24.8741,118.6757"),
+    ("纽约", "纽约", "40.7128,-74.0060"),
+    ("new york", "纽约", "40.7128,-74.0060"),
+    ("北京", "北京", "39.9042,116.4074"),
+    ("上海", "上海", "31.2304,121.4737"),
+    ("东京", "东京", "35.6764,139.6500"),
+    ("首尔", "首尔", "37.5665,126.9780"),
+    ("伦敦", "伦敦", "51.5072,-0.1276"),
+    ("洛杉矶", "洛杉矶", "34.0522,-118.2437"),
+    ("los angeles", "洛杉矶", "34.0522,-118.2437"),
+)
+
+WEATHER_LOCATION_STOP_PHRASES = (
+    "天气怎么样",
+    "天气如何",
+    "会不会下雨",
+    "会不会下雪",
+    "会下雨吗",
+    "会下雪吗",
+    "今天",
+    "明天",
+    "后天",
+    "现在",
+    "当前",
+    "目前",
+    "此刻",
+    "今晚",
+    "早上",
+    "上午",
+    "中午",
+    "下午",
+    "晚上",
+    "本周",
+    "周末",
+    "天气",
+    "气温",
+    "温度",
+    "降雨",
+    "下雨",
+    "下雪",
+    "冷不冷",
+    "热不热",
+    "冷吗",
+    "热吗",
+    "风大不大",
+    "风大",
+    "适不适合",
+    "适合",
+    "能不能",
+    "要不要",
+    "出门",
+    "带伞",
+    "外套",
+    "客户",
+    "行程",
+    "影响",
+    "多少",
+    "怎么样",
+    "如何",
+    "吗",
+)
+
+WEATHER_GENERIC_LOCATION_WORDS = {"", "某地", "当地", "这里", "那边", "附近", "这个位置", "你那里"}
+
+
+def _weather_alias_target(text: str) -> WeatherLocationTarget | None:
+    lowered = str(text or "").lower()
+    for marker, label, query in WEATHER_LOCATION_ALIASES:
+        if marker.lower() in lowered:
+            return WeatherLocationTarget(label=label, query=query)
+    return None
+
+
+def _weather_location_candidate(text: str) -> str:
+    cleaned = re.sub(r"[？?！!，,。；;：:\s]+", "", str(text or "").strip())
+    for phrase in WEATHER_LOCATION_STOP_PHRASES:
+        cleaned = cleaned.replace(phrase, "")
+    cleaned = cleaned.strip()
+    if cleaned in WEATHER_GENERIC_LOCATION_WORDS:
+        return ""
+    if re.fullmatch(r"[A-Za-z][A-Za-z .'-]{1,40}", cleaned):
+        return cleaned
+    if re.search(r"[\u4e00-\u9fff]", cleaned) and 1 < len(cleaned) <= 12:
+        return cleaned
+    return ""
+
+
+def _weather_location_target(text: str) -> WeatherLocationTarget | None:
+    alias_target = _weather_alias_target(text)
+    if alias_target is not None:
+        return alias_target
+    default_location = str(os.environ.get("VELA_DEFAULT_WEATHER_LOCATION") or "").strip()
+    if default_location:
+        default_alias = _weather_alias_target(default_location)
+        if default_alias is not None:
+            return default_alias
+        return WeatherLocationTarget(label=default_location, query=default_location)
+    candidate = _weather_location_candidate(text)
+    if candidate:
+        return WeatherLocationTarget(label=candidate, query=candidate)
+    return None
+
+
+def _weather_day_index(text: str) -> tuple[int, str]:
+    raw = str(text or "")
+    if "后天" in raw:
+        return 2, "后天"
+    if "明天" in raw:
+        return 1, "明天"
+    return 0, "今天"
+
+
+def _weather_timeout_seconds() -> float:
+    raw = str(os.environ.get("VELA_WEATHER_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return 6.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 6.0
+    return min(max(value, 2.0), 12.0)
+
+
+def _fmt_weather_number(value: object, *, digits: int = 0) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "未知"
+    if digits <= 0:
+        return str(int(round(number)))
+    return f"{number:.{digits}f}"
+
+
+def _weather_condition_text(current: dict[str, Any], day: dict[str, Any], day_index: int) -> str:
+    source = current if day_index == 0 else day
+    condition = source.get("condition") if isinstance(source.get("condition"), dict) else {}
+    text = str(condition.get("text") or "").strip()
+    if text:
+        return text
+    fallback = day.get("condition") if isinstance(day.get("condition"), dict) else {}
+    return str(fallback.get("text") or "未知").strip() or "未知"
+
+
+def _weather_temperature_text(current: dict[str, Any], day: dict[str, Any], day_index: int) -> str:
+    low = _fmt_weather_number(day.get("mintemp_c"), digits=0)
+    high = _fmt_weather_number(day.get("maxtemp_c"), digits=0)
+    range_text = "" if low == "未知" or high == "未知" else f"{low}-{high}°C"
+    if day_index == 0:
+        current_temp = _fmt_weather_number(current.get("temp_c"), digits=1)
+        if current_temp != "未知" and range_text:
+            return f"{current_temp}°C（今日{range_text}）"
+        if current_temp != "未知":
+            return f"{current_temp}°C"
+    return range_text or "未知"
+
+
+def _weather_precipitation_text(day: dict[str, Any]) -> str:
+    rain = _fmt_weather_number(day.get("daily_chance_of_rain"), digits=0)
+    snow = _fmt_weather_number(day.get("daily_chance_of_snow"), digits=0)
+    if rain == "未知" and snow == "未知":
+        return "未知"
+    if snow != "未知" and int(snow) > max(int(rain) if rain != "未知" else 0, 0):
+        return f"{snow}%（降雪）"
+    return f"{rain if rain != '未知' else snow}%"
+
+
+def _weather_wind_text(current: dict[str, Any], day: dict[str, Any], day_index: int) -> str:
+    value = current.get("wind_kph") if day_index == 0 and current.get("wind_kph") is not None else day.get("maxwind_kph")
+    wind = _fmt_weather_number(value, digits=0)
+    return "未知" if wind == "未知" else f"{wind} km/h"
+
+
+def _weather_humidity_text(current: dict[str, Any], day: dict[str, Any], day_index: int) -> str:
+    value = current.get("humidity") if day_index == 0 and current.get("humidity") is not None else day.get("avghumidity")
+    humidity = _fmt_weather_number(value, digits=0)
+    return "未知" if humidity == "未知" else f"{humidity}%"
+
+
 class WeatherConnector(RetrievalConnector):
     source_type = "weather"
-    source_name = "Open-Meteo weather lane"
+    source_name = "WeatherAPI.com forecast"
 
     def fetch(self, query: str, freshness_requirement: str) -> ConnectorRawResult:
+        provider = str(os.environ.get("VELA_WEATHER_PROVIDER") or "").strip().lower()
+        api_key = str(os.environ.get("VELA_WEATHER_API_KEY") or "").strip()
+        if not provider or not api_key:
+            return self._unavailable(
+                "真实天气源未接入",
+                "未配置 VELA_WEATHER_PROVIDER / VELA_WEATHER_API_KEY；不能生成实时天气。",
+                ["weather_provider_not_configured"],
+            )
+        if provider not in {"weatherapi", "weatherapi.com"}:
+            return self._unavailable(
+                "天气 provider 暂不支持",
+                "当前 weather connector 只支持 WeatherAPI.com；不把未支持 provider 冒充可用。",
+                ["weather_provider_unsupported"],
+            )
+        target = _weather_location_target(query)
+        if target is None:
+            return self._unavailable(
+                "天气查询缺少地点",
+                "用户没有给城市/地点，本地上下文也没有默认地点；不能猜位置。",
+                ["weather_location_required"],
+            )
+        day_index, day_label = _weather_day_index(query)
+        try:
+            payload = self._fetch_weatherapi(target.query, day_index + 1)
+            return self.normalize(
+                {
+                    "provider": provider,
+                    "payload": payload,
+                    "target": target.to_dict(),
+                    "day_index": day_index,
+                    "day_label": day_label,
+                }
+            )
+        except Exception as exc:
+            return ConnectorRawResult(
+                source_name=self.source_name,
+                source_type=self.source_type,
+                freshness_status=FRESH_UNAVAILABLE,
+                title="天气源调用失败",
+                summary="真实天气源这轮没有返回可用数据；不能补编温度、降雨概率或风力。",
+                key_values={"error": type(exc).__name__},
+                source_url_or_origin="WeatherAPI.com forecast.json",
+                confidence_level="medium",
+                known_limits=["weather_provider_error"],
+            )
+
+    def _unavailable(self, title: str, summary: str, limits: list[str]) -> ConnectorRawResult:
         return ConnectorRawResult(
             source_name=self.source_name,
             source_type=self.source_type,
-            freshness_status=FRESH_DELAYED,
-            title="天气资料源计划",
-            summary="天气问题必须走 weather connector；真实预报由 weather lane 拉取，失败时只给出行风险边界。",
-            source_url_or_origin="Open-Meteo forecast API via vela_realtime_info",
+            freshness_status=FRESH_UNAVAILABLE,
+            title=title,
+            summary=summary,
+            source_url_or_origin="local weather connector config",
             confidence_level="high",
-            known_limits=["weather_fetch_happens_in_weather_lane"],
+            known_limits=limits,
+        )
+
+    def _fetch_weatherapi(self, location_query: str, days: int) -> dict[str, Any]:
+        params = {
+            "key": str(os.environ.get("VELA_WEATHER_API_KEY") or "").strip(),
+            "q": location_query,
+            "days": str(min(max(days, 1), 3)),
+            "aqi": "no",
+            "alerts": "no",
+            "lang": "zh",
+        }
+        url = f"{WEATHERAPI_FORECAST_URL}?{urlencode(params)}"
+        with urllib.request.urlopen(url, timeout=_weather_timeout_seconds()) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("weather_payload_not_object")
+        return payload
+
+    def normalize(self, raw_result: ConnectorRawResult | dict[str, Any]) -> ConnectorRawResult:
+        if isinstance(raw_result, ConnectorRawResult):
+            return raw_result
+        payload = raw_result.get("payload") if isinstance(raw_result.get("payload"), dict) else {}
+        target = raw_result.get("target") if isinstance(raw_result.get("target"), dict) else {}
+        forecast = payload.get("forecast") if isinstance(payload.get("forecast"), dict) else {}
+        forecast_days = forecast.get("forecastday") if isinstance(forecast.get("forecastday"), list) else []
+        if not forecast_days:
+            return ConnectorRawResult(
+                source_name=self.source_name,
+                source_type=self.source_type,
+                freshness_status=FRESH_UNAVAILABLE,
+                title="天气源缺少预报字段",
+                summary="天气 provider 返回了数据，但没有可整理的 forecastday；不补编预报。",
+                source_url_or_origin="WeatherAPI.com forecast.json",
+                confidence_level="medium",
+                known_limits=["weather_forecast_missing"],
+            )
+        requested_day = int(raw_result.get("day_index") or 0)
+        day_index = min(max(requested_day, 0), len(forecast_days) - 1)
+        forecast_day = forecast_days[day_index] if isinstance(forecast_days[day_index], dict) else {}
+        day = forecast_day.get("day") if isinstance(forecast_day.get("day"), dict) else {}
+        current = payload.get("current") if isinstance(payload.get("current"), dict) else {}
+        api_location = payload.get("location") if isinstance(payload.get("location"), dict) else {}
+
+        label = str(target.get("label") or api_location.get("name") or "未知地点").strip()
+        day_label = str(raw_result.get("day_label") or "今天").strip()
+        date_text = str(forecast_day.get("date") or "").strip()
+        forecast_window = f"{day_label}（{date_text}）" if date_text else day_label
+        temperature = _weather_temperature_text(current, day, day_index)
+        condition = _weather_condition_text(current, day, day_index)
+        precipitation = _weather_precipitation_text(day)
+        wind = _weather_wind_text(current, day, day_index)
+        humidity = _weather_humidity_text(current, day, day_index)
+        updated_at = str(current.get("last_updated") or api_location.get("localtime") or "").strip()
+        known_limits = ["forecast_probability_is_daily_not_minute_level"]
+        if requested_day >= len(forecast_days):
+            known_limits.append("requested_forecast_window_not_returned")
+        for key, value in {
+            "temperature": temperature,
+            "condition": condition,
+            "precipitation_probability": precipitation,
+            "wind": wind,
+            "humidity": humidity,
+        }.items():
+            if value == "未知":
+                known_limits.append(f"missing_{key}")
+        key_values = {
+            "location": label,
+            "temperature": temperature,
+            "condition": condition,
+            "precipitation_probability": precipitation,
+            "wind": wind,
+            "humidity": humidity,
+            "forecast_window": forecast_window,
+        }
+        if updated_at:
+            key_values["provider_updated_at"] = updated_at
+        summary = (
+            f"{label}{forecast_window}：{condition}，温度{temperature}，"
+            f"降水概率{precipitation}，风{wind}，湿度{humidity}。"
+        )
+        return ConnectorRawResult(
+            source_name=self.source_name,
+            source_type=self.source_type,
+            freshness_status=FRESH_REALTIME,
+            title=f"{label}{forecast_window}天气",
+            summary=summary,
+            key_values=key_values,
+            source_url_or_origin="WeatherAPI.com forecast.json",
+            confidence_level="high" if not any(limit.startswith("missing_") for limit in known_limits) else "medium",
+            known_limits=known_limits,
         )
 
 
@@ -448,6 +793,53 @@ def build_realtime_evidence(
     return RealtimeEvidenceResult(plan=plan, packets=packets, frontstage_boundary=boundary, model_context=model_context)
 
 
+def _first_number(text: str) -> float | None:
+    match = re.search(r"-?\d+(?:\.\d+)?", str(text or ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
+
+
+def _weather_advice(packet: EvidencePacket) -> str:
+    values = packet.key_values
+    rain = _first_number(values.get("precipitation_probability", ""))
+    wind = _first_number(values.get("wind", ""))
+    temperature = _first_number(values.get("temperature", ""))
+    if rain is not None and rain >= 60:
+        return "出门可以，但别硬刚天气：带伞，鞋别穿太娇贵，行程留十五到三十分钟缓冲。"
+    if rain is not None and rain >= 35:
+        return "能出门，但天气有变脸风险；伞带上，别把行程排到一秒不剩。"
+    if wind is not None and wind >= 25:
+        return "风偏大，能出门但别安排太狼狈的户外行程；外套和发型至少保一个。"
+    if temperature is not None and temperature <= 10:
+        return "偏冷，外套别省；省这一层布，最后会用体温还债。"
+    if temperature is not None and temperature >= 30:
+        return "偏热，少折腾户外；水和防晒比嘴硬更可靠。"
+    return "整体可以正常安排；出门前再看一次临近预报，重点盯降雨和风。"
+
+
+def _format_weather_frontstage(packet: EvidencePacket) -> str:
+    values = packet.key_values
+    location = values.get("location", "这个地点")
+    window = values.get("forecast_window", "今天")
+    condition = values.get("condition", "未知")
+    temperature = values.get("temperature", "未知")
+    precipitation = values.get("precipitation_probability", "未知")
+    wind = values.get("wind", "未知")
+    humidity = values.get("humidity", "未知")
+    updated_at = values.get("provider_updated_at") or packet.retrieved_at
+    return "\n".join(
+        [
+            f"{location}{window}：{_weather_advice(packet)}",
+            f"关键数据：{condition}，温度{temperature}，降雨概率{precipitation}，风{wind}，湿度{humidity}。",
+            f"更新时间：{updated_at}；边界：这是天气源预报，不是分钟级临场保证，出门前再扫一眼。"
+        ]
+    )
+
+
 def format_realtime_boundary(plan: SourcePlan, packets: list[EvidencePacket]) -> str:
     if not plan.source_need:
         return ""
@@ -467,7 +859,19 @@ def format_realtime_boundary(plan: SourcePlan, packets: list[EvidencePacket]) ->
             return "当前未接入实时行情源，只能基于本地缓存和已接入资料做有限方向判断。"
         return "当前未接入实时行情源，不能给盘中数值，也不能把模型判断伪装成行情。"
     if "weather" in types:
-        return "天气问题先走天气源；源不可用时只给出行风险边界，不编温度。"
+        first = packets[0] if packets else None
+        if first is None:
+            return "我现在还没接入真实天气源，所以不能给实时天气。接上天气 provider 后，我就能按地点读取天气，再给你自然判断。"
+        limits = set(first.known_limits)
+        if first.freshness_status == FRESH_REALTIME:
+            return _format_weather_frontstage(first)
+        if "weather_provider_not_configured" in limits:
+            return "我现在还没接入真实天气源，所以不能给实时天气。接上天气 provider 后，我就能按地点读取天气，再给你自然判断。"
+        if "weather_location_required" in limits:
+            return "你要看天气，先给地点；城市名发我就行。我不猜你在哪，天气这东西猜错了会很蠢。"
+        if "weather_provider_unsupported" in limits:
+            return "天气 provider 还没接到可用类型；现在不能给实时天气。把 VELA_WEATHER_PROVIDER 配成 weatherapi 后再查。"
+        return "真实天气源这轮没拉回可用数据；我不编温度和降雨概率。要安排出门，先按有雨、有温差处理。"
     if {"web_search", "news"} & types and FRESH_REALTIME in statuses:
         first = next((packet for packet in packets if packet.freshness_status == FRESH_REALTIME), None)
         if first is not None:

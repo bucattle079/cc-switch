@@ -30,6 +30,14 @@ The local cc-connect startup script maps canonical `DEEPSEEK_MODEL` and `DEEPSEE
 
 Weather prompts keep their `weather_query` intent so they do not fall into casual chat. They first use the realtime weather evidence layer, then the dialogue adapter renders VELA's concise answer when configured. If the source is unavailable, the foreground must say so and fall back to conservative travel-risk guidance; VELA must not invent temperature, rain probability, or precise forecast data.
 
+Weather provider MVP is enabled only when both env vars are present:
+
+- `VELA_WEATHER_PROVIDER`: currently supports `weatherapi`.
+- `VELA_WEATHER_API_KEY`: WeatherAPI provider key. Keep it in the process/user environment, never in this repo.
+- `VELA_DEFAULT_WEATHER_LOCATION`: optional local context fallback for prompts such as "今天适合出门吗". If unset and the user gives no place, VELA asks for a city instead of guessing.
+
+No provider/key behavior is explicit: VELA says it has not connected a real weather source and cannot give realtime weather. Raw connector flags stay inside tests/logs; WeChat output must not show `provider_not_configured`, `connector_unavailable`, `source_type`, or `evidence_id`.
+
 ## Companion Core
 
 Every WeChat-facing reply should carry internal context that is not exposed to the user:
@@ -111,11 +119,18 @@ Web/news search is enabled only when both env vars are present:
 
 If either value is missing, VELA returns a plain boundary such as "网页/新闻搜索源未接入" and must not mock or imply realtime retrieval.
 
+Weather source is enabled only when both env vars are present:
+
+- `VELA_WEATHER_PROVIDER=weatherapi`
+- `VELA_WEATHER_API_KEY`: provider key
+
+Weather evidence packets include the normal evidence fields plus normalized weather values in `key_values`: `location`, `temperature`, `condition`, `precipitation_probability`, `wind`, `humidity`, `forecast_window`, optional `provider_updated_at`, `source_url_or_origin`, `confidence_level`, and `known_limits`. The foreground weather reply should start with a practical conclusion, then key data, then update time/boundary.
+
 Source-specific boundaries:
 
 - VIX/current market/add-position questions check `market_data` before judgment. Without a real realtime market connector, VELA gives no current number and no fake live trade signal.
 - Sector discussion questions such as storage or optical modules plan `market_data + news + web_search`. If those sources are incomplete, VELA says the evidence gap instead of reusing broad A-share cache as sector heat.
-- Weather questions remain in the weather lane and use the existing forecast connector path, with conservative travel-risk fallback if the source fails.
+- Weather questions remain in the weather lane and use the configured forecast provider path, with conservative travel-risk fallback if the source fails. If the prompt has no location, VELA uses `VELA_DEFAULT_WEATHER_LOCATION` only when configured; otherwise it asks for the city.
 
 ## Local Acceptance Smoke
 

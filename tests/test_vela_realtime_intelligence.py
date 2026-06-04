@@ -241,6 +241,236 @@ class VelaRealtimeIntelligenceTests(unittest.TestCase):
         self.assertEqual(plan.source_type, ["weather"])
         self.assertEqual(plan.freshness_requirement, "real_time")
 
+    def test_weather_connector_without_key_returns_unavailable_boundary(self):
+        rt = load_module(REALTIME, "vela_realtime_intelligence_weather_no_key")
+
+        result = rt.build_realtime_evidence("天气怎么样", "weather_query")
+
+        self.assertTrue(result.plan.source_need)
+        self.assertEqual(result.plan.source_type, ["weather"])
+        self.assertTrue(result.packets)
+        packet = result.packets[0]
+        self.assertEqual(packet.source_type, "weather")
+        self.assertEqual(packet.freshness_status, rt.FRESH_UNAVAILABLE)
+        self.assertIn("weather_provider_not_configured", packet.known_limits)
+        self.assertIn("没接入真实天气源", result.frontstage_boundary)
+        for raw in [
+            "provider_not_configured",
+            "connector_unavailable",
+            "real_time_source_available=false",
+            "cached_summary_available=false",
+            "source_type",
+            "evidence_id",
+        ]:
+            self.assertNotIn(raw, result.frontstage_boundary)
+
+    def test_weather_connector_with_weatherapi_key_builds_weather_evidence_packet(self):
+        rt = load_module(REALTIME, "vela_realtime_intelligence_weatherapi")
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                payload = {
+                    "location": {
+                        "name": "New York",
+                        "country": "United States",
+                        "localtime": "2026-06-04 09:10",
+                    },
+                    "current": {
+                        "temp_c": 16.2,
+                        "condition": {"text": "多云"},
+                        "wind_kph": 12.4,
+                        "humidity": 62,
+                        "last_updated": "2026-06-04 09:00",
+                    },
+                    "forecast": {
+                        "forecastday": [
+                            {
+                                "date": "2026-06-04",
+                                "day": {
+                                    "mintemp_c": 13.0,
+                                    "maxtemp_c": 19.0,
+                                    "daily_chance_of_rain": 20,
+                                    "daily_chance_of_snow": 0,
+                                    "maxwind_kph": 14.0,
+                                    "avghumidity": 60,
+                                    "condition": {"text": "多云"},
+                                },
+                            },
+                            {
+                                "date": "2026-06-05",
+                                "day": {
+                                    "mintemp_c": 14.0,
+                                    "maxtemp_c": 20.0,
+                                    "daily_chance_of_rain": 70,
+                                    "daily_chance_of_snow": 0,
+                                    "maxwind_kph": 18.0,
+                                    "avghumidity": 68,
+                                    "condition": {"text": "小雨"},
+                                },
+                            },
+                        ]
+                    },
+                }
+                return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "VELA_LEARNING_LOOP_DIR": str(Path(self.temp_dir.name) / "learning-loop"),
+                "VELA_WEATHER_PROVIDER": "weatherapi",
+                "VELA_WEATHER_API_KEY": "test-weather-key",
+            },
+            clear=True,
+        ):
+            with patch.object(rt.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen:
+                result = rt.build_realtime_evidence("明天纽约会下雨吗", "weather_query")
+
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertTrue(result.packets)
+        packet = result.packets[0]
+        self.assertEqual(packet.freshness_status, rt.FRESH_REALTIME)
+        packet_dict = packet.to_dict()
+        for key in [
+            "location",
+            "temperature",
+            "condition",
+            "precipitation_probability",
+            "wind",
+            "humidity",
+            "forecast_window",
+            "source_url_or_origin",
+            "confidence_level",
+            "known_limits",
+        ]:
+            self.assertIn(key, packet_dict)
+        self.assertIn("纽约", packet.key_values["location"])
+        self.assertIn("70%", packet.key_values["precipitation_probability"])
+        self.assertIn("纽约", result.frontstage_boundary)
+        self.assertIn("降雨概率", result.frontstage_boundary)
+        self.assertNotIn("source_type", result.frontstage_boundary)
+        self.assertNotIn("provider_not_configured", result.frontstage_boundary)
+
+    def test_weather_connector_with_provider_but_no_location_asks_for_city_without_fetching(self):
+        rt = load_module(REALTIME, "vela_realtime_intelligence_weather_location_required")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "VELA_LEARNING_LOOP_DIR": str(Path(self.temp_dir.name) / "learning-loop"),
+                "VELA_WEATHER_PROVIDER": "weatherapi",
+                "VELA_WEATHER_API_KEY": "test-weather-key",
+            },
+            clear=True,
+        ):
+            with patch.object(rt.urllib.request, "urlopen") as urlopen:
+                result = rt.build_realtime_evidence("天气怎么样", "weather_query")
+
+        self.assertEqual(urlopen.call_count, 0)
+        self.assertTrue(result.packets)
+        packet = result.packets[0]
+        self.assertEqual(packet.freshness_status, rt.FRESH_UNAVAILABLE)
+        self.assertIn("weather_location_required", packet.known_limits)
+        self.assertIn("先给地点", result.frontstage_boundary)
+        self.assertNotIn("北京", result.frontstage_boundary)
+        self.assertNotIn("source_type", result.frontstage_boundary)
+
+    def test_router_weather_with_mock_provider_gives_natural_advice_without_engineering_fields(self):
+        router = load_module(ROUTER, "vela_router_weather_natural")
+        rt_module = sys.modules["vela_realtime_intelligence"]
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                payload = {
+                    "location": {"name": "New York", "country": "United States", "localtime": "2026-06-04 08:30"},
+                    "current": {
+                        "temp_c": 8.4,
+                        "condition": {"text": "小雨"},
+                        "wind_kph": 22.0,
+                        "humidity": 74,
+                        "last_updated": "2026-06-04 08:15",
+                    },
+                    "forecast": {
+                        "forecastday": [
+                            {
+                                "date": "2026-06-04",
+                                "day": {
+                                    "mintemp_c": 7.0,
+                                    "maxtemp_c": 12.0,
+                                    "daily_chance_of_rain": 65,
+                                    "daily_chance_of_snow": 0,
+                                    "maxwind_kph": 24.0,
+                                    "avghumidity": 76,
+                                    "condition": {"text": "小雨"},
+                                },
+                            }
+                        ]
+                    },
+                }
+                return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "VELA_LEARNING_LOOP_DIR": str(Path(self.temp_dir.name) / "learning-loop"),
+                "VELA_WEATHER_PROVIDER": "weatherapi",
+                "VELA_WEATHER_API_KEY": "test-weather-key",
+                "VELA_DEFAULT_WEATHER_LOCATION": "纽约",
+            },
+            clear=True,
+        ):
+            with patch.object(rt_module.urllib.request, "urlopen", return_value=FakeResponse()):
+                reply = router.reply_for("今天适合出门吗")
+
+        self.assertIn("纽约", reply)
+        self.assertIn("出门", reply)
+        self.assertIn("降雨概率", reply)
+        for raw in [
+            "source_type",
+            "evidence_id",
+            "provider_not_configured",
+            "connector_unavailable",
+            "real_time_source_available",
+            "cached_summary_available",
+            "schema",
+            "raw payload",
+        ]:
+            self.assertNotIn(raw, reply)
+
+    def test_current_vix_still_routes_to_market_data(self):
+        rt = load_module(REALTIME, "vela_realtime_intelligence_vix_pollution")
+
+        result = rt.build_realtime_evidence("现在 VIX 是多少", "market_brief")
+
+        self.assertIn("market_data", result.plan.source_type)
+        self.assertNotIn("weather", result.plan.source_type)
+
+    def test_deepseek_search_boundary_and_identity_routes_stay_out_of_weather(self):
+        router = load_module(ROUTER, "vela_router_weather_pollution")
+
+        search_reply = router.reply_for("DeepSeek API 为什么不能自己搜")
+        identity_reply = router.reply_for("VELA 和 DeepSeek / Codex / 记忆是什么关系")
+
+        self.assertIn("DeepSeek", search_reply)
+        self.assertTrue(any(token in search_reply for token in ["外部", "检索", "搜索", "资料源"]), search_reply)
+        self.assertIn("DeepSeek", identity_reply)
+        self.assertIn("Codex", identity_reply)
+        self.assertIn("记忆", identity_reply)
+        for reply in [search_reply, identity_reply]:
+            self.assertNotIn("天气源", reply)
+            self.assertNotIn("source_type", reply)
+
 
 if __name__ == "__main__":
     unittest.main()

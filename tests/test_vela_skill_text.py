@@ -1,7 +1,9 @@
 from pathlib import Path
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 import unittest
 
@@ -162,16 +164,20 @@ class VelaSkillTextTests(unittest.TestCase):
         self.assertIn('reply_for("VELA")', source)
         self.assertNotIn("在。不是报到，是连接。我听着，你说。", source)
 
-        completed = subprocess.run(
-            [sys.executable, "-X", "utf8", str(VELA_PING)],
-            text=True,
-            encoding="utf-8",
-            capture_output=True,
-            check=False,
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env["VELA_LEARNING_LOOP_DIR"] = str(Path(tmp) / "learning-loop")
+            completed = subprocess.run(
+                [sys.executable, "-X", "utf8", str(VELA_PING)],
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                check=False,
+                env=env,
+            )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertRegex(completed.stdout, r"(我在|我听着|你说|醒着|话放过来)")
+        self.assertRegex(completed.stdout, r"(在。|我在|我听着|你说|醒着|话放过来|真正想聊)")
         self.assertNotIn("不是报到，是连接", completed.stdout)
         self.assertNotIn("你好", completed.stdout)
         self.assertNotIn("有什么可以帮", completed.stdout)

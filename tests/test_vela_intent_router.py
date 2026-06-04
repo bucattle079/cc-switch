@@ -92,7 +92,7 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_weather_query_routes_to_weather_lane_not_chat(self):
         router = load_module(ROUTER, "vela_router")
 
-        for text in ["明天晋江天气", "今天纽约冷吗"]:
+        for text in ["天气怎么样", "今天会下雨吗", "明天晋江天气", "明天纽约天气", "今天纽约冷吗", "今天适合出门吗", "纽约风大不大", "纽约会不会下雪"]:
             intent = router.classify_intent(text)
 
             self.assertEqual(intent.name, "weather_query", text)
@@ -108,29 +108,31 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_weather_reply_uses_realtime_weather_supporting_context(self):
         router = load_module(ROUTER, "vela_router")
 
-        api_reply = "K，晋江明天实时天气源：已接入；小雨，24-30°C。\n判断：带伞。\n下一步：出门前再看一次临近预报。"
-        with patch.object(router, "render_weather_query_reply", return_value=api_reply):
+        api_reply = "晋江明天（2026-06-05）：出门可以，但带伞，行程留缓冲。\n关键数据：小雨，温度24-30°C，降雨概率70%，风18 km/h，湿度80%。\n更新时间：2026-06-04 09:00；边界：出门前再看一次临近预报。"
+        evidence = SimpleNamespace(frontstage_boundary=api_reply)
+        with patch.object(router, "build_realtime_evidence", return_value=evidence):
             with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text=api_reply)) as run:
                 reply = router.reply_for("明天晋江天气")
 
-        self.assertEqual(reply, api_reply.removeprefix("K，"))
+        self.assertEqual(reply, api_reply)
         self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
-        self.assertIn("实时天气源：已接入", run.call_args.kwargs["supporting_context"])
+        self.assertIn("关键数据", run.call_args.kwargs["supporting_context"])
         self.assertIn("24-30°C", run.call_args.kwargs["supporting_context"])
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
     def test_now_weather_uses_weather_api_lane_not_deepseek_template(self):
         router = load_module(ROUTER, "vela_router")
 
-        api_reply = "K，纽约今天实时天气源：已接入；多云，18-24°C。\n判断：外套带薄的。\n下一步：出门前再看风和降雨。"
+        api_reply = "纽约今天（2026-06-04）：偏凉，薄外套带上。\n关键数据：多云，温度18-24°C，降雨概率20%，风12 km/h，湿度60%。\n更新时间：2026-06-04 09:00；边界：出门前再看风和降雨。"
+        evidence = SimpleNamespace(frontstage_boundary=api_reply)
         with patch.dict("os.environ", self.isolated_env(DEEPSEEK_API_KEY="sk-test-secret"), clear=True):
-            with patch.object(router, "render_weather_query_reply", return_value=api_reply):
+            with patch.object(router, "build_realtime_evidence", return_value=evidence):
                 with patch.object(router, "run_layered_response", return_value=SimpleNamespace(text=api_reply)) as run:
                     reply = router.reply_for("现在纽约冷吗")
 
-        self.assertEqual(reply, api_reply.removeprefix("K，"))
+        self.assertEqual(reply, api_reply)
         self.assertEqual(run.call_args.kwargs["intent"], "weather_query")
-        self.assertIn("实时天气源：已接入", run.call_args.kwargs["supporting_context"])
+        self.assertIn("关键数据", run.call_args.kwargs["supporting_context"])
         self.assertNotIn("reply_adapter", run.call_args.kwargs)
 
     def test_market_reply_uses_local_boundary_adapter_with_cache_context(self):
@@ -181,16 +183,14 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_weather_reply_is_weather_surface_not_menu(self):
         router = load_module(ROUTER, "vela_router")
 
-        with patch.object(
-            router,
-            "render_weather_query_reply",
-            return_value="K，晋江明天实时天气源：已接入；小雨，24-30°C。\n判断：带伞。\n下一步：出门前再看一次临近预报。",
-        ):
+        evidence = SimpleNamespace(
+            frontstage_boundary="晋江明天（2026-06-05）：出门可以，但带伞。\n关键数据：小雨，温度24-30°C，降雨概率70%，风18 km/h，湿度80%。\n更新时间：2026-06-04 09:00；边界：出门前再看一次临近预报。"
+        )
+        with patch.object(router, "build_realtime_evidence", return_value=evidence):
             reply = router.reply_for("明天晋江天气")
 
         self.assertIn("晋江", reply)
-        self.assertIn("天气", reply)
-        self.assertIn("实时天气源：已接入", reply)
+        self.assertIn("关键数据", reply)
         self.assertIn("24-30°C", reply)
         self.assertNotIn("DeepSeek", reply)
         self.assertNotIn("real_time_source_available", reply)
@@ -202,17 +202,16 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_weather_reply_uses_natural_boundary_for_real_trip_question(self):
         router = load_module(ROUTER, "vela_router")
 
-        with patch.object(
-            router,
-            "render_weather_query_reply",
-            return_value="K，晋江明天实时天气源：已接入；小雨，24-30°C。\n判断：带伞。\n下一步：出门前再看一次临近预报。",
-        ):
+        evidence = SimpleNamespace(
+            frontstage_boundary="晋江明天（2026-06-05）：出门可以，但带伞，行程留缓冲。\n关键数据：小雨，温度24-30°C，降雨概率70%，风18 km/h，湿度80%。\n更新时间：2026-06-04 09:00；边界：出门前再看一次临近预报。"
+        )
+        with patch.object(router, "build_realtime_evidence", return_value=evidence):
             reply = router.render_weather_reply("明天晋江会不会下雨，能不能出门")
 
-        self.assertIn("K，晋江", reply)
-        self.assertIn("实时天气源：已接入", reply)
+        self.assertIn("晋江", reply)
+        self.assertIn("关键数据", reply)
         self.assertIn("24-30°C", reply)
-        self.assertIn("下一步：", reply)
+        self.assertIn("更新时间", reply)
         self.assertNotIn("天气线", reply)
         self.assertNotIn("模型仅生成", reply)
         self.assertNotIn("weather_query", reply)

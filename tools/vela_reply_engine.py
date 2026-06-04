@@ -562,7 +562,7 @@ class FallbackReplyAdapter(ReplyAdapter):
     IDENTITY_VARIANTS = (
         "关系很简单：DeepSeek 是日常脑，Codex 是工程手，记忆是本地经验库。VELA 是把它们收成一个判断的人格核心。",
         "模型和工具会换，但 VELA 不能散。DeepSeek 负责沟通分析，Codex 负责工程执行，记忆负责让下一轮更懂你。",
-        "它们是器官，不是人格。VELA 负责连续性：听懂、判断、记住边界，再决定该让哪个工具上场。",
+        "DeepSeek、Codex 和记忆都是器官，不是人格。VELA 负责连续性：听懂、判断、记住边界，再决定该让哪个工具上场。",
     )
 
     def generate(self, context: ReplyContext) -> ReplyEngineResult:

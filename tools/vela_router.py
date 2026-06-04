@@ -423,11 +423,26 @@ CONTEXT_LEAKAGE_SUBJECT_KEYWORDS = [
 WEATHER_KEYWORDS = [
     "天气",
     "气温",
+    "温度",
     "降温",
+    "降雨",
     "下雨",
     "下雪",
+    "会不会下雨",
+    "会不会下雪",
+    "会下雨吗",
+    "会下雪吗",
+    "冷不冷",
     "冷吗",
+    "热不热",
     "热吗",
+    "风大",
+    "带伞",
+    "外套",
+    "适合出门",
+    "适不适合出门",
+    "能不能出门",
+    "出门风险",
     "weather",
     "temperature",
 ]
@@ -870,7 +885,8 @@ def weather_location_from_text(text: str) -> str:
 
 
 def render_weather_reply(text: str) -> str:
-    return guard_wechat_output(render_weather_query_reply(text))
+    evidence = build_realtime_evidence(text, "weather_query")
+    return guard_wechat_output(evidence.frontstage_boundary)
 
 
 def render_local_tool_reply(

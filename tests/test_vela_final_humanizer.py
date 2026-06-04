@@ -101,7 +101,13 @@ class VelaFinalHumanizerTests(unittest.TestCase):
     def test_realtime_market_boundary_is_user_readable_not_engineering_fields(self):
         reply = self.reply("现在的市场资讯")
 
-        self.assertTrue(any(token in reply for token in ["不能读取实时", "实时源未接入", "实时源暂不可用", "不能给盘中实时结论"]), reply)
+        self.assertTrue(
+            any(
+                token in reply
+                for token in ["不能读取实时", "实时源未接入", "实时源暂不可用", "不能给盘中实时结论", "实时源已接入"]
+            ),
+            reply,
+        )
         for token in ["状态边界", "数据来源：本地市场缓存", "模型仅生成", "缓存摘要", "可用性"]:
             self.assertNotIn(token, reply)
         self.assert_no_template_tics(reply)

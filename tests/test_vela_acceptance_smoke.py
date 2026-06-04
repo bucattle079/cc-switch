@@ -178,7 +178,8 @@ class VelaAcceptanceSmokeTests(unittest.TestCase):
                 with self.subTest(case["id"]):
                     adapter_flag = case["latest_quality_log"]["quality_flags"][1]
                     self.assertIn(adapter_flag, {"adapter:deepseek_chat", "adapter:local_weather_fallback"})
-                    self.assertIn("实时天气源", case["reply_preview"])
+                    self.assertIn("没接入真实天气源", case["reply_preview"])
+                    self.assertIn("不能给实时天气", case["reply_preview"])
                     self.assertNotIn("天气实时数据不可用", case["reply_preview"])
                     self.assertFalse(case["leaks"], case)
             if case["id"] in now_info_ids:
