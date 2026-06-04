@@ -3151,6 +3151,134 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertIn("依据", candidate["summary"])
         self.assertFalse(candidate["confirmed"])
 
+    def test_project_a_completion_loop_writes_need_research_files(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine_project_a")
+
+        class EvidenceAwareAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "结论：先按证据做低置信度观察。\n"
+                        "依据：公开资料线索显示讨论度升温。\n"
+                        "边界：来源还要复核，不能当成最终事实。\n"
+                        "下一步：核官方来源，再看是否值得跟进。"
+                    ),
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        evidence = SimpleNamespace(
+            packets=[
+                SimpleNamespace(
+                    source_type="news",
+                    freshness_status="real_time_source_available",
+                    retrieved_at="2026-06-04T02:00:00+00:00",
+                    title="行业讨论度升温",
+                    summary="公开新闻线索显示行业关注度上升。",
+                    confidence_level="medium",
+                    known_limits=["source_must_be_verified_before_strong_claims"],
+                )
+            ],
+            frontstage_boundary="公开网页/新闻搜索源已返回线索；判断前仍要复核原始来源。",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.run_layered_response(
+                "帮我查一下今天某行业最新讨论度",
+                intent="daily_info",
+                log_dir=log_dir,
+                supporting_context=evidence.frontstage_boundary,
+                retrieval_evidence=evidence,
+                reply_adapter=EvidenceAwareAdapter(),
+            )
+            product.run_layered_response(
+                "你又模板了",
+                intent="style_feedback",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            product.run_layered_response(
+                "我需要你像真正的智能伙伴一样回答",
+                intent="style_feedback",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+
+            interaction_rows = [
+                json.loads(line)
+                for line in next(log_dir.glob("interaction-log-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            style_rows = [
+                json.loads(line)
+                for line in next(log_dir.glob("style-feedback-candidates-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            need_rows = [
+                json.loads(line)
+                for line in next(log_dir.glob("need-profile-candidates-*.jsonl")).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            next_context = product.build_reply_context("继续", intent="normal_chat", log_dir=log_dir)
+
+        first = interaction_rows[0]
+        for key in [
+            "user_query_type",
+            "explicit_request",
+            "inferred_hidden_need",
+            "emotional_or_style_signal",
+            "source_types_used",
+            "evidence_summary",
+            "final_answer_summary",
+            "uncertainty_or_boundary",
+            "user_feedback_type",
+            "style_feedback_candidate",
+            "need_profile_candidate",
+            "next_turn_improvement",
+            "should_confirm_with_user",
+        ]:
+            self.assertIn(key, first)
+        self.assertEqual(first["source_types_used"], ["news"])
+        self.assertIn("行业讨论度升温", first["evidence_summary"])
+        self.assertIn("低置信度观察", first["final_answer_summary"])
+        self.assertFalse(first["should_confirm_with_user"])
+
+        self.assertTrue(any("reduce_template_tone" in row["style_feedback_candidate"] for row in style_rows))
+        self.assertTrue(any("answer_first" in row["style_feedback_candidate"] for row in style_rows))
+        self.assertTrue(any("avoid_self_explanation" in row["style_feedback_candidate"] for row in style_rows))
+        self.assertTrue(
+            any("expects_proactive_context_understanding" in row["need_profile_candidate"] for row in need_rows),
+            need_rows,
+        )
+        self.assertTrue(any("memory_continuity" in row["need_profile_candidate"] for row in need_rows), need_rows)
+        preference_context = " ".join(next_context.user_preferences)
+        self.assertIn("reduce_template_tone", preference_context)
+        self.assertIn("answer_first", preference_context)
+        self.assertIn("expects_proactive_context_understanding", preference_context)
+
+    def test_ellipsis_writes_silent_dissatisfaction_repair_signal(self):
+        product = load_product_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            product.run_layered_response(
+                "。。",
+                intent="normal_chat",
+                log_dir=log_dir,
+                reply_adapter=product.FallbackReplyAdapter(),
+            )
+            row = json.loads(next(log_dir.glob("interaction-log-*.jsonl")).read_text(encoding="utf-8").splitlines()[0])
+            context = product.build_reply_context("继续", intent="normal_chat", log_dir=log_dir)
+
+        self.assertEqual(row["user_feedback_type"], "silent_dissatisfaction_or_pause")
+        self.assertIn("repair_previous_answer_without_defense", row["next_turn_improvement"])
+        self.assertTrue(any("silent_dissatisfaction_or_pause" in item for item in context.user_preferences))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -300,7 +300,7 @@ SINGLE_TURN_CASES = [
     },
     {
         "id": "mvp_nearby_life_info_search_boundary",
-        "message": "附近生活资讯/出门建议",
+        "message": "附近有什么适合出门的生活建议",
         "expected_intent": "daily_info",
         "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
         "forbidden_reply_tokens": ["天气", "市场", "DEEPSEEK_API_KEY", "source_type", "evidence_id", "schema"],
@@ -662,6 +662,14 @@ SINGLE_TURN_CASES = [
         "required_reply_tokens": ["说人话", "真实意思", "结论"],
         "forbidden_reply_tokens": ["已校准", "长期记忆", "候选", "下一轮我", "schema"],
         "max_reply_chars": 140,
+    },
+    {
+        "id": "mvp_true_partner_answer_request",
+        "message": "我需要你像真正的智能伙伴一样回答",
+        "expected_intent": "style_feedback",
+        "required_reply_tokens": ["判断", "动作", "执行节奏", "推进"],
+        "forbidden_reply_tokens": ["已校准", "长期记忆", "候选", "下一轮我", "schema", "DeepSeek API"],
+        "max_reply_chars": 100,
     },
     {
         "id": "mvp_ellipsis_not_task_or_market",

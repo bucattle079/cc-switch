@@ -99,15 +99,17 @@ class VelaIntentRouterTests(unittest.TestCase):
     def test_life_information_routes_to_search_not_weather_or_chat(self):
         router = load_module(ROUTER, "vela_router_mvp_life_routes")
 
-        intent = router.classify_intent("附近生活资讯/出门建议")
-        decision = router.route_decision("附近生活资讯/出门建议")
-        source_plan = router.plan_sources("附近生活资讯/出门建议", intent.name)
+        for message in ["附近生活资讯/出门建议", "附近有什么适合出门的生活建议"]:
+            with self.subTest(message=message):
+                intent = router.classify_intent(message)
+                decision = router.route_decision(message)
+                source_plan = router.plan_sources(message, intent.name)
 
-        self.assertEqual(intent.name, "daily_info")
-        self.assertTrue(decision.needs_retrieval)
-        self.assertIn("news", source_plan.source_type)
-        self.assertIn("web_search", source_plan.source_type)
-        self.assertNotIn("weather", source_plan.source_type)
+                self.assertEqual(intent.name, "daily_info")
+                self.assertTrue(decision.needs_retrieval)
+                self.assertIn("news", source_plan.source_type)
+                self.assertIn("web_search", source_plan.source_type)
+                self.assertNotIn("weather", source_plan.source_type)
 
     def test_record_preferred_answer_shape_routes_to_memory_candidate(self):
         router = load_module(ROUTER, "vela_router_mvp_record_preference")

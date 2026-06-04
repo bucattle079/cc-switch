@@ -1216,6 +1216,8 @@ def record_session_note(
 
 
 def user_message_type_for(message: str, intent: str, interpretation: NeedInterpretation, learning: LearningEvaluation) -> str:
+    if is_silent_dissatisfaction_or_pause(message):
+        return "silent_dissatisfaction_or_pause"
     if learning.classification == "relationship_repair":
         return "feedback_repair"
     if learning.classification == "behavior_preference":
@@ -1242,6 +1244,8 @@ def user_message_type_for(message: str, intent: str, interpretation: NeedInterpr
 
 
 def user_feedback_type_for(message: str, intent: str, learning: LearningEvaluation) -> str:
+    if is_silent_dissatisfaction_or_pause(message):
+        return "silent_dissatisfaction_or_pause"
     if learning.classification == "relationship_repair":
         return "meaning_misread"
     if learning.classification == "style_feedback":
@@ -1251,6 +1255,11 @@ def user_feedback_type_for(message: str, intent: str, learning: LearningEvaluati
     if intent == "deep_analysis" and _has_any(message, ("地狱验尸", "验尸", "根因")):
         return "deep_diagnosis_request"
     return "none"
+
+
+def is_silent_dissatisfaction_or_pause(message: str) -> bool:
+    compact = "".join(str(message or "").strip().split())
+    return compact in {"。。", "。。。", "...", "……", "…", ".."}
 
 
 def response_quality_signals_for(
@@ -1304,6 +1313,8 @@ def next_turn_improvement_for(
         return "下一轮减少模板、冷感、冗长和机械自证，直接给判断。"
     if feedback_type == "behavior_preference":
         return "下一轮更快理解真实意思，减少拖延，直接推进最小下一步。"
+    if feedback_type == "silent_dissatisfaction_or_pause":
+        return "repair_previous_answer_without_defense; answer_first; reduce_template_tone"
     if feedback_type == "self_quality_repair":
         return "下一轮不要菜单化、不要露工程字段或外部项目残留；只按当前问题给判断。"
     if context.should_use_evidence_gate:
@@ -1963,6 +1974,31 @@ def iteration_preference_summaries(log_dir: Path | None = None, limit: int = 3) 
     return summaries[-limit:]
 
 
+def style_feedback_candidate_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
+    summaries: list[str] = []
+    for row in latest_learning_rows("style-feedback-candidates-*.jsonl", log_dir=log_dir, limit=limit * 3):
+        candidate = str(row.get("style_feedback_candidate") or "").strip()
+        feedback_type = str(row.get("user_feedback_type") or "").strip()
+        improvement = str(row.get("next_turn_improvement") or "").strip()
+        if not candidate:
+            continue
+        detail = candidate
+        if improvement:
+            detail = f"{detail}; {improvement}"
+        summaries.append(f"表达候选（未确认，{feedback_type or 'style'}）：{detail}"[:360])
+    return summaries[-limit:]
+
+
+def need_profile_candidate_summaries(log_dir: Path | None = None, limit: int = 3) -> list[str]:
+    summaries: list[str] = []
+    for row in latest_learning_rows("need-profile-candidates-*.jsonl", log_dir=log_dir, limit=limit * 3):
+        candidate = str(row.get("need_profile_candidate") or "").strip()
+        if not candidate:
+            continue
+        summaries.append(f"需求画像候选（未确认）：{candidate}"[:360])
+    return summaries[-limit:]
+
+
 def infer_pressure_scenario(message: str, intent: str) -> str:
     text = str(message or "").lower()
     if intent == "style_feedback":
@@ -2117,6 +2153,8 @@ def build_reply_context(
         } and summary:
             preferences.append(f"候选偏好（未确认，{classification}）：{summary}")
     preferences.extend(iteration_preference_summaries(log_dir=log_dir, limit=3))
+    preferences.extend(style_feedback_candidate_summaries(log_dir=log_dir, limit=3))
+    preferences.extend(need_profile_candidate_summaries(log_dir=log_dir, limit=3))
     selection = select_model_and_tools(intent, message=normalized_message)
     interpretation = interpret_need(normalized_message, intent)
     return ReplyContext(
@@ -3230,6 +3268,200 @@ def retrieval_learning_metadata(retrieval_evidence, *, response_text: str, bound
     }
 
 
+def sanitize_learning_trace_value(value: object, limit: int = 500) -> str:
+    text = " ".join(scrub_legacy_external_project_text(str(value or "")).split())
+    if not text:
+        return ""
+    text = WINDOWS_PATH_RE.sub("[internal_path_redacted]", text)
+    text = re.sub(r"(?i)\b(DEEPSEEK_API_KEY|VELA_[A-Z0-9_]*API_KEY|OPENAI_API_KEY)\b", "[env_key_redacted]", text)
+    text = re.sub(r"(?i)\b(api[_-]?key|token|secret)\s*[:=]\s*['\"]?[^,\s'\";]+", r"\1=[secret_redacted]", text)
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]{12,}\b", "[secret_redacted]", text)
+    return text[:limit]
+
+
+def style_feedback_candidate_for(
+    *,
+    message: str,
+    feedback_type: str,
+    learning: LearningEvaluation,
+) -> str:
+    text = str(message or "")
+    candidates: list[str] = []
+    if feedback_type == "silent_dissatisfaction_or_pause":
+        candidates.extend(["repair_previous_answer_without_defense", "answer_first", "reduce_template_tone"])
+    if feedback_type in {"style_expression", "meaning_misread", "behavior_preference", "self_quality_repair"}:
+        candidates.extend(["reduce_template_tone", "answer_first", "avoid_self_explanation"])
+    if learning.classification in {"style_feedback", "relationship_repair", "behavior_preference"}:
+        candidates.extend(["reduce_template_tone", "answer_first", "avoid_self_explanation"])
+    if _has_any(text, ("K", "k", "称呼", "开头", "口头禅")):
+        candidates.append("avoid_fixed_k_prefix")
+    if _has_any(text, ("太长", "冗长", "啰嗦")):
+        candidates.append("shorter_reply")
+    if _has_any(text, ("太冷", "不像真人", "真人", "伙伴", "太像机器人", "机器人")):
+        candidates.append("warmer_partner_tone")
+    if feedback_type == "meaning_misread":
+        candidates.append("decode_hidden_need")
+    ordered: list[str] = []
+    for item in candidates:
+        if item and item not in ordered:
+            ordered.append(item)
+    return ", ".join(ordered)
+
+
+def need_profile_candidate_for(
+    *,
+    message: str,
+    intent: str,
+    retrieval_meta: dict[str, object],
+    feedback_type: str,
+    learning: LearningEvaluation,
+) -> str:
+    text = str(message or "")
+    candidates: list[str] = []
+    if _has_any(text, ("智能伙伴", "真正的智能伙伴", "更智能", "不够智能", "像真正", "长期伙伴")):
+        candidates.extend(
+            [
+                "expects_proactive_context_understanding",
+                "retrieval_when_needed",
+                "memory_continuity",
+                "strategic_judgment",
+            ]
+        )
+    if feedback_type in {"style_expression", "meaning_misread", "silent_dissatisfaction_or_pause"}:
+        candidates.append("expects_feedback_correction_next_turn")
+    if retrieval_meta.get("source_types_used"):
+        candidates.append("needs_evidence_boundary")
+    if intent in {"market_brief", "market_refresh", "freshness_status"}:
+        candidates.append("needs_financial_freshness_boundary")
+    if intent == "weather_query":
+        candidates.append("needs_weather_retrieval_not_chat_template")
+    if intent in {"daily_info", "world_brief"} and is_current_information_request(message, intent):
+        candidates.append("expects_current_info_connector_before_analysis")
+    if learning.classification == "behavior_preference":
+        candidates.append("expects_answer_first_structure")
+    ordered: list[str] = []
+    for item in candidates:
+        if item and item not in ordered:
+            ordered.append(item)
+    return ", ".join(ordered)
+
+
+def build_need_research_record(
+    *,
+    message: str,
+    intent: str,
+    context: ReplyContext,
+    learning: LearningEvaluation,
+    iteration_signal: HumanIterationSignal,
+    retrieval_meta: dict[str, object],
+    response_text: str,
+    memory_candidate: bool,
+) -> dict[str, object]:
+    style_candidate = style_feedback_candidate_for(
+        message=message,
+        feedback_type=iteration_signal.user_feedback_type,
+        learning=learning,
+    )
+    need_candidate = need_profile_candidate_for(
+        message=message,
+        intent=intent,
+        retrieval_meta=retrieval_meta,
+        feedback_type=iteration_signal.user_feedback_type,
+        learning=learning,
+    )
+    source_types = retrieval_meta.get("source_types_used")
+    if not isinstance(source_types, list):
+        source_types = list(source_types or []) if source_types else []
+    should_confirm = bool(
+        memory_candidate
+        and learning.classification
+        in {"strategic_goal", "market_focus", "project_state", "behavior_preference", "preference"}
+    )
+    return {
+        "created_at": utc_now().isoformat(),
+        "level": "Need Research Signal",
+        "user_query_type": iteration_signal.user_message_type,
+        "intent": intent,
+        "explicit_request": sanitize_learning_trace_value(message, limit=260),
+        "inferred_hidden_need": sanitize_learning_trace_value(
+            iteration_signal.inferred_hidden_need or context.inferred_hidden_need,
+            limit=360,
+        ),
+        "emotional_or_style_signal": sanitize_learning_trace_value(
+            iteration_signal.detected_user_state or context.detected_user_state,
+            limit=180,
+        ),
+        "source_types_used": source_types,
+        "retrieved_at": sanitize_learning_trace_value(retrieval_meta.get("retrieved_at"), limit=120),
+        "evidence_summary": sanitize_learning_trace_value(retrieval_meta.get("evidence_summary"), limit=700),
+        "final_answer_summary": sanitize_learning_trace_value(
+            retrieval_meta.get("final_answer_summary") or response_text,
+            limit=500,
+        ),
+        "uncertainty_or_boundary": sanitize_learning_trace_value(
+            retrieval_meta.get("uncertainty_or_boundary"),
+            limit=500,
+        ),
+        "user_feedback_type": iteration_signal.user_feedback_type,
+        "style_feedback_candidate": style_candidate,
+        "need_profile_candidate": need_candidate,
+        "next_turn_improvement": sanitize_learning_trace_value(iteration_signal.next_turn_improvement, limit=260),
+        "should_confirm_with_user": should_confirm,
+        "confirmed": False,
+        "storage_policy": "local_summary_candidate_no_sensitive_raw_text",
+    }
+
+
+def record_need_research_signal(record: dict[str, object], log_dir: Path | None = None) -> dict[str, Path]:
+    log_dir = learning_loop_dir(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    now = utc_now()
+    paths: dict[str, Path] = {}
+    source = interaction_source()
+    if source:
+        record = {**record, "source": source}
+    interaction_path = log_dir / f"interaction-log-{now:%Y-%m-%d}.jsonl"
+    with interaction_path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    paths["interaction_log"] = interaction_path
+
+    if str(record.get("style_feedback_candidate") or "").strip():
+        style_path = log_dir / f"style-feedback-candidates-{now:%Y-%m-%d}.jsonl"
+        style_row = {
+            "created_at": record.get("created_at"),
+            "level": "Style Feedback Candidate",
+            "user_feedback_type": record.get("user_feedback_type"),
+            "style_feedback_candidate": record.get("style_feedback_candidate"),
+            "next_turn_improvement": record.get("next_turn_improvement"),
+            "confirmed": False,
+            "storage_policy": "candidate_affects_expression_only",
+        }
+        if source:
+            style_row["source"] = source
+        with style_path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(style_row, ensure_ascii=False) + "\n")
+        paths["style_feedback_candidates"] = style_path
+
+    if str(record.get("need_profile_candidate") or "").strip():
+        need_path = log_dir / f"need-profile-candidates-{now:%Y-%m-%d}.jsonl"
+        need_row = {
+            "created_at": record.get("created_at"),
+            "level": "Need Profile Candidate",
+            "user_query_type": record.get("user_query_type"),
+            "need_profile_candidate": record.get("need_profile_candidate"),
+            "should_confirm_with_user": record.get("should_confirm_with_user"),
+            "confirmed": False,
+            "storage_policy": "candidate_affects_context_understanding_only",
+        }
+        if source:
+            need_row["source"] = source
+        with need_path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(need_row, ensure_ascii=False) + "\n")
+        paths["need_profile_candidates"] = need_path
+
+    return paths
+
+
 def run_layered_response(
     message: str,
     *,
@@ -3290,11 +3522,6 @@ def run_layered_response(
         boundary_text=supporting_context,
     )
     user_query_type = user_message_type_for(message, intent, interpret_need(message, intent), learning)
-    style_feedback_candidate = (
-        f"conversation_style_feedback:{learning.classification}"
-        if learning.classification in {"style_feedback", "relationship_repair", "behavior_preference"}
-        else ""
-    )
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     quality_flags = [
         "reply_engine",
@@ -3341,6 +3568,17 @@ def run_layered_response(
         response_text=guarded,
         issues=issues,
     )
+    need_research_record = build_need_research_record(
+        message=message,
+        intent=intent,
+        context=context,
+        learning=learning,
+        iteration_signal=iteration_signal,
+        retrieval_meta=retrieval_meta,
+        response_text=guarded,
+        memory_candidate=memory_candidate,
+    )
+    style_feedback_candidate = str(need_research_record.get("style_feedback_candidate") or "")
     record_iteration_signal(iteration_signal, log_dir=log_dir)
     record_interaction(
         message=message,
@@ -3367,6 +3605,7 @@ def run_layered_response(
         next_turn_improvement=iteration_signal.next_turn_improvement,
         log_dir=log_dir,
     )
+    record_need_research_signal(need_research_record, log_dir=log_dir)
     record_session_note(
         message,
         intent,

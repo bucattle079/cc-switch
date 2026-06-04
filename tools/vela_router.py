@@ -583,6 +583,8 @@ def classify_intent(text: str) -> Intent:
         return Intent("normal_chat", 1.0, [])
     if is_tool_surface_opt_out_chat(norm):
         return Intent("normal_chat", 0.87, ["conversation_boundary"])
+    if is_life_information_request(norm):
+        return Intent("daily_info", 0.84, ["daily_info", "life_info", "current_info"])
     if is_weather_query(raw):
         return Intent("weather_query", 0.9, weather_focus_tags(raw))
     if is_deepseek_retrieval_question(raw):
@@ -607,8 +609,6 @@ def classify_intent(text: str) -> Intent:
         return Intent("world_brief", 0.84, ["geopolitics", "global", "current_info"])
     if is_current_time_query(norm):
         return Intent("daily_info", 0.86, ["daily_info", "current_info", "time_query"])
-    if is_life_information_request(norm):
-        return Intent("daily_info", 0.84, ["daily_info", "life_info", "current_info"])
     if is_current_general_info_request(norm):
         return Intent("daily_info", 0.82, ["daily_info", "current_info"])
     if is_freshness_question(norm) and not is_market_summary_request(norm):
@@ -717,7 +717,14 @@ def is_current_general_info_request(text: str) -> bool:
 
 def is_life_information_request(text: str) -> bool:
     norm = normalize(text)
-    return contains_any(norm, LIFE_INFO_KEYWORDS) and not is_weather_query(norm)
+    if not contains_any(norm, LIFE_INFO_KEYWORDS):
+        return False
+    strong_weather_keywords = [
+        word
+        for word in WEATHER_KEYWORDS
+        if word not in {"适合出门", "适不适合出门", "能不能出门", "出门风险"}
+    ]
+    return not contains_any(norm, strong_weather_keywords)
 
 
 def is_current_time_query(text: str) -> bool:

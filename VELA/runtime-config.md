@@ -86,6 +86,16 @@ Strategic memory candidates, such as project goals or persona direction, are rea
 
 Interaction logs are local diagnostic memory. They mark repeated messages, feedback type, candidate-memory status, response latency, foreground lane, and response quality issues so the next turn can adapt without exposing raw schema or promoting one-off feedback into permanent truth.
 
+Project A completion-loop memory adds a separate backstage need-research layer under `VELA/learning-loop`:
+
+- `interaction-log-*.jsonl`: sanitized per-turn trace with query type, explicit request summary, inferred hidden need, source types, evidence summary, final answer summary, uncertainty/boundary, feedback type, next-turn improvement, and confirmation need.
+- `style-feedback-candidates-*.jsonl`: unconfirmed expression candidates such as `reduce_template_tone`, `answer_first`, `avoid_self_explanation`, `repair_previous_answer_without_defense`, `avoid_fixed_k_prefix`, or `warmer_partner_tone`.
+- `need-profile-candidates-*.jsonl`: unconfirmed need-profile candidates such as `expects_proactive_context_understanding`, `retrieval_when_needed`, `memory_continuity`, `strategic_judgment`, `needs_evidence_boundary`, or `needs_financial_freshness_boundary`.
+- `memory-candidates-*.jsonl`: non-sensitive reusable preference or behavior candidates. These remain unconfirmed until the user explicitly confirms them.
+- `strategic-memory-*.jsonl`: confirmed long-term principles only; writes require explicit user confirmation.
+
+The context builder reads recent style and need-profile candidates before the next reply. These candidates may change wording, reply shape, and repair behavior, but they must not fabricate facts, imply confirmed preferences, or expand into private user profiling. Stored values are short summaries/tags only; API keys, internal paths, long raw user text, and sensitive payloads are redacted or skipped.
+
 ## Factual Status Boundary
 
 Market, weather, and realtime-info lanes must distinguish:
