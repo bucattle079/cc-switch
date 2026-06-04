@@ -92,6 +92,12 @@ MARKET_KEYWORDS = [
     "美元",
     "美债",
     "人民币",
+    "汇率",
+    "美元人民币",
+    "美元/人民币",
+    "股票",
+    "基金",
+    "指数",
     "油价",
     "黄金",
     "vix",
@@ -135,6 +141,12 @@ EXPLICIT_MARKET_DECISION_KEYWORDS = [
     "美元",
     "美债",
     "人民币",
+    "汇率",
+    "美元人民币",
+    "美元/人民币",
+    "股票",
+    "基金",
+    "指数",
     "油价",
     "黄金",
     "vix",
@@ -235,6 +247,7 @@ CURRENT_MARKET_HARD_SURFACE_KEYWORDS = [
     "盘面",
 ]
 WORLD_KEYWORDS = ["世界", "全球", "军政", "地缘", "外交", "战争", "制裁", "航运", "能源安全", "世界简报"]
+LIFE_INFO_KEYWORDS = ["附近", "生活资讯", "出门建议", "本地生活", "周边", "通勤", "路线", "餐厅", "活动"]
 CURRENT_INFO_ACTION_KEYWORDS = [
     "资讯",
     "新闻",
@@ -470,8 +483,8 @@ WEATHER_QUESTION_WORDS = [
     "风险",
 ]
 DAILY_INFO_KEYWORDS = ["解释", "整理", "总结", "帮我查", "帮我搜", "这是什么意思", "什么意思", "逻辑", "分析一下", "协助我分析", "选择", "比较好吗", "翻译", "普通检索"]
-MEMORY_KEYWORDS = ["记住", "记忆", "长期", "以后", "默认", "偏好", "别忘", "学习一下", *STYLE_FEEDBACK_KEYWORDS]
-MEMORY_PRIORITY_KEYWORDS = ["记住", "记忆", "长期", "以后", "默认", "偏好", "别忘", "学习一下", "沉淀"]
+MEMORY_KEYWORDS = ["记住", "记录", "记忆", "长期", "以后", "默认", "偏好", "别忘", "学习一下", *STYLE_FEEDBACK_KEYWORDS]
+MEMORY_PRIORITY_KEYWORDS = ["记住", "记录", "记忆", "长期", "以后", "默认", "偏好", "别忘", "学习一下", "沉淀"]
 PERSONA_TOOL_PREFIXES = {"persona", "personality", "vela-personality"}
 PERSONA_TOOL_ALIASES = {
     "人格": ["status"],
@@ -594,6 +607,8 @@ def classify_intent(text: str) -> Intent:
         return Intent("world_brief", 0.84, ["geopolitics", "global", "current_info"])
     if is_current_time_query(norm):
         return Intent("daily_info", 0.86, ["daily_info", "current_info", "time_query"])
+    if is_life_information_request(norm):
+        return Intent("daily_info", 0.84, ["daily_info", "life_info", "current_info"])
     if is_current_general_info_request(norm):
         return Intent("daily_info", 0.82, ["daily_info", "current_info"])
     if is_freshness_question(norm) and not is_market_summary_request(norm):
@@ -698,6 +713,11 @@ def is_current_general_info_request(text: str) -> bool:
     if is_weather_query(norm):
         return False
     return contains_any(norm, CURRENT_INFO_ACTION_KEYWORDS) or is_current_time_query(norm)
+
+
+def is_life_information_request(text: str) -> bool:
+    norm = normalize(text)
+    return contains_any(norm, LIFE_INFO_KEYWORDS) and not is_weather_query(norm)
 
 
 def is_current_time_query(text: str) -> bool:
@@ -889,6 +909,20 @@ def render_weather_reply(text: str) -> str:
     return guard_wechat_output(evidence.frontstage_boundary)
 
 
+def evidence_has_realtime_packet(evidence) -> bool:
+    return any(
+        getattr(packet, "freshness_status", "") == "real_time_source_available"
+        for packet in getattr(evidence, "packets", [])
+    )
+
+
+def should_use_realtime_evidence_for_public_info(text: str, intent: str) -> bool:
+    if is_current_information_request(text, intent):
+        return True
+    source_plan = plan_sources(text, intent)
+    return source_plan.source_need and bool({"news", "web_search"} & set(source_plan.source_type))
+
+
 def render_local_tool_reply(
     *,
     script: Path,
@@ -1066,23 +1100,38 @@ def reply_for(text: str) -> str:
             text,
             intent=intent.name,
             supporting_context=supporting_context,
-            reply_adapter=FallbackReplyAdapter(),
+            reply_adapter=None if evidence_has_realtime_packet(evidence) else FallbackReplyAdapter(),
+            retrieval_evidence=evidence,
         ).text
     elif intent.name == "market_brief":
-        supporting_context = render_cached_market_reply(text)
-        reply_adapter = None if is_current_information_request(text, intent.name) else FallbackReplyAdapter()
-        reply = run_layered_response(
-            text,
-            intent=intent.name,
-            supporting_context=supporting_context,
-            reply_adapter=reply_adapter,
-        ).text
+        source_plan = plan_sources(text, intent.name)
+        if source_plan.source_need and source_plan.freshness_requirement == "real_time":
+            evidence = build_realtime_evidence(text, intent.name)
+            supporting_context = guard_wechat_output(evidence.frontstage_boundary)
+            reply = run_layered_response(
+                text,
+                intent=intent.name,
+                supporting_context=supporting_context,
+                reply_adapter=None if evidence_has_realtime_packet(evidence) else FallbackReplyAdapter(),
+                retrieval_evidence=evidence,
+            ).text
+        else:
+            supporting_context = render_cached_market_reply(text)
+            reply_adapter = None if is_current_information_request(text, intent.name) else FallbackReplyAdapter()
+            reply = run_layered_response(
+                text,
+                intent=intent.name,
+                supporting_context=supporting_context,
+                reply_adapter=reply_adapter,
+            ).text
     elif intent.name == "weather_query":
-        supporting_context = render_weather_reply(text)
+        evidence = build_realtime_evidence(text, intent.name)
+        supporting_context = guard_wechat_output(evidence.frontstage_boundary)
         reply = run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
+            retrieval_evidence=evidence,
         ).text
     elif intent.name == "daily_info" and is_current_time_query(text):
         supporting_context = guard_wechat_output(render_time_query_reply(text))
@@ -1091,14 +1140,15 @@ def reply_for(text: str) -> str:
             intent=intent.name,
             supporting_context=supporting_context,
         ).text
-    elif intent.name in {"daily_info", "world_brief"} and is_current_information_request(text, intent.name):
+    elif intent.name in {"daily_info", "world_brief"} and should_use_realtime_evidence_for_public_info(text, intent.name):
         evidence = build_realtime_evidence(text, intent.name)
         supporting_context = guard_wechat_output(evidence.frontstage_boundary)
         reply = run_layered_response(
             text,
             intent=intent.name,
             supporting_context=supporting_context,
-            reply_adapter=FallbackReplyAdapter(),
+            reply_adapter=None if evidence_has_realtime_packet(evidence) else FallbackReplyAdapter(),
+            retrieval_evidence=evidence,
         ).text
     elif intent.name == "style_feedback":
         reply = run_layered_response(

@@ -456,6 +456,90 @@ class VelaRealtimeIntelligenceTests(unittest.TestCase):
         self.assertIn("market_data", result.plan.source_type)
         self.assertNotIn("weather", result.plan.source_type)
 
+    def test_source_planner_maps_financial_realtime_to_market_news_and_web(self):
+        rt = load_module(REALTIME, "vela_realtime_intelligence_finance_sources")
+
+        for message in ["美元人民币汇率现在多少", "目前 VIX 是否正常？", "今天市场能不能加仓"]:
+            with self.subTest(message):
+                plan = rt.plan_sources(message, "market_brief")
+
+                self.assertTrue(plan.source_need)
+                self.assertIn("market_data", plan.source_type)
+                self.assertIn("news", plan.source_type)
+                self.assertIn("web_search", plan.source_type)
+                self.assertEqual(plan.freshness_requirement, "real_time")
+
+    def test_market_connector_without_provider_returns_structured_capability_boundary(self):
+        rt = load_module(REALTIME, "vela_realtime_intelligence_market_no_provider")
+
+        result = rt.build_realtime_evidence("美元人民币汇率现在多少", "market_brief")
+
+        self.assertTrue(result.packets)
+        market_packet = next(packet for packet in result.packets if packet.source_type == "market_data")
+        self.assertEqual(market_packet.freshness_status, rt.FRESH_UNAVAILABLE)
+        self.assertIn("market_provider_not_configured", market_packet.known_limits)
+        for token in ["当前可用数据", "不可用数据", "可判断部分", "不能确定部分", "下一步"]:
+            self.assertIn(token, result.frontstage_boundary)
+        self.assertNotRegex(result.frontstage_boundary, r"(美元|人民币|VIX)[^\n]{0,12}\d{1,3}(?:\.\d+)?")
+        for raw in ["source_type", "evidence_id", "provider_not_configured", "real_time_source_available"]:
+            self.assertNotIn(raw, result.frontstage_boundary)
+
+    def test_market_connector_with_alpha_vantage_fx_builds_evidence_packet(self):
+        rt = load_module(REALTIME, "vela_realtime_intelligence_market_alpha_fx")
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                payload = {
+                    "Realtime Currency Exchange Rate": {
+                        "1. From_Currency Code": "USD",
+                        "2. From_Currency Name": "United States Dollar",
+                        "3. To_Currency Code": "CNY",
+                        "4. To_Currency Name": "Chinese Yuan",
+                        "5. Exchange Rate": "7.18320000",
+                        "6. Last Refreshed": "2026-06-04 02:20:00",
+                        "7. Time Zone": "UTC",
+                    }
+                }
+                return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        with patch.dict(
+            "os.environ",
+            {
+                "VELA_LEARNING_LOOP_DIR": str(Path(self.temp_dir.name) / "learning-loop"),
+                "VELA_MARKET_PROVIDER": "alpha_vantage",
+                "VELA_MARKET_API_KEY": "test-market-key",
+            },
+            clear=True,
+        ):
+            with patch.object(rt.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen:
+                result = rt.build_realtime_evidence("美元人民币汇率现在多少", "market_brief")
+
+        self.assertGreaterEqual(urlopen.call_count, 1)
+        market_packet = next(packet for packet in result.packets if packet.source_type == "market_data")
+        self.assertEqual(market_packet.freshness_status, rt.FRESH_REALTIME)
+        self.assertIn("美元/人民币", market_packet.key_values["instrument"])
+        self.assertIn("7.1832", market_packet.key_values["value"])
+        self.assertIn("2026-06-04", market_packet.key_values["as_of"])
+        self.assertNotIn("test-market-key", market_packet.source_url_or_origin)
+        self.assertIn("数据时间", result.frontstage_boundary)
+        self.assertIn("辅助判断", result.frontstage_boundary)
+
+    def test_life_information_query_plans_web_and_news_without_weather_pollution(self):
+        rt = load_module(REALTIME, "vela_realtime_intelligence_life_sources")
+
+        plan = rt.plan_sources("附近生活资讯/出门建议", "daily_info")
+
+        self.assertTrue(plan.source_need)
+        self.assertIn("web_search", plan.source_type)
+        self.assertIn("news", plan.source_type)
+        self.assertNotIn("weather", plan.source_type)
+
     def test_deepseek_search_boundary_and_identity_routes_stay_out_of_weather(self):
         router = load_module(ROUTER, "vela_router_weather_pollution")
 

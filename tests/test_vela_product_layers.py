@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -3080,6 +3081,75 @@ class VelaProductLayerTests(unittest.TestCase):
         self.assertTrue(any("self_quality_repair" in item for item in next_context.user_preferences))
         self.assertNotIn("刚忙完", second.text)
         self.assertNotIn("菜单", second.text)
+
+    def test_retrieval_evidence_is_recorded_as_learning_candidate_metadata(self):
+        product = load_product_module()
+        reply_engine = load_module(REPLY_ENGINE, "vela_reply_engine")
+
+        class EvidenceAwareAdapter(reply_engine.ReplyAdapter):
+            name = "deepseek_chat"
+
+            def generate(self, context):
+                return reply_engine.ReplyEngineResult(
+                    text=(
+                        "结论：先按低置信度观察，不把标题当事实。\n"
+                        "依据：公开新闻线索显示行业讨论度升温。\n"
+                        "边界：来源需要复核，不能当成交易指令。\n"
+                        "下一步：先核原始公告，再看资金是否跟上。"
+                    ),
+                    source="fake",
+                    used_api=True,
+                    adapter=self.name,
+                )
+
+        evidence = SimpleNamespace(
+            packets=[
+                SimpleNamespace(
+                    source_type="news",
+                    freshness_status="real_time_source_available",
+                    retrieved_at="2026-06-04T02:00:00+00:00",
+                    title="AI 算力链讨论度升温",
+                    summary="公开新闻线索显示存储和光模块关注度上升。",
+                    confidence_level="medium",
+                    known_limits=["source_must_be_verified_before_strong_claims"],
+                )
+            ],
+            frontstage_boundary="公开网页/新闻搜索源已返回线索；判断前仍要复核原始来源。",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            result = product.run_layered_response(
+                "帮我查一下今天某行业最新讨论度",
+                intent="daily_info",
+                log_dir=log_dir,
+                supporting_context=evidence.frontstage_boundary,
+                retrieval_evidence=evidence,
+                reply_adapter=EvidenceAwareAdapter(),
+            )
+            interaction_row = json.loads(next(log_dir.glob("interaction-*.jsonl")).read_text(encoding="utf-8").splitlines()[0])
+            quality_row = json.loads(next(log_dir.glob("reply-quality-*.jsonl")).read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertIn("结论：", result.text)
+        self.assertEqual(interaction_row["user_query_type"], "daily_info")
+        self.assertEqual(interaction_row["source_types_used"], ["news"])
+        self.assertEqual(interaction_row["retrieved_at"], "2026-06-04T02:00:00+00:00")
+        self.assertIn("AI 算力链讨论度升温", interaction_row["evidence_summary"])
+        self.assertIn("低置信度观察", interaction_row["final_answer_summary"])
+        self.assertIn("复核原始来源", interaction_row["uncertainty_or_boundary"])
+        self.assertEqual(quality_row["source_types_used"], ["news"])
+        for raw in ["evidence_id", "source_type", "real_time_source_available"]:
+            self.assertNotIn(raw, result.text)
+
+    def test_record_answer_shape_preference_keeps_specific_candidate_summary(self):
+        product = load_product_module()
+
+        candidate = product.build_memory_candidate("记录我更喜欢先结论后解释")
+
+        self.assertEqual(candidate["classification"], "behavior_preference")
+        self.assertIn("先给结论", candidate["summary"])
+        self.assertIn("依据", candidate["summary"])
+        self.assertFalse(candidate["confirmed"])
 
 
 if __name__ == "__main__":

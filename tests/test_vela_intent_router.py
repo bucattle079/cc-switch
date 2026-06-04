@@ -80,6 +80,43 @@ class VelaIntentRouterTests(unittest.TestCase):
         self.assertTrue(intent.market_allowed)
         self.assertIn("china_a", intent.focus_tags)
 
+    def test_realtime_financial_queries_route_to_market_retrieval(self):
+        router = load_module(ROUTER, "vela_router_mvp_finance_routes")
+
+        for message in ["现在 VIX 是多少", "美元人民币汇率现在多少", "今天市场能不能加仓"]:
+            with self.subTest(message=message):
+                intent = router.classify_intent(message)
+                decision = router.route_decision(message)
+                source_plan = router.plan_sources(message, intent.name)
+
+                self.assertEqual(intent.name, "market_brief")
+                self.assertTrue(decision.needs_retrieval)
+                self.assertIn("market_data", source_plan.source_type)
+                self.assertIn("news", source_plan.source_type)
+                self.assertIn("web_search", source_plan.source_type)
+                self.assertEqual(source_plan.freshness_requirement, "real_time")
+
+    def test_life_information_routes_to_search_not_weather_or_chat(self):
+        router = load_module(ROUTER, "vela_router_mvp_life_routes")
+
+        intent = router.classify_intent("附近生活资讯/出门建议")
+        decision = router.route_decision("附近生活资讯/出门建议")
+        source_plan = router.plan_sources("附近生活资讯/出门建议", intent.name)
+
+        self.assertEqual(intent.name, "daily_info")
+        self.assertTrue(decision.needs_retrieval)
+        self.assertIn("news", source_plan.source_type)
+        self.assertIn("web_search", source_plan.source_type)
+        self.assertNotIn("weather", source_plan.source_type)
+
+    def test_record_preferred_answer_shape_routes_to_memory_candidate(self):
+        router = load_module(ROUTER, "vela_router_mvp_record_preference")
+
+        intent = router.classify_intent("记录我更喜欢先结论后解释")
+
+        self.assertEqual(intent.name, "memory_related")
+        self.assertIn("memory", intent.focus_tags)
+
     def test_general_market_question_routes_to_market_brief(self):
         router = load_module(ROUTER, "vela_router")
 

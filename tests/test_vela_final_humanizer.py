@@ -104,7 +104,14 @@ class VelaFinalHumanizerTests(unittest.TestCase):
         self.assertTrue(
             any(
                 token in reply
-                for token in ["不能读取实时", "实时源未接入", "实时源暂不可用", "不能给盘中实时结论", "实时源已接入"]
+                for token in [
+                    "不能读取实时",
+                    "实时源未接入",
+                    "实时源暂不可用",
+                    "实时行情源未接入",
+                    "不能给盘中实时结论",
+                    "实时源已接入",
+                ]
             ),
             reply,
         )

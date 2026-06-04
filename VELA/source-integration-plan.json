@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-06-04",
+  "purpose": "Provider-ready source map for VELA general intelligence MVP. This file records connector surfaces and boundaries; it does not store API keys or pretend any provider is connected.",
+  "output_structures": [
+    "daily_brief",
+    "topic_radar",
+    "company_watchlist",
+    "risk_signal",
+    "decision_log",
+    "local_memory"
+  ],
+  "sources": {
+    "official_announcements": {
+      "source_type": "web_search",
+      "status": "provider_ready",
+      "env_required": [
+        "VELA_SEARCH_PROVIDER",
+        "VELA_SEARCH_API_KEY"
+      ],
+      "outputs": [
+        "daily_brief",
+        "risk_signal",
+        "decision_log"
+      ],
+      "known_limits": [
+        "search_results_are_leads_not_final_facts",
+        "official_origin_must_be_verified"
+      ],
+      "pretend_connected": false
+    },
+    "judicial_auction": {
+      "source_type": "web_search",
+      "status": "provider_ready",
+      "env_required": [
+        "VELA_SEARCH_PROVIDER",
+        "VELA_SEARCH_API_KEY"
+      ],
+      "outputs": [
+        "topic_radar",
+        "risk_signal"
+      ],
+      "known_limits": [
+        "requires_domain_filtering_before_strong_claims"
+      ],
+      "pretend_connected": false
+    },
+    "court_documents": {
+      "source_type": "web_search",
+      "status": "provider_ready",
+      "env_required": [
+        "VELA_SEARCH_PROVIDER",
+        "VELA_SEARCH_API_KEY"
+      ],
+      "outputs": [
+        "risk_signal",
+        "decision_log"
+      ],
+      "known_limits": [
+        "case_metadata_must_be_verified_at_original_source"
+      ],
+      "pretend_connected": false
+    },
+    "execution_info": {
+      "source_type": "web_search",
+      "status": "provider_ready",
+      "env_required": [
+        "VELA_SEARCH_PROVIDER",
+        "VELA_SEARCH_API_KEY"
+      ],
+      "outputs": [
+        "risk_signal",
+        "company_watchlist"
+      ],
+      "known_limits": [
+        "high_false_positive_risk_without_identifier_matching"
+      ],
+      "pretend_connected": false
+    },
+    "enterprise_query": {
+      "source_type": "generic_tool_connector",
+      "status": "planned",
+      "env_required": [
+        "VELA_ENTERPRISE_PROVIDER",
+        "VELA_ENTERPRISE_API_KEY"
+      ],
+      "outputs": [
+        "company_watchlist",
+        "risk_signal",
+        "local_memory"
+      ],
+      "known_limits": [
+        "not_connected_in_current_mvp",
+        "must_not_store_sensitive_company_payloads_without_policy"
+      ],
+      "pretend_connected": false
+    },
+    "eastmoney_xueqiu_market_info": {
+      "source_type": "market_data",
+      "status": "provider_ready",
+      "env_required": [
+        "VELA_MARKET_PROVIDER",
+        "VELA_MARKET_API_KEY"
+      ],
+      "outputs": [
+        "daily_brief",
+        "topic_radar",
+        "risk_signal"
+      ],
+      "known_limits": [
+        "provider_latency_or_delay_must_be_labeled",
+        "not_investment_advice"
+      ],
+      "pretend_connected": false
+    },
+    "mutual_finance_listed_company_watchlist": {
+      "source_type": "local_files",
+      "status": "local_file_ready",
+      "env_required": [
+        "VELA_WATCHLIST_FILE"
+      ],
+      "outputs": [
+        "company_watchlist",
+        "topic_radar",
+        "risk_signal",
+        "local_memory"
+      ],
+      "known_limits": [
+        "uploaded_or_configured_file_required",
+        "watchlist_membership_is_context_not_risk_fact"
+      ],
+      "pretend_connected": false
+    }
+  }
+}

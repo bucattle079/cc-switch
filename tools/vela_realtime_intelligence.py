@@ -32,6 +32,7 @@ DEFAULT_SOURCE_TYPES = (
 )
 
 WEATHERAPI_FORECAST_URL = "https://api.weatherapi.com/v1/forecast.json"
+ALPHA_VANTAGE_QUERY_URL = "https://www.alphavantage.co/query"
 WEATHER_EVIDENCE_KEYS = (
     "location",
     "temperature",
@@ -95,6 +96,15 @@ class ConnectorRawResult:
 
 
 @dataclass(frozen=True)
+class MarketTarget:
+    label: str
+    target_type: str
+    symbol: str = ""
+    from_currency: str = ""
+    to_currency: str = ""
+
+
+@dataclass(frozen=True)
 class RealtimeEvidenceResult:
     plan: SourcePlan
     packets: list[EvidencePacket] = field(default_factory=list)
@@ -154,28 +164,75 @@ class MarketDataConnector(RetrievalConnector):
     source_name = "VELA market data boundary"
 
     def fetch(self, query: str, freshness_requirement: str) -> ConnectorRawResult:
+        provider = str(os.environ.get("VELA_MARKET_PROVIDER") or "").strip().lower()
+        api_key = str(os.environ.get("VELA_MARKET_API_KEY") or "").strip()
+        if provider and api_key:
+            target = _market_target_for_query(query)
+            if target is None:
+                return self._unavailable(
+                    query,
+                    "市场数据源已配置，但这条问题没有可直接查询的行情标的。",
+                    ["market_instrument_not_mapped"],
+                    include_cache=False,
+                )
+            if provider in {"alpha_vantage", "alphavantage"}:
+                try:
+                    payload = self._fetch_alpha_vantage(target, api_key)
+                    return self._normalize_alpha_vantage(payload, target)
+                except Exception as exc:
+                    return ConnectorRawResult(
+                        source_name="Alpha Vantage market data",
+                        source_type=self.source_type,
+                        freshness_status=FRESH_UNAVAILABLE,
+                        title="市场数据源调用失败",
+                        summary="已配置市场数据源，但这轮没有返回可用行情；不能把模型判断伪装成当前数值。",
+                        key_values={"provider": "alpha_vantage", "error": type(exc).__name__},
+                        source_url_or_origin="Alpha Vantage API",
+                        confidence_level="medium",
+                        known_limits=["market_provider_error"],
+                    )
+            return self._unavailable(
+                query,
+                "市场数据 provider 暂不支持；不能给当前行情数值。",
+                ["market_provider_unsupported"],
+                include_cache=False,
+            )
+        return self._unavailable(
+            query,
+            "当前未接入实时市场数据源；不能给当前行情数值。",
+            ["market_provider_not_configured"],
+            include_cache=True,
+        )
+
+    def _unavailable(
+        self,
+        query: str,
+        summary: str,
+        limits: list[str],
+        *,
+        include_cache: bool,
+    ) -> ConnectorRawResult:
         key_values: dict[str, str] = {}
         status_text = FRESH_UNAVAILABLE
-        try:
-            from vela_market_briefing import market_freshness_status
+        if include_cache and not _market_requires_current_value(query):
+            try:
+                from vela_market_briefing import market_freshness_status
 
-            status = market_freshness_status(query)
-            if status.cached_summary_available:
-                status_text = FRESH_CACHE
-                key_values["cache_last_updated"] = status.last_updated
-            elif status.model_generated_only:
-                status_text = FRESH_MODEL_ONLY
-        except Exception as exc:
-            key_values["status_error"] = type(exc).__name__
-        wants_vix = "vix" in _compact(query)
-        summary = (
-            "当前没有 VIX/外盘实时行情 connector；不能给当前数值。"
-            if wants_vix
-            else "当前市场实时 connector 不完整；只能使用本地缓存、已有行情快照或用户提供材料做方向判断。"
-        )
-        limits = ["no_realtime_market_connector"]
-        if wants_vix:
-            limits.append("no_vix_realtime_value")
+                status = market_freshness_status(query)
+                if status.cached_summary_available:
+                    status_text = FRESH_CACHE
+                    key_values["cache_last_updated"] = status.last_updated
+                elif status.model_generated_only:
+                    status_text = FRESH_MODEL_ONLY
+            except Exception as exc:
+                key_values["status_error"] = type(exc).__name__
+        target = _market_target_for_query(query)
+        if target is not None:
+            key_values["instrument"] = target.label
+        elif _has_any(_compact(query), ["存储", "光模块"]):
+            key_values["instrument"] = "存储/光模块讨论度"
+        if "vix" in _compact(query):
+            limits = _dedupe(limits + ["no_vix_realtime_value"])
         return ConnectorRawResult(
             source_name=self.source_name,
             source_type=self.source_type,
@@ -183,9 +240,102 @@ class MarketDataConnector(RetrievalConnector):
             title="市场数据源边界",
             summary=summary,
             key_values=key_values,
-            source_url_or_origin="VELA/market-cache and configured market connectors",
+            source_url_or_origin="VELA market connector config",
             confidence_level="high",
             known_limits=limits,
+        )
+
+    def _fetch_alpha_vantage(self, target: MarketTarget, api_key: str) -> dict[str, Any]:
+        if target.target_type == "fx":
+            params = {
+                "function": "CURRENCY_EXCHANGE_RATE",
+                "from_currency": target.from_currency,
+                "to_currency": target.to_currency,
+                "apikey": api_key,
+            }
+        else:
+            params = {"function": "GLOBAL_QUOTE", "symbol": target.symbol, "apikey": api_key}
+        request = urllib.request.Request(f"{ALPHA_VANTAGE_QUERY_URL}?{urlencode(params)}", method="GET")
+        with urllib.request.urlopen(request, timeout=_timeout_seconds()) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("market_payload_not_object")
+        return payload
+
+    def _normalize_alpha_vantage(self, payload: dict[str, Any], target: MarketTarget) -> ConnectorRawResult:
+        if target.target_type == "fx":
+            data = payload.get("Realtime Currency Exchange Rate")
+            if not isinstance(data, dict):
+                return ConnectorRawResult(
+                    source_name="Alpha Vantage market data",
+                    source_type=self.source_type,
+                    freshness_status=FRESH_UNAVAILABLE,
+                    title=f"{target.label}汇率暂不可用",
+                    summary="Alpha Vantage 没有返回可整理的实时汇率字段；不能给当前数值。",
+                    key_values={"provider": "alpha_vantage", "instrument": target.label},
+                    source_url_or_origin="Alpha Vantage API",
+                    confidence_level="medium",
+                    known_limits=["market_provider_payload_unusable"],
+                )
+            value = _clean_market_value(data.get("5. Exchange Rate"))
+            as_of = str(data.get("6. Last Refreshed") or "").strip()
+            timezone_text = str(data.get("7. Time Zone") or "").strip()
+            if as_of and timezone_text:
+                as_of = f"{as_of} {timezone_text}"
+            key_values = {
+                "provider": "alpha_vantage",
+                "instrument": target.label,
+                "value": value,
+                "as_of": as_of or "provider reported",
+                "data_time": as_of or "provider reported",
+                "delay_status": "provider_reported; may be delayed",
+            }
+            return ConnectorRawResult(
+                source_name="Alpha Vantage market data",
+                source_type=self.source_type,
+                freshness_status=FRESH_REALTIME,
+                title=f"{target.label}当前汇率",
+                summary=f"{target.label}当前汇率约为 {value}；仍需结合新闻、美元指数和风险资产表现判断。",
+                key_values=key_values,
+                source_url_or_origin="Alpha Vantage API",
+                confidence_level="medium",
+                known_limits=["provider_may_be_delayed", "not_investment_advice"],
+            )
+        data = payload.get("Global Quote")
+        if not isinstance(data, dict):
+            return ConnectorRawResult(
+                source_name="Alpha Vantage market data",
+                source_type=self.source_type,
+                freshness_status=FRESH_UNAVAILABLE,
+                title=f"{target.label}行情暂不可用",
+                summary="Alpha Vantage 没有返回可整理的行情字段；不能给当前数值。",
+                key_values={"provider": "alpha_vantage", "instrument": target.label},
+                source_url_or_origin="Alpha Vantage API",
+                confidence_level="medium",
+                known_limits=["market_provider_payload_unusable"],
+            )
+        value = _clean_market_value(data.get("05. price"))
+        latest_day = str(data.get("07. latest trading day") or "").strip()
+        change_percent = str(data.get("10. change percent") or "").strip()
+        key_values = {
+            "provider": "alpha_vantage",
+            "instrument": target.label,
+            "value": value,
+            "as_of": latest_day or "provider reported",
+            "data_time": latest_day or "provider reported",
+            "change_percent": change_percent,
+            "delay_status": "provider_reported; may be delayed",
+        }
+        return ConnectorRawResult(
+            source_name="Alpha Vantage market data",
+            source_type=self.source_type,
+            freshness_status=FRESH_REALTIME,
+            title=f"{target.label}当前行情",
+            summary=f"{target.label}当前价格约为 {value}；涨跌幅 {change_percent or '未返回'}。",
+            key_values=key_values,
+            source_url_or_origin="Alpha Vantage API",
+            confidence_level="medium",
+            known_limits=["provider_may_be_delayed", "not_investment_advice"],
         )
 
 
@@ -672,6 +822,61 @@ def _timeout_seconds() -> float:
     return min(max(value, 2.0), 20.0)
 
 
+def _market_requires_current_value(query: str) -> bool:
+    compact = _compact(query)
+    return _has_any(
+        compact,
+        [
+            "现在",
+            "当前",
+            "目前",
+            "此刻",
+            "实时",
+            "是多少",
+            "多少",
+            "正常",
+            "汇率",
+            "vix",
+            "美元人民币",
+            "美元/人民币",
+            "usdcny",
+            "usd/cny",
+        ],
+    )
+
+
+def _market_target_for_query(query: str) -> MarketTarget | None:
+    compact = _compact(query)
+    if _has_any(compact, ["美元人民币", "美元/人民币", "美元兑人民币", "人民币汇率", "美元人民币汇率", "usdcny", "usd/cny"]) or (
+        "美元" in compact and "人民币" in compact and "汇率" in compact
+    ):
+        return MarketTarget(label="美元/人民币", target_type="fx", from_currency="USD", to_currency="CNY")
+    if "vix" in compact:
+        return MarketTarget(label="VIX", target_type="quote", symbol="VIX")
+    if _has_any(compact, ["s&p500", "sp500", "标普500"]):
+        return MarketTarget(label="S&P 500", target_type="quote", symbol="SPY")
+    if _has_any(compact, ["nasdaq", "纳斯达克", "纳指"]):
+        return MarketTarget(label="Nasdaq", target_type="quote", symbol="QQQ")
+    if _has_any(compact, ["美元指数", "dxy"]):
+        return MarketTarget(label="美元指数", target_type="quote", symbol="UUP")
+    return None
+
+
+def _clean_market_value(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "未返回"
+    match = re.search(r"-?\d+(?:\.\d+)?", text)
+    if not match:
+        return text[:32]
+    number = match.group(0)
+    if "." not in number:
+        return number
+    integer, decimal = number.split(".", 1)
+    decimal = decimal[:4].rstrip("0")
+    return integer if not decimal else f"{integer}.{decimal}"
+
+
 def plan_sources(message: str, intent: str) -> SourcePlan:
     compact = _compact(message)
     source_types: list[str] = []
@@ -681,7 +886,7 @@ def plan_sources(message: str, intent: str) -> SourcePlan:
     warn = False
     reason = ""
 
-    if intent == "weather_query" or _has_any(compact, ["天气", "冷吗", "热吗", "下雨", "温度"]):
+    if intent == "weather_query" or _has_any(compact, ["天气", "冷吗", "热吗", "下雨", "下雪", "降雨", "风大", "温度", "气温"]):
         return SourcePlan(
             source_need=True,
             source_type=["weather"],
@@ -701,6 +906,19 @@ def plan_sources(message: str, intent: str) -> SourcePlan:
         "美股",
         "走势",
         "行情",
+        "汇率",
+        "股票",
+        "基金",
+        "指数",
+        "美元人民币",
+        "美元/人民币",
+        "人民币",
+        "美元",
+        "美债",
+        "黄金",
+        "油价",
+        "正常阶段",
+        "非正常阶段",
         "光模块",
         "存储",
         "半导体",
@@ -709,12 +927,30 @@ def plan_sources(message: str, intent: str) -> SourcePlan:
         source_types.append("market_data")
         should_use_cache = True
         warn = True
-        freshness = "real_time" if _has_any(compact, ["现在", "今天", "当前", "实时", "vix", "是多少"]) else "cached_or_delayed"
+        real_time_markers = [
+            "现在",
+            "当前",
+            "目前",
+            "此刻",
+            "实时",
+            "vix",
+            "是多少",
+            "多少",
+            "能不能",
+            "要不要",
+            "加仓",
+            "汇率",
+            "正常",
+            "讨论度",
+            "最新",
+        ]
+        realtime_requested = _has_any(compact, real_time_markers) and not _has_any(compact, ["不是实时", "不需要实时"])
+        freshness = "real_time" if realtime_requested else "cached_or_delayed"
         fallback = [FRESH_CACHE, FRESH_DELAYED, FRESH_UNAVAILABLE]
         reason = "市场问题先查行情/缓存边界，不能凭模型生成盘中事实。"
-        if _has_any(compact, ["讨论度", "新闻", "资讯", "消息", "存储", "光模块"]):
+        if freshness == "real_time" or _has_any(compact, ["讨论度", "新闻", "资讯", "消息", "存储", "光模块"]):
             source_types.extend(["news", "web_search"])
-            reason = "市场讨论度需要行情、新闻和网页线索共同验证。"
+            reason = "实时金融判断需要行情、新闻和网页线索共同校准，不能只看模型口感。"
         return SourcePlan(
             source_need=True,
             source_type=_dedupe(source_types),
@@ -736,7 +972,8 @@ def plan_sources(message: str, intent: str) -> SourcePlan:
             reason="身份/工具能力问题读取本地记忆和通用工具状态，不触发外部检索。",
         )
 
-    current_info = _has_any(
+    life_info = _has_any(compact, ["附近", "生活资讯", "出门建议", "本地生活", "周边", "活动", "通勤", "路线", "餐厅"])
+    current_info = life_info or _has_any(
         compact,
         ["现在", "今天", "当前", "最新", "查一下", "搜一下", "检索", "资料", "新闻", "公告", "网上讨论", "行业资讯", "政策"],
     )
@@ -840,24 +1077,64 @@ def _format_weather_frontstage(packet: EvidencePacket) -> str:
     )
 
 
+def _format_market_frontstage(packet: EvidencePacket | None, packets: list[EvidencePacket]) -> str:
+    market = packet or next((item for item in packets if item.source_type == "market_data"), None)
+    if market is None:
+        return (
+            "当前可用数据：暂未形成市场数据包。\n"
+            "不可用数据：实时行情源未接入，不能给当前数值。\n"
+            "可判断部分：只能做问题类型识别和资料缺口判断。\n"
+            "不能确定部分：当前价格、VIX、汇率、仓位时点都不能确定。\n"
+            "下一步：配置 VELA_MARKET_PROVIDER / VELA_MARKET_API_KEY 后再查。"
+        )
+    values = market.key_values
+    instrument = values.get("instrument") or ("VIX" if "vix" in _compact(market.title + market.summary) else "市场指标")
+    if market.freshness_status == FRESH_REALTIME:
+        value = values.get("value", "未返回")
+        data_time = values.get("data_time") or market.retrieved_at
+        provider = values.get("provider", market.source_name)
+        delay = values.get("delay_status", "provider_reported")
+        extra = ""
+        if values.get("change_percent"):
+            extra = f"；涨跌幅 {values['change_percent']}"
+        return "\n".join(
+            [
+                f"结论：{instrument} 已查到可用行情，当前值约 {value}{extra}。",
+                f"依据：数据时间 {data_time}；来源 {provider}；状态 {delay}。",
+                "边界：行情可能延迟，结论只能辅助判断，不是确定性买卖指令。",
+                "下一步：再叠加新闻、美元/美债和主要指数表现，别拿一个数字替整个战场下令。",
+            ]
+        )
+    cache_text = values.get("cache_last_updated")
+    available = f"本地缓存（更新时间 {cache_text}）" if cache_text else "本地缓存、用户提供材料、已接入的网页/新闻线索（如有）"
+    unavailable = f"{instrument} 实时行情源未接入，不能给当前数值"
+    if values.get("provider"):
+        unavailable = f"{instrument} provider 未返回可用行情，不能给当前数值"
+    return "\n".join(
+        [
+            f"当前可用数据：{available}。",
+            f"不可用数据：{unavailable}。",
+            "可判断部分：可以做方向框架、风险清单和低置信度观察，不能把缓存当直播。",
+            f"不能确定部分：{instrument} 当前值、异常程度、交易时点和买卖强度都不能确定。",
+            "下一步：接入市场数据 provider 和密钥；VIX、汇率、指数要拿到实时行情后，再交给 DeepSeek 综合判断。",
+        ]
+    )
+
+
 def format_realtime_boundary(plan: SourcePlan, packets: list[EvidencePacket]) -> str:
     if not plan.source_need:
         return ""
     statuses = {packet.freshness_status for packet in packets}
     types = set(plan.source_type)
-    if "market_data" in types and {"news", "web_search"} & types:
-        if FRESH_REALTIME in statuses:
-            return "已拿到公开网页/新闻线索；市场数据源仍需单独确认，结论不能只凭搜索标题下死。"
-        return (
-            "存储和光模块讨论度要同时看行情、新闻和网页线索；"
-            "当前网页/新闻搜索源未接入，只能先标出证据缺口，不能把缓存盘面当成板块热度。"
-        )
+    if "market_data" in types and FRESH_REALTIME not in statuses:
+        return _format_market_frontstage(next((packet for packet in packets if packet.source_type == "market_data"), None), packets)
+    if "market_data" in types and FRESH_REALTIME in statuses:
+        market_packet = next((packet for packet in packets if packet.source_type == "market_data"), None)
+        if market_packet is not None and market_packet.freshness_status == FRESH_REALTIME:
+            return _format_market_frontstage(market_packet, packets)
+        return _format_market_frontstage(market_packet, packets)
     if {"web_search", "news"} & types and FRESH_REALTIME not in statuses:
         return "网页/新闻搜索源未接入；我不能把模型常识伪装成实时检索。"
-    if "market_data" in types and FRESH_REALTIME not in statuses:
-        if FRESH_CACHE in statuses:
-            return "当前未接入实时行情源，只能基于本地缓存和已接入资料做有限方向判断。"
-        return "当前未接入实时行情源，不能给盘中数值，也不能把模型判断伪装成行情。"
     if "weather" in types:
         first = packets[0] if packets else None
         if first is None:

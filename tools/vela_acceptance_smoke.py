@@ -291,6 +291,22 @@ SINGLE_TURN_CASES = [
         "max_reply_chars": 300,
     },
     {
+        "id": "mvp_industry_latest_discussion_search_boundary",
+        "message": "帮我查一下今天某行业最新讨论度",
+        "expected_intent": "daily_info",
+        "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
+        "forbidden_reply_tokens": ["DEEPSEEK_API_KEY", "source_type", "evidence_id", "raw payload", "schema"],
+        "max_reply_chars": 260,
+    },
+    {
+        "id": "mvp_nearby_life_info_search_boundary",
+        "message": "附近生活资讯/出门建议",
+        "expected_intent": "daily_info",
+        "required_reply_tokens": ["网页/新闻搜索源", "未接入", "不能把模型常识"],
+        "forbidden_reply_tokens": ["天气", "市场", "DEEPSEEK_API_KEY", "source_type", "evidence_id", "schema"],
+        "max_reply_chars": 260,
+    },
+    {
         "id": "world_info_now_event_not_market",
         "message": "现在日本地震新闻",
         "expected_intent": "world_brief",
@@ -321,6 +337,14 @@ SINGLE_TURN_CASES = [
         "required_reply_tokens": ["没接入真实天气源", "不能给实时天气"],
         "forbidden_reply_tokens": ["不编实时天气", "天气实时数据不可用", "要精确预报请看本机天气源", "DeepSeek API", "DEEPSEEK_API_KEY"],
         "max_reply_chars": 420,
+    },
+    {
+        "id": "mvp_weather_new_york_tomorrow_rain",
+        "message": "明天纽约会下雨吗",
+        "expected_intent": "weather_query",
+        "required_reply_tokens": ["没接入真实天气源", "不能给实时天气"],
+        "forbidden_reply_tokens": ["DeepSeek API", "DEEPSEEK_API_KEY", "source_type", "evidence_id", "闲聊模板"],
+        "max_reply_chars": 360,
     },
     {
         "id": "weather_schedule_boundary",
@@ -363,6 +387,22 @@ SINGLE_TURN_CASES = [
         "max_reply_chars": 280,
     },
     {
+        "id": "mvp_market_add_position_realtime_boundary",
+        "message": "今天市场能不能加仓",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["当前可用数据", "不可用数据", "不能把缓存当直播", "下一步"],
+        "forbidden_reply_tokens": ["source_type", "evidence_id", "raw payload", "schema", "状态边界"],
+        "max_reply_chars": 420,
+    },
+    {
+        "id": "mvp_usd_cny_current_boundary",
+        "message": "美元人民币汇率现在多少",
+        "expected_intent": "market_brief",
+        "required_reply_tokens": ["美元/人民币", "实时行情源未接入", "不能给当前数值"],
+        "forbidden_reply_tokens": ["source_type", "evidence_id", "raw payload", "schema", "7."],
+        "max_reply_chars": 420,
+    },
+    {
         "id": "market_storage_light_discussion_source_boundary",
         "message": "帮我查一下今天存储和光模块的市场讨论度。",
         "expected_intent": "market_brief",
@@ -374,7 +414,7 @@ SINGLE_TURN_CASES = [
         "id": "market_current_a_share_realtime_compact",
         "message": "今天的A股市场如何",
         "expected_intent": "market_brief",
-        "required_reply_tokens": ["实时源", "判断：", "下一步："],
+        "required_reply_tokens": ["不是实时直播", "实时源", "60秒判断", "下一观察点"],
         "forbidden_reply_tokens": ["以下基于最近缓存", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
         "max_reply_chars": 620,
     },
@@ -382,7 +422,7 @@ SINGLE_TURN_CASES = [
         "id": "market_current_now_info_realtime_compact",
         "message": "现在的市场资讯",
         "expected_intent": "market_brief",
-        "required_reply_tokens": ["实时源已接入", "A股快照", "判断：", "下一步："],
+        "required_reply_tokens": ["当前可用数据", "不可用数据", "不能把缓存当直播", "下一步"],
         "forbidden_reply_tokens": ["以下基于最近缓存", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
         "max_reply_chars": 620,
     },
@@ -390,7 +430,7 @@ SINGLE_TURN_CASES = [
         "id": "market_current_a_share_object_now_uses_deepseek_chain",
         "message": "现在A股怎么样",
         "expected_intent": "market_brief",
-        "required_reply_tokens": ["实时源", "A股", "判断：", "下一步："],
+        "required_reply_tokens": ["当前可用数据", "不可用数据", "不能把缓存当直播", "下一步"],
         "forbidden_reply_tokens": ["以下基于最近缓存", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
         "max_reply_chars": 620,
     },
@@ -398,7 +438,7 @@ SINGLE_TURN_CASES = [
         "id": "market_current_news_realtime_compact",
         "message": "当前市场新闻",
         "expected_intent": "market_brief",
-        "required_reply_tokens": ["实时源已接入", "A股快照", "判断：", "下一步："],
+        "required_reply_tokens": ["当前可用数据", "不可用数据", "不能把缓存当直播", "下一步"],
         "forbidden_reply_tokens": ["不是实时直播；实时源：未接入", "不是实时直播；实时源未接入", "60秒判断", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
         "max_reply_chars": 620,
     },
@@ -406,7 +446,7 @@ SINGLE_TURN_CASES = [
         "id": "market_current_us_info_not_a_share",
         "message": "现在美股资讯",
         "expected_intent": "market_brief",
-        "required_reply_tokens": ["实时源暂不可用", "外盘实时源未接通", "全球", "判断：", "下一步："],
+        "required_reply_tokens": ["当前可用数据", "不可用数据", "不能把缓存当直播", "下一步"],
         "forbidden_reply_tokens": ["A股快照", "上证指数", "以下基于最近缓存", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
         "max_reply_chars": 620,
     },
@@ -414,7 +454,7 @@ SINGLE_TURN_CASES = [
         "id": "market_current_global_not_a_share",
         "message": "现在全球市场资讯",
         "expected_intent": "market_brief",
-        "required_reply_tokens": ["实时源暂不可用", "外盘实时源未接通", "全球", "判断：", "下一步："],
+        "required_reply_tokens": ["当前可用数据", "不可用数据", "不能把缓存当直播", "下一步"],
         "forbidden_reply_tokens": ["A股快照", "上证指数", "以下基于最近缓存", "VELA 市场简报", "状态边界：", "关键风险\n1.", "Market & World Briefing"],
         "max_reply_chars": 620,
     },
@@ -562,6 +602,22 @@ SINGLE_TURN_CASES = [
         "expected_intent": "memory_related",
     },
     {
+        "id": "mvp_identity_model_tool_memory_relation",
+        "message": "VELA 和 DeepSeek/Codex/记忆是什么关系",
+        "expected_intent": "memory_related",
+        "required_reply_tokens": ["DeepSeek", "Codex", "记忆", "VELA"],
+        "forbidden_reply_tokens": ["source_type", "evidence_id", "raw payload", "schema", "工程日志"],
+        "max_reply_chars": 180,
+    },
+    {
+        "id": "mvp_record_answer_shape_preference",
+        "message": "记录我更喜欢先结论后解释",
+        "expected_intent": "memory_related",
+        "required_reply_tokens": ["待确认偏好", "先给结论"],
+        "forbidden_reply_tokens": ["长期记忆", "schema", "jsonl", "已固定"],
+        "max_reply_chars": 180,
+    },
+    {
         "id": "memory_market_preference_candidate",
         "message": "记住：以后市场分析默认先看A股、美股、韩国",
         "expected_intent": "memory_related",
@@ -598,6 +654,21 @@ SINGLE_TURN_CASES = [
         "required_reply_tokens": ["说人话", "先听懂", "真实意思", "结论", "重切"],
         "forbidden_reply_tokens": ["候选", "候选记录", "长期记忆", "已收进", "已校准", "不永久写死", "下一轮我", "你可以再试"],
         "max_reply_chars": 120,
+    },
+    {
+        "id": "mvp_style_feedback_template_again",
+        "message": "你又模板了",
+        "expected_intent": "style_feedback",
+        "required_reply_tokens": ["说人话", "真实意思", "结论"],
+        "forbidden_reply_tokens": ["已校准", "长期记忆", "候选", "下一轮我", "schema"],
+        "max_reply_chars": 140,
+    },
+    {
+        "id": "mvp_ellipsis_not_task_or_market",
+        "message": "。。",
+        "expected_intent": "normal_chat",
+        "forbidden_reply_tokens": ["市场", "Codex", "DEEPSEEK_API_KEY", "source_type", "evidence_id", "schema", "菜单"],
+        "max_reply_chars": 180,
     },
 ]
 
@@ -718,7 +789,8 @@ def supporting_context_for(intent: str, message: str) -> str:
     if intent == "weather_query":
         return router.render_weather_reply(message)
     if intent == "market_brief":
-        if router.is_sector_discussion_source_request(message):
+        source_plan = router.plan_sources(message, intent)
+        if source_plan.source_need and source_plan.freshness_requirement == "real_time":
             evidence = router.build_realtime_evidence(message, intent)
             return router.guard_wechat_output(evidence.frontstage_boundary)
         return router.render_cached_market_reply(message)
@@ -726,7 +798,7 @@ def supporting_context_for(intent: str, message: str) -> str:
         return router.render_freshness_reply(message)
     if intent == "daily_info" and router.is_current_time_query(message):
         return router.guard_wechat_output(router.render_time_query_reply(message))
-    if intent in {"daily_info", "world_brief"} and router.is_current_information_request(message, intent):
+    if intent in {"daily_info", "world_brief"} and router.should_use_realtime_evidence_for_public_info(message, intent):
         evidence = router.build_realtime_evidence(message, intent)
         return router.guard_wechat_output(evidence.frontstage_boundary)
     return ""

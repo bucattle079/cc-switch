@@ -126,11 +126,32 @@ Weather source is enabled only when both env vars are present:
 
 Weather evidence packets include the normal evidence fields plus normalized weather values in `key_values`: `location`, `temperature`, `condition`, `precipitation_probability`, `wind`, `humidity`, `forecast_window`, optional `provider_updated_at`, `source_url_or_origin`, `confidence_level`, and `known_limits`. The foreground weather reply should start with a practical conclusion, then key data, then update time/boundary.
 
+Market data is enabled only when both env vars are present:
+
+- `VELA_MARKET_PROVIDER`: currently supports `alpha_vantage` for MVP provider-ready market data.
+- `VELA_MARKET_API_KEY`: market provider key. Keep it in the process/user environment, never in this repo.
+
+Alpha Vantage market support currently normalizes:
+
+- USD/CNY style FX questions through `CURRENCY_EXCHANGE_RATE`.
+- Mapped quote questions such as VIX/S&P/Nasdaq/DXY through `GLOBAL_QUOTE`.
+
+If the market provider is missing, unsupported, or returns unusable payloads, VELA must not give a current number. It should return a five-part capability boundary: current usable data, unavailable data, what can still be judged, what cannot be determined, and the next provider/config step. If a provider returns data, the foreground answer must include data time, provider/source, delay/cache/realtime status, and a reminder that finance output is auxiliary judgment, not a deterministic buy/sell instruction.
+
 Source-specific boundaries:
 
 - VIX/current market/add-position questions check `market_data` before judgment. Without a real realtime market connector, VELA gives no current number and no fake live trade signal.
+- Real-time financial questions plan `market_data + news + web_search`, so the market value is not treated as the whole judgment.
 - Sector discussion questions such as storage or optical modules plan `market_data + news + web_search`. If those sources are incomplete, VELA says the evidence gap instead of reusing broad A-share cache as sector heat.
 - Weather questions remain in the weather lane and use the configured forecast provider path, with conservative travel-risk fallback if the source fails. If the prompt has no location, VELA uses `VELA_DEFAULT_WEATHER_LOCATION` only when configured; otherwise it asks for the city.
+- Life/current public information queries such as nearby life info, public notices, latest discussion, and policy checks plan `news + web_search`. If search is unavailable, VELA says that plainly and does not claim to have searched.
+
+`VELA/source-integration-plan.json` declares provider-ready or planned source surfaces for official announcements, judicial auction, court documents, execution info, enterprise query, Eastmoney/Xueqiu market info, and the mutual-finance listed-company watchlist. The file is a connector map and output-structure contract (`daily_brief`, `topic_radar`, `company_watchlist`, `risk_signal`, `decision_log`, `local_memory`); it is not proof that any source is already connected.
+
+Learning-loop retrieval metadata:
+
+- `interaction-*.jsonl` and `reply-quality-*.jsonl` may include `user_query_type`, `source_types_used`, `retrieved_at`, `evidence_summary`, `final_answer_summary`, `uncertainty_or_boundary`, `style_feedback_candidate`, and `next_turn_improvement`.
+- These are local diagnostic/candidate fields. Do not display them in WeChat output and do not promote preference candidates to confirmed preferences without explicit user confirmation.
 
 ## Local Acceptance Smoke
 

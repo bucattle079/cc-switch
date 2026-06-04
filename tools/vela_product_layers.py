@@ -1062,6 +1062,11 @@ def record_reply_quality(
     need_interpretation: str = "",
     response_mode: str = "",
     human_tone_vector: dict | None = None,
+    source_types_used: Iterable[str] | None = None,
+    retrieved_at: str = "",
+    evidence_summary: str = "",
+    final_answer_summary: str = "",
+    uncertainty_or_boundary: str = "",
     log_dir: Path | None = None,
 ) -> Path:
     log_dir = learning_loop_dir(log_dir)
@@ -1086,6 +1091,16 @@ def record_reply_quality(
         row["response_mode"] = response_mode
     if human_tone_vector:
         row["human_tone_vector"] = human_tone_vector
+    if source_types_used:
+        row["source_types_used"] = list(source_types_used)
+    if retrieved_at:
+        row["retrieved_at"] = retrieved_at
+    if evidence_summary:
+        row["evidence_summary"] = evidence_summary
+    if final_answer_summary:
+        row["final_answer_summary"] = final_answer_summary
+    if uncertainty_or_boundary:
+        row["uncertainty_or_boundary"] = uncertainty_or_boundary
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     return path
@@ -1107,6 +1122,14 @@ def record_interaction(
     quality_issues: Iterable[str] | None = None,
     latency_ms: int | None = None,
     foreground_lane: str = "",
+    user_query_type: str = "",
+    source_types_used: Iterable[str] | None = None,
+    retrieved_at: str = "",
+    evidence_summary: str = "",
+    final_answer_summary: str = "",
+    uncertainty_or_boundary: str = "",
+    style_feedback_candidate: str = "",
+    next_turn_improvement: str = "",
     log_dir: Path | None = None,
 ) -> Path:
     log_dir = learning_loop_dir(log_dir)
@@ -1141,6 +1164,22 @@ def record_interaction(
         row["latency_ms"] = max(0, int(latency_ms))
     if foreground_lane:
         row["foreground_lane"] = foreground_lane
+    if user_query_type:
+        row["user_query_type"] = user_query_type
+    if source_types_used:
+        row["source_types_used"] = list(source_types_used)
+    if retrieved_at:
+        row["retrieved_at"] = retrieved_at
+    if evidence_summary:
+        row["evidence_summary"] = evidence_summary
+    if final_answer_summary:
+        row["final_answer_summary"] = final_answer_summary
+    if uncertainty_or_boundary:
+        row["uncertainty_or_boundary"] = uncertainty_or_boundary
+    if style_feedback_candidate:
+        row["style_feedback_candidate"] = style_feedback_candidate
+    if next_turn_improvement:
+        row["next_turn_improvement"] = next_turn_improvement
     source = interaction_source()
     if source:
         row["source"] = source
@@ -1460,6 +1499,11 @@ BEHAVIOR_PREFERENCE_MARKERS = (
     "像个真伙伴",
     "更像真正",
     "智能伙伴",
+    "更喜欢",
+    "先结论",
+    "后解释",
+    "先给结论",
+    "结论后解释",
 )
 
 PERSONA_SKELETON_ORDER = [
@@ -1563,7 +1607,7 @@ def _is_identity_core_question(text: str) -> bool:
 
 
 def _is_explicit_memory_instruction(text: str) -> bool:
-    return _has_any(text, ("记住", "以后", "默认", "别忘", "学习一下", "沉淀"))
+    return _has_any(text, ("记住", "记录", "以后", "默认", "别忘", "学习一下", "沉淀"))
 
 
 def _is_memory_opt_out_instruction(text: str) -> bool:
@@ -2200,7 +2244,10 @@ def build_memory_candidate(message: str) -> dict:
     elif contains_legacy_project:
         summary = "行为边界候选：外部项目上下文不进入 VELA Companion Core；下一轮只围绕当前 VELA 任务判断。"
     elif classification == "behavior_preference":
-        summary = "行为偏好候选：更快理解真实意思，减少拖延和自证，下一轮直接给判断和推进路径。"
+        if _has_any(text, ("先结论", "先给结论", "后解释", "结论后解释")):
+            summary = "行为偏好候选：用户更喜欢先给结论，再补依据、边界和解释。"
+        else:
+            summary = "行为偏好候选：更快理解真实意思，减少拖延和自证，下一轮直接给判断和推进路径。"
     elif classification == "style_feedback":
         summary = (
             "表达反馈候选：用户反馈机器人/刻板感；减少 K 和固定口头禅，少说直接说/不绕弯；"
@@ -2565,7 +2612,7 @@ def render_memory_reply(message: str) -> str:
         return "这条涉及敏感信息，我先不写长期记忆。要存，必须你明确确认。"
     if candidate["classification"] == "style_feedback":
         return "收到。先听懂真实意思，再给结论；我从这里重切。"
-    summary = str(candidate.get("summary") or "").strip()
+    summary = str(candidate.get("summary") or "").strip().rstrip("。")
     if candidate["classification"] in {"market_focus", "behavior_preference", "project_state"}:
         return f"收到。先按待确认偏好处理：{summary}。你确认后我再固定。"
     return f"收到。先按待确认经验处理：{summary}。后续我会用表现验证，不急着写死。"
@@ -2898,8 +2945,38 @@ def is_frontstage_source_boundary_context(text: str) -> bool:
         "公开网页/新闻线索",
         "搜索源未接入",
         "不能把模型判断伪装成实时检索",
+        "当前可用数据",
+        "不可用数据",
+        "市场数据源",
+        "市场实时源",
     )
     return any(marker in raw for marker in markers)
+
+
+def source_boundary_should_stay_local(text: str) -> bool:
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    real_evidence_markers = (
+        "已返回线索",
+        "已拿到",
+        "已查到可用行情",
+        "实时源已接入",
+        "数据时间",
+        "来源 ",
+    )
+    if any(marker in raw for marker in real_evidence_markers):
+        return False
+    unavailable_markers = (
+        "未接入",
+        "不可用",
+        "不能给",
+        "不能把模型",
+        "没有可用",
+        "缺口",
+        "provider 未返回",
+    )
+    return any(marker in raw for marker in unavailable_markers)
 
 
 def compact_current_info_evidence_context(supporting_context: str, adapter_name: str) -> str:
@@ -2956,8 +3033,10 @@ def engine_text_for_intent(
     current_info = is_current_information_request(context.message, context.intent)
     if context.intent in {"freshness_status", "market_refresh"} and context.supporting_context.strip():
         return context.supporting_context.strip(), "local_status", False
-    if context.intent in {"daily_info", "market_brief", "world_brief"} and is_frontstage_source_boundary_context(
-        context.supporting_context
+    if (
+        context.intent in {"daily_info", "market_brief", "world_brief"}
+        and is_frontstage_source_boundary_context(context.supporting_context)
+        and source_boundary_should_stay_local(context.supporting_context)
     ):
         return context.supporting_context.strip(), "local_realtime_boundary", False
     if context.intent == "weather_query" and context.supporting_context.strip():
@@ -3107,6 +3186,50 @@ def avoid_repeated_reply(text: str, context: ReplyContext) -> str:
     return text
 
 
+def retrieval_learning_metadata(retrieval_evidence, *, response_text: str, boundary_text: str = "") -> dict[str, object]:
+    if retrieval_evidence is None:
+        return {}
+    packets = list(getattr(retrieval_evidence, "packets", []) or [])
+    if not packets:
+        return {}
+    source_types: list[str] = []
+    for packet in packets:
+        source_type = str(getattr(packet, "source_type", "") or "").strip()
+        if source_type and source_type not in source_types:
+            source_types.append(source_type)
+    retrieved_at = ""
+    for packet in packets:
+        candidate = str(getattr(packet, "retrieved_at", "") or "").strip()
+        if candidate:
+            retrieved_at = candidate
+            break
+    evidence_lines: list[str] = []
+    for packet in packets[:4]:
+        title = " ".join(str(getattr(packet, "title", "") or "").split())
+        summary = " ".join(str(getattr(packet, "summary", "") or "").split())
+        confidence = str(getattr(packet, "confidence_level", "") or "").strip()
+        limits = [str(item) for item in list(getattr(packet, "known_limits", []) or [])[:2]]
+        parts = []
+        if title:
+            parts.append(title[:100])
+        if summary:
+            parts.append(summary[:180])
+        if confidence:
+            parts.append(f"confidence={confidence}")
+        if limits:
+            parts.append("limits=" + ",".join(limits))
+        if parts:
+            evidence_lines.append("；".join(parts))
+    uncertainty = " ".join(str(boundary_text or getattr(retrieval_evidence, "frontstage_boundary", "") or "").split())[:500]
+    return {
+        "source_types_used": source_types,
+        "retrieved_at": retrieved_at,
+        "evidence_summary": scrub_legacy_external_project_text(" | ".join(evidence_lines))[:800],
+        "final_answer_summary": scrub_legacy_external_project_text(" ".join(str(response_text or "").split()))[:500],
+        "uncertainty_or_boundary": scrub_legacy_external_project_text(uncertainty),
+    }
+
+
 def run_layered_response(
     message: str,
     *,
@@ -3115,6 +3238,7 @@ def run_layered_response(
     log_dir: Path | None = None,
     reply_adapter: ReplyAdapter | None = None,
     supporting_context: str = "",
+    retrieval_evidence=None,
 ) -> LayeredResponse:
     started_at = time.perf_counter()
     used_codex = intent == "codex_task"
@@ -3160,6 +3284,17 @@ def run_layered_response(
         used_cache=used_cache,
         style_override=session_style_override_active(context),
     )
+    retrieval_meta = retrieval_learning_metadata(
+        retrieval_evidence,
+        response_text=guarded,
+        boundary_text=supporting_context,
+    )
+    user_query_type = user_message_type_for(message, intent, interpret_need(message, intent), learning)
+    style_feedback_candidate = (
+        f"conversation_style_feedback:{learning.classification}"
+        if learning.classification in {"style_feedback", "relationship_repair", "behavior_preference"}
+        else ""
+    )
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     quality_flags = [
         "reply_engine",
@@ -3191,6 +3326,11 @@ def run_layered_response(
         need_interpretation=context.need_interpretation,
         response_mode=context.response_mode,
         human_tone_vector=context.human_tone_vector,
+        source_types_used=retrieval_meta.get("source_types_used"),
+        retrieved_at=str(retrieval_meta.get("retrieved_at") or ""),
+        evidence_summary=str(retrieval_meta.get("evidence_summary") or ""),
+        final_answer_summary=str(retrieval_meta.get("final_answer_summary") or ""),
+        uncertainty_or_boundary=str(retrieval_meta.get("uncertainty_or_boundary") or ""),
         log_dir=log_dir,
     )
     iteration_signal = build_iteration_signal(
@@ -3217,6 +3357,14 @@ def run_layered_response(
         quality_issues=issues,
         latency_ms=latency_ms,
         foreground_lane=selection.foreground_lane,
+        user_query_type=user_query_type,
+        source_types_used=retrieval_meta.get("source_types_used"),
+        retrieved_at=str(retrieval_meta.get("retrieved_at") or ""),
+        evidence_summary=str(retrieval_meta.get("evidence_summary") or ""),
+        final_answer_summary=str(retrieval_meta.get("final_answer_summary") or ""),
+        uncertainty_or_boundary=str(retrieval_meta.get("uncertainty_or_boundary") or ""),
+        style_feedback_candidate=style_feedback_candidate,
+        next_turn_improvement=iteration_signal.next_turn_improvement,
         log_dir=log_dir,
     )
     record_session_note(
